@@ -27,7 +27,8 @@ export function startPythonBackend() {
     '8000'
   ], {
     cwd: pythonBackendDir,
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, PYTHONUNBUFFERED: '1' }
   });
 
   if (pythonProcess.stdout) {
