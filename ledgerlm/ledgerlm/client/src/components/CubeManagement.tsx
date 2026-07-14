@@ -283,7 +283,6 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
         name: newCubeName,
         description: newCubeDescription || null,
         sourceType: newCubeSourceType,
-        connectorId: null, // No longer referencing domain connectors
         ingestionConfig: Object.keys(ingestionConfig).length > 0 ? ingestionConfig : null,
         domainId: isSuperAdmin ? domainId : undefined,
       });
