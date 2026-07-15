@@ -13808,10 +13808,36 @@ Return a JSON object with:
                             })
                             break
 
+                    # Entity-specific WHERE filter: "for BGSW", "for India", etc.
+                    # Only applies when NOT doing a "by entity" group-by
+                    _cr_entity_filter = None
+                    if not _cr_by_entity:
+                        _sorted_entities = sorted(
+                            ENTITY_MAPPING.items(), key=lambda x: -len(x[0])
+                        )
+                        for _ep, _ev in _sorted_entities:
+                            if _ep in ['worldwide', 'ww', 'world wide']:
+                                continue
+                            if _ep in _q_lower_cr:
+                                _cr_entity_filter = _ev
+                                break
+                    if _cr_entity_filter:
+                        intent.setdefault('filters', [])
+                        intent['filters'] = [
+                            f for f in intent['filters']
+                            if f.get('column') != 'region_entity'
+                        ]
+                        intent['filters'].append({
+                            'column': 'region_entity',
+                            'operator': '=',
+                            'value': _cr_entity_filter
+                        })
+
                     logger.info(
                         f"Customer revenue fast-path: top_n={_cr_n}, "
                         f"order={_cr_dir}, currency={_cr_currency}, "
-                        f"by_entity={_cr_by_entity}, bypassing LLM routing"
+                        f"by_entity={_cr_by_entity}, entity_filter={_cr_entity_filter}, "
+                        f"bypassing LLM routing"
                     )
                     return self.compile_calculation_sql(
                         'customer_revenue', cube_id, intent, domain)
