@@ -2683,6 +2683,7 @@ export class EvidenceBroker {
       total_capacity_end: "Total Capacity End (heads)",
       total_capacity_avg: "Total Capacity Avg (heads)",
       revenue: "Revenue (millions USD)",
+      customer_revenue: "Customer Revenue (millions USD) — ranked by BillToPartyLegalEntityFullName",
       budget_per_avg_capacity: "Budget Per Avg Capacity (USD/head)",
       budget_per_avg_capacity_entity: "Budget Per Avg Capacity (USD/head)",
       pyramid_mix: "Pyramid Mix (%)",

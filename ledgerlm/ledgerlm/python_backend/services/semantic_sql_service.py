@@ -451,6 +451,23 @@ METRIC_CATALOG = {
         "cost_category": "Billing Utilization Summary"
     },
 
+    # Customer Revenue Metrics
+    "customer_revenue": {
+        "builder": "_build_customer_revenue_sql",
+        "description": "Customer-wise revenue — Top/Least N customers ranked by revenue (BillToPartyLegalEntityFullName). Optional group by entity or filter to a specific entity. Split filter via Split_of_iTraMs/SDS (Bosch-Internal / SDS-External / Mobility-External).",
+        "examples": [
+            "customer revenue", "customer wise revenue", "top 5 customer revenue",
+            "top 10 customer revenue by entity", "least 10 customer revenue",
+            "show top 5 customer revenue", "show least 10 customer revenue for internal bosch",
+            "customer revenue breakdown", "customer revenue for bgsw",
+            "customer revenue internal bosch", "customer revenue sds external",
+            "top customer revenue", "bottom customer revenue", "customer revenue itrams",
+            "customer wise revenue breakdown by entity", "top 5 customers by revenue"
+        ],
+        "column_used": "amount_usd, bill_to_party_legal_entity_full_name",
+        "cost_category": "Revenue Summary"
+    },
+
     # Revenue Metrics
     "revenue": {
         "builder": "_build_revenue_sql",
@@ -7905,6 +7922,13 @@ Return a JSON object with:
                     return self._build_ms_outsourcing_utilization_sql(
                         where_parts, params, select_cols, group_by_clause,
                         rounding or 2)
+                elif catalog_key == 'customer_revenue':
+                    return self._build_customer_revenue_sql(
+                        where_parts, params, select_cols, group_by_clause,
+                        rounding or 2, amt_col,
+                        top_n=intent.get('_customer_top_n', 10),
+                        order_dir=intent.get('_customer_order_dir', 'DESC'),
+                        include_entity=intent.get('_customer_include_entity', False))
                 elif catalog_key == 'revenue':
                     return self._build_revenue_sql(where_parts, params,
                                                    select_cols,
@@ -8220,6 +8244,19 @@ Return a JSON object with:
                 return self._build_entity_pl_revenue_sql(
                     where_parts, params, select_cols, group_by_clause,
                     rounding or 2, amt_col)
+
+            # Customer Revenue — must be BEFORE generic revenue catch-all
+            elif any(kw in calc_name_lower for kw in [
+                    'customer revenue', 'customer wise revenue',
+                    'customer-wise revenue', 'customers by revenue',
+                    'customer breakdown revenue'
+            ]):
+                return self._build_customer_revenue_sql(
+                    where_parts, params, select_cols, group_by_clause,
+                    rounding or 2, amt_col,
+                    top_n=intent.get('_customer_top_n', 10),
+                    order_dir=intent.get('_customer_order_dir', 'DESC'),
+                    include_entity=intent.get('_customer_include_entity', False))
 
             # Revenue (MTD or Summary) - simple SUM of Revenue Summary by entity
             elif 'revenue' in calc_name_lower:
@@ -11943,6 +11980,69 @@ Return a JSON object with:
             'calculation_type': 'revenue'
         }
 
+    def _build_customer_revenue_sql(
+            self,
+            where_parts: List[str],
+            params: List,
+            select_cols: str,        # ignored — we build our own based on include_entity
+            group_by_clause: str,    # ignored — bill_to_party not in _build_group_by_columns
+            rounding: int,
+            amt_col: str = 'amount_usd',
+            top_n: int = 10,
+            order_dir: str = 'DESC',  # DESC = top, ASC = least/bottom
+            include_entity: bool = False,
+    ) -> Dict[str, Any]:
+        """Customer-wise Revenue — Top/Least N customers by BillToPartyLegalEntityFullName.
+
+        Formula: SUM(amount_usd or amount_inr) / 1_000_000
+        WHERE cost_category = 'Revenue Summary'
+        GROUP BY bill_to_party_legal_entity_full_name [, region_entity]
+        ORDER BY revenue DESC|ASC
+        LIMIT top_n
+
+        split_itrams_sds filter (Bosch-Internal / SDS-External / Mobility-External)
+        is injected by the fast-path into where_parts before this builder is called.
+        A specific entity filter (BGSW, BGSV …) likewise arrives via where_parts.
+        """
+        where_clause = self._embed_params_in_where(where_parts, params)
+        col_alias = 'revenue_inr' if amt_col == 'amount_inr' else 'revenue'
+
+        # Build SELECT and GROUP BY manually — _build_group_by_columns does not
+        # know bill_to_party_legal_entity_full_name.
+        _select_parts = ['bill_to_party_legal_entity_full_name']
+        _group_parts  = ['bill_to_party_legal_entity_full_name']
+        if include_entity:
+            _select_parts.insert(0, 'region_entity')
+            _group_parts.insert(0, 'region_entity')
+        _select_str = ', '.join(_select_parts)
+        _group_str  = ', '.join(_group_parts)
+
+        sql = f"""
+            SELECT
+                {_select_str},
+                ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) AS {col_alias}
+            FROM cube_fact_data
+            WHERE {where_clause}
+              AND cost_category = 'Revenue Summary'
+              AND bill_to_party_legal_entity_full_name IS NOT NULL
+              AND TRIM(bill_to_party_legal_entity_full_name) != ''
+            GROUP BY {_group_str}
+            ORDER BY {col_alias} {order_dir}
+            LIMIT {top_n}
+        """
+        sql = sql.replace('%', '%%')
+        logger.info(
+            f"Generated Customer Revenue SQL ("
+            f"top_n={top_n}, order={order_dir}, col={amt_col}, "
+            f"include_entity={include_entity})"
+        )
+        return {
+            'success': True,
+            'sql': sql,
+            'params': [],
+            'calculation_type': 'customer_revenue'
+        }
+
     # ==================== P&L REVENUE BUILDERS (YTD + exclusions) ====================
 
     def _build_gb_pl_revenue_sql(self, where_parts: List[str], params: List,
@@ -13594,6 +13694,76 @@ Return a JSON object with:
             # ================================================================
             original_query = intent.get('original_query', '')
             if original_query and not is_nemko and not has_cost_class_filter:
+                # ----------------------------------------------------------------
+                # CUSTOMER REVENUE FAST-PATH — must be BEFORE the plain revenue
+                # fast-path so "customer revenue" doesn't fall into it.
+                # Handles: top/least N, by entity, specific entity (BGSW etc.),
+                # split filter (Bosch-Internal / SDS-External / iTraMs).
+                # ----------------------------------------------------------------
+                _q_lower_cr = original_query.lower()
+                _is_customer_revenue = (
+                    'customer' in _q_lower_cr
+                    and bool(re.search(r'\brevenue\b', _q_lower_cr))
+                    and not any(kw in _q_lower_cr for kw in [
+                        'p&l', 'pl revenue', 'ebit', 'gross margin'
+                    ])
+                )
+                if _is_customer_revenue:
+                    _cr_currency = detect_currency(original_query)
+                    intent['currency'] = _cr_currency
+
+                    # Top N / Least N
+                    _top_m  = re.search(r'\btop\s+(\d+)\b', _q_lower_cr)
+                    _bot_m  = re.search(r'\b(?:least|bottom|lowest)\s+(\d+)\b', _q_lower_cr)
+                    if _top_m:
+                        _cr_n, _cr_dir = int(_top_m.group(1)), 'DESC'
+                    elif _bot_m:
+                        _cr_n, _cr_dir = int(_bot_m.group(1)), 'ASC'
+                    elif any(kw in _q_lower_cr for kw in ['least', 'bottom', 'lowest']):
+                        _cr_n, _cr_dir = 10, 'ASC'
+                    else:
+                        _cr_n, _cr_dir = 10, 'DESC'
+                    intent['_customer_top_n']    = _cr_n
+                    intent['_customer_order_dir'] = _cr_dir
+
+                    # Group by entity dimension (vs specific entity filter)
+                    _cr_by_entity = any(kw in _q_lower_cr for kw in [
+                        'by entity', 'per entity', 'by region', 'per region'
+                    ])
+                    intent['_customer_include_entity'] = _cr_by_entity
+
+                    # Split_of_iTraMs/SDS filter
+                    _split_map = [
+                        (['bosch internal', 'internal bosch', 'bosch - internal',
+                          'bosch_internal'], 'Bosch - Internal'),
+                        (['sds external', 'sds - external', 'sds_external'],
+                         'SDS - External'),
+                        (['itrams', 'mobility solution external', 'mobility external',
+                          'mobility solution', 'mobility_solution'],
+                         'Mobility Solution External - Itrams'),
+                    ]
+                    for _skws, _sval in _split_map:
+                        if any(kw in _q_lower_cr for kw in _skws):
+                            intent.setdefault('filters', [])
+                            intent['filters'] = [
+                                f for f in intent['filters']
+                                if f.get('column') != 'split_itrams_sds'
+                            ]
+                            intent['filters'].append({
+                                'column': 'split_itrams_sds',
+                                'operator': '=',
+                                'value': _sval
+                            })
+                            break
+
+                    logger.info(
+                        f"Customer revenue fast-path: top_n={_cr_n}, "
+                        f"order={_cr_dir}, currency={_cr_currency}, "
+                        f"by_entity={_cr_by_entity}, bypassing LLM routing"
+                    )
+                    return self.compile_calculation_sql(
+                        'customer_revenue', cube_id, intent, domain)
+
                 # ----------------------------------------------------------------
                 # REVENUE FAST-PATH: detect "revenue" keyword before LLM routing.
                 # Prevents the LLM from confusing plain revenue queries with the
