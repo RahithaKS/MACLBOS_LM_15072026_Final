@@ -25,8 +25,14 @@ export async function addCustomerColumns(): Promise<void> {
         ON cube_fact_data(project_type)
     `);
 
+    await db.execute(sql`
+      ALTER TABLE cube_fact_data
+        ADD COLUMN IF NOT EXISTS bill_to_party_legal_entity_full_name VARCHAR(500)
+    `);
+
     console.log("✅ Added project_type column to cube_fact_data");
     console.log("✅ Added customer column to cube_fact_data");
+    console.log("✅ Added bill_to_party_legal_entity_full_name column to cube_fact_data");
     console.log("✅ Created indexes on project_type and customer");
     console.log("✨ Customer columns migration completed!");
   } catch (error: any) {

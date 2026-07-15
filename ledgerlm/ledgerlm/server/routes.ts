@@ -8427,6 +8427,7 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
           "fund", "vkm_code", "profit_center", "prft_flag", "rdate",
           "include_exclude", "version", "released_status", "project_nonproject",
           "effort_type", "attrition", "attrition_type", "report",
+          "bill_to_party_legal_entity_full_name",
         ];
 
         const metrics = [

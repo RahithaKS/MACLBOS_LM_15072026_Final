@@ -956,6 +956,7 @@ export const cubeFactData = pgTable("cube_fact_data", {
   entitySubCategory: varchar("entity_sub_category", { length: 255 }),
   projectType: varchar("project_type", { length: 255 }),
   customer: varchar("customer", { length: 500 }),
+  billToPartyLegalEntityFullName: varchar("bill_to_party_legal_entity_full_name", { length: 500 }),
 }, (table) => ({
   cubeIdIdx: index("cube_fact_data_cube_id_idx").on(table.cubeId),
   yearMonthIdx: index("cube_fact_data_year_month_idx").on(table.year, table.month),

@@ -96,6 +96,7 @@ export async function runSemanticSqlMigration() {
         res_bu VARCHAR(255),
         res_section VARCHAR(255),
         report VARCHAR(255),
+        bill_to_party_legal_entity_full_name VARCHAR(500),
         -- Metric columns (for aggregation)
         billed_capacity DECIMAL(18,6),
         allocated_capacity DECIMAL(18,6),
