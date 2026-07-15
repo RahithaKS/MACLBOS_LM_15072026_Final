@@ -3642,11 +3642,23 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
             'other direct cost': 'Other Direct Cost',
             'other direct expense': 'Other Direct Cost',
             'other direct expenses': 'Other Direct Cost',
+            'sx internal utilization %': 'SX Internal Utilization',
+            'sx internal utilization percentage': 'SX Internal Utilization',
+            'sx internal utilization': 'SX Internal Utilization',
+            'sx internal util': 'SX Internal Utilization',
+            'sx billing utilization': 'SX Internal Utilization',
+            'sx internal billing utilization': 'SX Internal Utilization',
             'sx outsourcing utilization %': 'SX Outsourcing Utilization',
             'sx outsourcing utilization percentage': 'SX Outsourcing Utilization',
             'sx outsourcing utilization': 'SX Outsourcing Utilization',
             'sx outsourcing util': 'SX Outsourcing Utilization',
             'sx external utilization': 'SX Outsourcing Utilization',
+            'ms internal utilization %': 'MS Internal Utilization',
+            'ms internal utilization percentage': 'MS Internal Utilization',
+            'ms internal utilization': 'MS Internal Utilization',
+            'ms internal util': 'MS Internal Utilization',
+            'ms billing utilization': 'MS Internal Utilization',
+            'ms internal billing utilization': 'MS Internal Utilization',
             'ms outsourcing utilization %': 'MS Outsourcing Utilization',
             'ms outsourcing utilization percentage': 'MS Outsourcing Utilization',
             'ms outsourcing utilization': 'MS Outsourcing Utilization',
@@ -8028,8 +8040,16 @@ Return a JSON object with:
                 return self._build_ebit_sql(where_parts, params, select_cols,
                                             group_by_clause, rounding or 2, amt_col)
 
+            elif 'sx internal' in calc_name_lower and 'utiliz' in calc_name_lower:
+                return self._build_sx_internal_utilization_sql(
+                    where_parts, params, select_cols, group_by_clause, rounding or 2)
+
             elif 'sx outsourcing' in calc_name_lower and 'utiliz' in calc_name_lower:
                 return self._build_sx_outsourcing_utilization_sql(
+                    where_parts, params, select_cols, group_by_clause, rounding or 2)
+
+            elif 'ms internal' in calc_name_lower and 'utiliz' in calc_name_lower:
+                return self._build_ms_internal_utilization_sql(
                     where_parts, params, select_cols, group_by_clause, rounding or 2)
 
             elif 'ms outsourcing' in calc_name_lower and 'utiliz' in calc_name_lower:
@@ -13867,7 +13887,11 @@ Return a JSON object with:
                 # corporate cost, resource cost, travel cost, etc.
                 # ----------------------------------------------------------------
                 _cost_keyword_map = [
+                    (['sx internal utilization', 'sx internal util', 'sx internal billing utilization',
+                      'sx utilization internal', 'internal utilization sx', 'sx billing utilization'], 'sx internal utilization'),
                     (['sx outsourcing utilization', 'sx outsourcing util', 'sx external utilization'], 'sx outsourcing utilization'),
+                    (['ms internal utilization', 'ms internal util', 'ms internal billing utilization',
+                      'ms utilization internal', 'internal utilization ms', 'ms billing utilization'], 'ms internal utilization'),
                     (['ms outsourcing utilization', 'ms outsourcing util', 'ms external utilization'], 'ms outsourcing utilization'),
                     (['corporate cost', 'corporate costs', 'indirect cost', 'indirect expense', 'indirect expenses'], 'indirect cost'),
                     (['resource cost', 'resource costs', 'resource expense', 'resource expenses'], 'resource cost'),
