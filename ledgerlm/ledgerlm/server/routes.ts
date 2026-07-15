@@ -492,7 +492,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const emailDomain = emailLower.split('@')[1];
       let signinDomainEmailConfig = null;
       if (emailDomain) {
-        const domain = await storage.getDomainByName(emailDomain);
+        // Try exact domain match first, then parent domain (e.g. in.bosch.com → bosch.com)
+        let domain = await storage.getDomainByName(emailDomain);
+        if (!domain) {
+          const parts = emailDomain.split('.');
+          if (parts.length > 2) {
+            const parentDomain = parts.slice(1).join('.');
+            domain = await storage.getDomainByName(parentDomain);
+          }
+        }
         if (domain?.authMethod === 'microsoft_sso') {
           return res.status(400).json({
             error: 'sso_required',

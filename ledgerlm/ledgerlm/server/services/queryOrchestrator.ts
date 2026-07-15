@@ -242,7 +242,10 @@ export class QueryOrchestrator {
           const emailDomain = userEmail.split('@')[1];
           if (emailDomain) {
             const allDomainsForFallback = await storage.getAllDomains();
-            const userDomainByEmail = allDomainsForFallback.find(d => d.name === emailDomain);
+            // Match exact domain OR parent domain (e.g. in.bosch.com → bosch.com)
+            const userDomainByEmail = allDomainsForFallback.find(d =>
+              d.name === emailDomain || emailDomain.endsWith(`.${d.name}`)
+            );
             if (userDomainByEmail?.companyId) {
               companyIds.push(userDomainByEmail.companyId);
             }

@@ -63,7 +63,10 @@ export async function exchangeCodeForUser(
 }
 
 export function validateEmailDomain(email: string, domainName: string): boolean {
-  return email.toLowerCase().endsWith(`@${domainName.toLowerCase()}`);
+  const e = email.toLowerCase();
+  const d = domainName.toLowerCase();
+  // Accept exact match (@bosch.com) or subdomain match (@in.bosch.com for domain bosch.com)
+  return e.endsWith(`@${d}`) || e.endsWith(`.${d}`);
 }
 
 /**

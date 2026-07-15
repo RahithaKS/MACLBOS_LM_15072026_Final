@@ -452,7 +452,7 @@ async function seedDomains(
   if (existingBoschDomain) {
     console.log('✅ bosch.com domain already exists');
     // Ensure Bosch India users exist under bosch.com domain
-    const boschInEmails = ['boschmatasam@in.bosch.com', 'boschmatasma@in.bosch.com'];
+    const boschInEmails = ['boschmatasam@bosch.com', 'boschmatasma@bosch.com'];
     for (const email of boschInEmails) {
       const existing = await db.query.domainUsers.findFirst({
         where: (du, { and, eq }) => and(
@@ -505,21 +505,21 @@ async function seedDomains(
     await db.insert(domainUsers).values([
       {
         domainId: boschDomain.id,
-        email: 'boschmatasam@in.bosch.com',
+        email: 'boschmatasam@bosch.com',
         role: 'admin',
         hardcodedOtp: '123456',
         invitedBy: boschAdminId,
       },
       {
         domainId: boschDomain.id,
-        email: 'boschmatasma@in.bosch.com',
+        email: 'boschmatasma@bosch.com',
         role: 'admin',
         hardcodedOtp: '123456',
         invitedBy: boschAdminId,
       },
     ]);
 
-    console.log('✅ Created domain users: boschmatasam@in.bosch.com, boschmatasma@in.bosch.com (OTP: 123456)');
+    console.log('✅ Created domain users: boschmatasam@bosch.com, boschmatasma@bosch.com (OTP: 123456)');
   }
   
   console.log('✨ Domains seeded');
