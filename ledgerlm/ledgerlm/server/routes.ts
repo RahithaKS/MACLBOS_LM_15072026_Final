@@ -554,6 +554,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // If user has a hardcoded OTP (admin bypass), skip email entirely —
+      // SMTP failures must never block these users from signing in.
+      const hardcodedOtpCheck = await getHardcodedOtpForUser(user.username);
+      if (hardcodedOtpCheck) {
+        return res.json({
+          success: true,
+          requiresOtp: true,
+          message: "Please enter your verification code",
+        });
+      }
+
       await otpService.createAndSendOtp(
         user.id,
         user.username,

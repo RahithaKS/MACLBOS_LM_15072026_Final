@@ -42,6 +42,9 @@ import rateLimit from "express-rate-limit";
 
 const app = express();
 
+// Trust Replit's reverse proxy so express-rate-limit reads X-Forwarded-For correctly
+app.set('trust proxy', 1);
+
 // ── Security headers (Helmet) ────────────────────────────────────────────────
 app.use(helmet({
   // Allow inline styles/scripts needed by Vite dev HMR + React
