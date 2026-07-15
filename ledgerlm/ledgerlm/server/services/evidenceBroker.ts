@@ -1516,6 +1516,9 @@ export class EvidenceBroker {
       { label: string; type: "monetary" | "percentage" | "count" | "dimension" }
     > = {
       region_entity: { label: "Entity", type: "dimension" },
+      bill_to_party_legal_entity_full_name: { label: "Customer", type: "dimension" },
+      revenue_inr: { label: "Revenue", type: "monetary" },
+      rank: { label: "Rank", type: "dimension" },
       sub_cost_category: { label: "Sub-Cost Category", type: "dimension" },
       cost_sub_category: { label: "Sub-Cost Category", type: "dimension" },
       cost_category_class: { label: "Cost Category", type: "dimension" },

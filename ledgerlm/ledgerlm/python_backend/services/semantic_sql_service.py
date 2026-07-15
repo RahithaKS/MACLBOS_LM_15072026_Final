@@ -12071,16 +12071,23 @@ Return a JSON object with:
 
         sql = f"""
             SELECT
+                ROW_NUMBER() OVER (ORDER BY {col_alias} {order_dir}) AS rank,
                 {_select_str},
-                ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) AS {col_alias}
-            FROM cube_fact_data
-            WHERE {where_clause}
-              AND cost_category = 'Revenue Summary'
-              AND bill_to_party_legal_entity_full_name IS NOT NULL
-              AND TRIM(bill_to_party_legal_entity_full_name) != ''
-            GROUP BY {_group_str}
+                {col_alias}
+            FROM (
+                SELECT
+                    {_select_str},
+                    ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) AS {col_alias}
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Revenue Summary'
+                  AND bill_to_party_legal_entity_full_name IS NOT NULL
+                  AND TRIM(bill_to_party_legal_entity_full_name) != ''
+                GROUP BY {_group_str}
+                ORDER BY {col_alias} {order_dir}
+                LIMIT {top_n}
+            ) ranked
             ORDER BY {col_alias} {order_dir}
-            LIMIT {top_n}
         """
         sql = sql.replace('%', '%%')
         logger.info(
