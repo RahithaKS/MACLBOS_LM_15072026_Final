@@ -129,7 +129,7 @@ const upload = multer({
     },
   }),
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB limit
+    fileSize: 250 * 1024 * 1024, // 250MB limit
   },
   fileFilter: (req, file, cb) => {
     console.log(
