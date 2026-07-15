@@ -7929,11 +7929,13 @@ Return a JSON object with:
                 elif catalog_key == 'sx_outsourcing_utilization':
                     return self._build_sx_outsourcing_utilization_sql(
                         where_parts, params, select_cols, group_by_clause,
-                        rounding or 2)
+                        rounding or 2,
+                        use_external_label=intent.get('_use_external_label', False))
                 elif catalog_key == 'ms_outsourcing_utilization':
                     return self._build_ms_outsourcing_utilization_sql(
                         where_parts, params, select_cols, group_by_clause,
-                        rounding or 2)
+                        rounding or 2,
+                        use_external_label=intent.get('_use_external_label', False))
                 elif catalog_key == 'customer_revenue':
                     return self._build_customer_revenue_sql(
                         where_parts, params, select_cols, group_by_clause,
@@ -8046,7 +8048,13 @@ Return a JSON object with:
 
             elif 'sx outsourcing' in calc_name_lower and 'utiliz' in calc_name_lower:
                 return self._build_sx_outsourcing_utilization_sql(
-                    where_parts, params, select_cols, group_by_clause, rounding or 2)
+                    where_parts, params, select_cols, group_by_clause, rounding or 2,
+                    use_external_label=intent.get('_use_external_label', False))
+
+            elif 'sx external' in calc_name_lower and 'utiliz' in calc_name_lower:
+                return self._build_sx_outsourcing_utilization_sql(
+                    where_parts, params, select_cols, group_by_clause, rounding or 2,
+                    use_external_label=True)
 
             elif 'ms internal' in calc_name_lower and 'utiliz' in calc_name_lower:
                 return self._build_ms_internal_utilization_sql(
@@ -8054,7 +8062,13 @@ Return a JSON object with:
 
             elif 'ms outsourcing' in calc_name_lower and 'utiliz' in calc_name_lower:
                 return self._build_ms_outsourcing_utilization_sql(
-                    where_parts, params, select_cols, group_by_clause, rounding or 2)
+                    where_parts, params, select_cols, group_by_clause, rounding or 2,
+                    use_external_label=intent.get('_use_external_label', False))
+
+            elif 'ms external' in calc_name_lower and 'utiliz' in calc_name_lower:
+                return self._build_ms_outsourcing_utilization_sql(
+                    where_parts, params, select_cols, group_by_clause, rounding or 2,
+                    use_external_label=True)
 
             elif 'billing utilization' in calc_name_lower or 'utilization' in calc_name_lower:
                 billing_cost_cat = 'Billing Utilization Summary'
@@ -8925,11 +8939,16 @@ Return a JSON object with:
             select_cols: str,
             group_by_clause: str,
             rounding: int,
+            use_external_label: bool = False,
     ) -> Dict[str, Any]:
-        """SX Outsourcing Utilization % — same formula as billing utilization,
+        """SX Outsourcing/External Utilization % — same formula as billing utilization,
         hardcoded to New Service Area = 'SX' and Resource Type = 'External'.
         Uses cost_category = 'Billing Utilization Summary'.
+        use_external_label=True → column alias and calc_type use 'external' wording
+        so the table header reads 'SX External Utilisation (%)'.
         """
+        col_alias = 'sx_external_utilization_pct'  if use_external_label else 'sx_outsourcing_utilization_pct'
+        calc_type = 'sx_external_utilization'       if use_external_label else 'sx_outsourcing_utilization'
         extra_where = list(where_parts) + [
             "TRIM(cost_category) = %s",
             "new_service_area = %s",
@@ -8938,7 +8957,7 @@ Return a JSON object with:
         extra_params = list(params) + ['Billing Utilization Summary', 'SX', 'External']
         where_clause = " AND ".join(extra_where)
         group_by_sql = f"GROUP BY {group_by_clause}" if group_by_clause else ""
-        order_by_sql = "ORDER BY sx_outsourcing_utilization_pct DESC" if group_by_clause else ""
+        order_by_sql = f"ORDER BY {col_alias} DESC" if group_by_clause else ""
         select_prefix = f"{select_cols}," if select_cols else ""
         sql = f"""
             SELECT
@@ -8951,18 +8970,18 @@ Return a JSON object with:
                         0
                     ),
                     {rounding}
-                ) AS sx_outsourcing_utilization_pct
+                ) AS {col_alias}
             FROM cube_fact_data
             WHERE {where_clause}
             {group_by_sql}
             {order_by_sql}
         """
-        logger.info("Generated SX Outsourcing Utilization % SQL (new_service_area=SX, resource_type=External)")
+        logger.info(f"Generated SX {'External' if use_external_label else 'Outsourcing'} Utilization % SQL (new_service_area=SX, resource_type=External)")
         return {
             'success': True,
             'sql': sql,
             'params': extra_params,
-            'calculation_type': 'sx_outsourcing_utilization'
+            'calculation_type': calc_type
         }
 
     def _build_ms_outsourcing_utilization_sql(
@@ -8972,11 +8991,16 @@ Return a JSON object with:
             select_cols: str,
             group_by_clause: str,
             rounding: int,
+            use_external_label: bool = False,
     ) -> Dict[str, Any]:
-        """MS Outsourcing Utilization % — same formula as billing utilization,
+        """MS Outsourcing/External Utilization % — same formula as billing utilization,
         hardcoded to New Service Area = 'MS' and Resource Type = 'External'.
         Uses cost_category = 'Billing Utilization Summary'.
+        use_external_label=True → column alias and calc_type use 'external' wording
+        so the table header reads 'MS External Utilisation (%)'.
         """
+        col_alias  = 'ms_external_utilization_pct'  if use_external_label else 'ms_outsourcing_utilization_pct'
+        calc_type  = 'ms_external_utilization'       if use_external_label else 'ms_outsourcing_utilization'
         extra_where = list(where_parts) + [
             "TRIM(cost_category) = %s",
             "new_service_area = %s",
@@ -8985,7 +9009,7 @@ Return a JSON object with:
         extra_params = list(params) + ['Billing Utilization Summary', 'MS', 'External']
         where_clause = " AND ".join(extra_where)
         group_by_sql = f"GROUP BY {group_by_clause}" if group_by_clause else ""
-        order_by_sql = "ORDER BY ms_outsourcing_utilization_pct DESC" if group_by_clause else ""
+        order_by_sql = f"ORDER BY {col_alias} DESC" if group_by_clause else ""
         select_prefix = f"{select_cols}," if select_cols else ""
         sql = f"""
             SELECT
@@ -8998,18 +9022,18 @@ Return a JSON object with:
                         0
                     ),
                     {rounding}
-                ) AS ms_outsourcing_utilization_pct
+                ) AS {col_alias}
             FROM cube_fact_data
             WHERE {where_clause}
             {group_by_sql}
             {order_by_sql}
         """
-        logger.info("Generated MS Outsourcing Utilization % SQL (new_service_area=MS, resource_type=External)")
+        logger.info(f"Generated MS {'External' if use_external_label else 'Outsourcing'} Utilization % SQL (new_service_area=MS, resource_type=External)")
         return {
             'success': True,
             'sql': sql,
             'params': extra_params,
-            'calculation_type': 'ms_outsourcing_utilization'
+            'calculation_type': calc_type
         }
 
     def _build_available_capacity_sql(self, where_parts: List[str],
@@ -13889,7 +13913,7 @@ Return a JSON object with:
                 _cost_keyword_map = [
                     (['sx internal utilization', 'sx internal util', 'sx internal billing utilization',
                       'sx utilization internal', 'internal utilization sx', 'sx billing utilization'], 'sx internal utilization'),
-                    (['sx outsourcing utilization', 'sx outsourcing util', 'sx external utilization'], 'sx outsourcing utilization'),
+                    (['sx outsourcing utilization', 'sx outsourcing util', 'sx external utilization'], 'sx outsourcing utilization',),
                     (['ms internal utilization', 'ms internal util', 'ms internal billing utilization',
                       'ms utilization internal', 'internal utilization ms', 'ms billing utilization'], 'ms internal utilization'),
                     (['ms outsourcing utilization', 'ms outsourcing util', 'ms external utilization'], 'ms outsourcing utilization'),
@@ -13901,11 +13925,24 @@ Return a JSON object with:
                     (['gross margin', 'gross profit', 'gross_margin'], 'gross margin'),
                     (['ebit', 'earnings before', 'ebit%', 'ebit percentage'], 'ebit'),
                 ]
+                # Keywords that carry an "external" user-facing label
+                _external_label_metrics = {'sx outsourcing utilization', 'ms outsourcing utilization'}
+                _external_trigger_kws   = {'sx external utilization', 'ms external utilization'}
                 _matched_cost_metric = None
+                _matched_cost_trigger = None
                 for _keywords, _metric in _cost_keyword_map:
-                    if any(kw in _q_lower for kw in _keywords):
-                        _matched_cost_metric = _metric
+                    for _kw in _keywords:
+                        if _kw in _q_lower:
+                            _matched_cost_metric  = _metric
+                            _matched_cost_trigger = _kw
+                            break
+                    if _matched_cost_metric:
                         break
+                # Propagate external-label flag so builders can rename the column
+                if _matched_cost_metric in _external_label_metrics and _matched_cost_trigger in _external_trigger_kws:
+                    intent['_use_external_label'] = True
+                elif '_use_external_label' in intent:
+                    del intent['_use_external_label']
                 if _matched_cost_metric:
                     logger.info(
                         f"Cost type fast-path: detected '{_matched_cost_metric}' from query, bypassing LLM routing"

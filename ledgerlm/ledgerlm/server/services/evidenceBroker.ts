@@ -1572,6 +1572,14 @@ export class EvidenceBroker {
         label: "MS Outsourcing Utilisation",
         type: "percentage",
       },
+      ms_external_utilization_pct: {
+        label: "MS External Utilisation",
+        type: "percentage",
+      },
+      sx_external_utilization_pct: {
+        label: "SX External Utilisation",
+        type: "percentage",
+      },
       attrition_pct: { label: "Attrition %", type: "percentage" },
       month_attrition: { label: "Attritions (Month)", type: "count" },
       ytd_attrition: { label: "Attritions (YTD)", type: "count" },
@@ -2692,6 +2700,8 @@ export class EvidenceBroker {
       sx_outsourcing_utilization: "SX Outsourcing Utilisation (%)",
       ms_internal_utilization: "MS Internal Utilisation (%)",
       ms_outsourcing_utilization: "MS Outsourcing Utilisation (%)",
+      ms_external_utilization: "MS External Utilisation (%)",
+      sx_external_utilization: "SX External Utilisation (%)",
       resource_cost: "Resource Cost (USD)",
       travel_cost:
         'Travel Cost (USD) — sub-categories use Bosch naming: "Offshore (T)" = offshore travel cost, "Onsite (T)" = onsite travel cost',
