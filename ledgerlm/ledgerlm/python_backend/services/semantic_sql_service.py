@@ -1185,6 +1185,7 @@ _COLUMN_MAPPING = {
     'BP_Rate': 'bp_rate',
     'Entity_Category': 'entity_category',
     'Entity_Sub_Category': 'entity_sub_category',
+    'BillToPartyLegalEntityFullName': 'bill_to_party_legal_entity_full_name',
 }
 
 # Backward compatibility: COLUMN_MAPPING for direct dict access
@@ -1530,7 +1531,8 @@ DIMENSION_COLUMNS = [
     'res_section',
     'report',
     'entity_category',
-    'entity_sub_category'
+    'entity_sub_category',
+    'bill_to_party_legal_entity_full_name'
 ]
 
 # Cost category column relevance mapping (from Insights_All_Document)
