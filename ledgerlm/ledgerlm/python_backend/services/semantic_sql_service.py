@@ -3652,7 +3652,8 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
             'sx outsourcing utilization percentage': 'SX Outsourcing Utilization',
             'sx outsourcing utilization': 'SX Outsourcing Utilization',
             'sx outsourcing util': 'SX Outsourcing Utilization',
-            'sx external utilization': 'SX Outsourcing Utilization',
+            'sx external utilization': 'SX External Utilization',
+            'sx external util': 'SX External Utilization',
             'ms internal utilization %': 'MS Internal Utilization',
             'ms internal utilization percentage': 'MS Internal Utilization',
             'ms internal utilization': 'MS Internal Utilization',
@@ -3663,7 +3664,8 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
             'ms outsourcing utilization percentage': 'MS Outsourcing Utilization',
             'ms outsourcing utilization': 'MS Outsourcing Utilization',
             'ms outsourcing util': 'MS Outsourcing Utilization',
-            'ms external utilization': 'MS Outsourcing Utilization'
+            'ms external utilization': 'MS External Utilization',
+            'ms external util': 'MS External Utilization'
         }
 
         # Sort triggers by length (longest first) to match more specific triggers first
@@ -7926,16 +7928,22 @@ Return a JSON object with:
                     return self._build_ms_internal_utilization_sql(
                         where_parts, params, select_cols, group_by_clause,
                         rounding or 2)
+                elif catalog_key == 'sx_external_utilization':
+                    return self._build_sx_outsourcing_utilization_sql(
+                        where_parts, params, select_cols, group_by_clause,
+                        rounding or 2, use_external_label=True)
                 elif catalog_key == 'sx_outsourcing_utilization':
                     return self._build_sx_outsourcing_utilization_sql(
                         where_parts, params, select_cols, group_by_clause,
-                        rounding or 2,
-                        use_external_label=intent.get('_use_external_label', False))
+                        rounding or 2, use_external_label=False)
+                elif catalog_key == 'ms_external_utilization':
+                    return self._build_ms_outsourcing_utilization_sql(
+                        where_parts, params, select_cols, group_by_clause,
+                        rounding or 2, use_external_label=True)
                 elif catalog_key == 'ms_outsourcing_utilization':
                     return self._build_ms_outsourcing_utilization_sql(
                         where_parts, params, select_cols, group_by_clause,
-                        rounding or 2,
-                        use_external_label=intent.get('_use_external_label', False))
+                        rounding or 2, use_external_label=False)
                 elif catalog_key == 'customer_revenue':
                     return self._build_customer_revenue_sql(
                         where_parts, params, select_cols, group_by_clause,
@@ -13913,10 +13921,12 @@ Return a JSON object with:
                 _cost_keyword_map = [
                     (['sx internal utilization', 'sx internal util', 'sx internal billing utilization',
                       'sx utilization internal', 'internal utilization sx', 'sx billing utilization'], 'sx internal utilization'),
-                    (['sx outsourcing utilization', 'sx outsourcing util', 'sx external utilization'], 'sx outsourcing utilization',),
+                    (['sx external utilization', 'sx external util'], 'sx external utilization'),
+                    (['sx outsourcing utilization', 'sx outsourcing util'], 'sx outsourcing utilization'),
                     (['ms internal utilization', 'ms internal util', 'ms internal billing utilization',
                       'ms utilization internal', 'internal utilization ms', 'ms billing utilization'], 'ms internal utilization'),
-                    (['ms outsourcing utilization', 'ms outsourcing util', 'ms external utilization'], 'ms outsourcing utilization'),
+                    (['ms external utilization', 'ms external util'], 'ms external utilization'),
+                    (['ms outsourcing utilization', 'ms outsourcing util'], 'ms outsourcing utilization'),
                     (['corporate cost', 'corporate costs', 'indirect cost', 'indirect expense', 'indirect expenses'], 'indirect cost'),
                     (['resource cost', 'resource costs', 'resource expense', 'resource expenses'], 'resource cost'),
                     (['travel cost', 'travel costs', 'travel expense', 'travel expenses'], 'travel cost'),
