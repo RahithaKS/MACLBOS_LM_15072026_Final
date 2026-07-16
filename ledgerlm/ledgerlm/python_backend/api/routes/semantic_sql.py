@@ -190,14 +190,19 @@ async def execute_structured_query(request: StructuredQueryRequest):
         
         calc_type = sql_result.get('calculation_type', 'unknown')
 
-        # Multi-metric path: SQL already executed inside _compile_multi_metric_sql.
-        # Results, columns and execution_ms are embedded directly in the result dict.
-        if calc_type == 'multi_metric':
+        # Pre-computed result types: SQL was already executed inside the builder.
+        # Includes multi_metric and all P2 analytics builders (difference, pct, etc.).
+        _PRECOMPUTED_TYPES = {
+            'multi_metric', 'difference', 'pct_contribution',
+            'variance', 'spike_detection',
+        }
+
+        if calc_type in _PRECOMPUTED_TYPES:
             fact_results = sql_result['results']
             generated_sql = sql_result.get('sql_query', '')
             exec_result = {'execution_ms': sql_result.get('execution_ms', 0)}
             logger.info(
-                f"[SQL_RESULT] metric=multi_metric | rows={len(fact_results)} "
+                f"[SQL_RESULT] metric={calc_type} | rows={len(fact_results)} "
                 f"| time={exec_result['execution_ms']}ms"
             )
         else:
@@ -229,7 +234,31 @@ async def execute_structured_query(request: StructuredQueryRequest):
             logger.info(
                 f"[SQL_RESULT] metric={calc_type} | rows={len(fact_results)} | time={exec_result.get('execution_ms', '?')}ms"
             )
-        
+
+        # ── P2: Ranking post-processing ───────────────────────────────────────
+        # Sort + slice results in Python for top-N / bottom-N / highest / lowest.
+        # The ranking params were set on intent by compile_sql P2 pre-processing.
+        _ranking_mode = intent.get('_ranking_mode')
+        if _ranking_mode and fact_results:
+            _ranking_dir   = intent.get('_ranking_dir', 'DESC')
+            _ranking_limit = int(intent.get('_ranking_limit', 10))
+            _reverse       = (_ranking_dir == 'DESC')
+            _vcol = next(
+                (c for c in ['amount_usd', 'amount_inr', 'headcount', 'value', 'total']
+                 if fact_results and c in fact_results[0]),
+                None
+            )
+            if _vcol:
+                fact_results = sorted(
+                    fact_results,
+                    key=lambda r: float(r.get(_vcol, 0) or 0),
+                    reverse=_reverse
+                )[:_ranking_limit]
+                logger.info(
+                    f"Ranking applied: mode={_ranking_mode}, limit={_ranking_limit}, "
+                    f"dir={_ranking_dir}, vcol={_vcol} → {len(fact_results)} rows"
+                )
+
         # Combine plan data with fact data if both exist
         combined_results = []
         if plan_results:
@@ -247,7 +276,28 @@ async def execute_structured_query(request: StructuredQueryRequest):
         
         # Use combined results if we have plan data, otherwise use fact results
         final_results = combined_results if plan_results else fact_results
-        
+
+        # ── P2: No-data guard ─────────────────────────────────────────────────
+        # Evaluated AFTER plan/fact merge so that plan-only responses (where
+        # fact_results is empty but plan_results is not) are never discarded.
+        # Only fires when BOTH sources are empty, preventing LLM hallucination
+        # on genuinely empty result sets.
+        if not final_results:
+            logger.info(f"[SQL_RESULT] No data from either source for metric={calc_type}")
+            return StructuredQueryResponse(
+                success=True,
+                results=[],
+                row_count=0,
+                execution_ms=exec_result.get('execution_ms', 0),
+                sql_query=generated_sql,
+                columns=[],
+                narrative="No data available for the requested period.",
+                time_filter=_extract_time_filter(intent),
+                currency=intent.get('currency', 'usd'),
+                calculation_type=calc_type,
+                error=None
+            )
+
         formatted = semantic_sql_service.format_results(
             final_results,
             intent.get('query_type', 'aggregation')

@@ -14011,6 +14011,590 @@ Return a JSON object with:
             'calculation_type': 'multi_metric',
         }
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # ══════════════  BOSCH P2: ADVANCED ANALYTICS HELPERS  ════════════════════
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _detect_ranking_params(self, query_lower: str):
+        """
+        Detect ranking/extremes keywords.
+        Returns (mode, limit, direction) or (None, 10, 'DESC').
+        Mode values: 'top_n', 'bottom_n', 'highest', 'lowest', 'rank'.
+        """
+        _top_m = re.search(r'\btop\s+(\d+)\b', query_lower)
+        _bot_m = re.search(r'\b(?:least|bottom)\s+(\d+)\b', query_lower)
+        if _top_m:
+            return 'top_n', int(_top_m.group(1)), 'DESC'
+        elif _bot_m:
+            return 'bottom_n', int(_bot_m.group(1)), 'ASC'
+        elif re.search(r'\b(?:highest|maximum)\b', query_lower) and \
+                not re.search(r'\btop\s+\d+\b', query_lower):
+            return 'highest', 1, 'DESC'
+        elif re.search(r'\b(?:lowest|minimum)\b', query_lower):
+            return 'lowest', 1, 'ASC'
+        elif re.search(r'\branking\b|\brank\s+(?:by|entities|the)\b', query_lower):
+            return 'rank', 25, 'DESC'
+        return None, 10, 'DESC'
+
+    def _detect_and_expand_quarter(
+            self, intent: Dict[str, Any], query: str) -> Dict[str, Any]:
+        """
+        Detect Q1–Q4 mentions and inject month IN filter.
+        Skips if a month filter already exists.  Marks intent so
+        the revenue fast-path does not double-expand.
+        """
+        if intent.get('_quarter_expanded'):
+            return intent
+        _q_lower = query.lower()
+        _quarter_map = {
+            'q1': [1, 2, 3], 'q2': [4, 5, 6],
+            'q3': [7, 8, 9],  'q4': [10, 11, 12],
+        }
+        _detected = [(qn, qm) for qn, qm in _quarter_map.items()
+                     if re.search(r'\b' + qn + r'\b', _q_lower)]
+        if not _detected:
+            return intent
+
+        # Don't override an explicit month filter set by the LLM
+        _existing_month = [f for f in intent.get('filters', [])
+                           if f.get('column') == 'month']
+        if _existing_month:
+            return intent
+
+        if len(_detected) == 1:
+            _qname, _qmonths = _detected[0]
+            intent.setdefault('filters', [])
+            intent['filters'] = [f for f in intent['filters']
+                                  if f.get('column') != 'month']
+            intent['filters'].append(
+                {'column': 'month', 'operator': 'IN', 'value': _qmonths})
+            # Do NOT modify group_by here — the metric builder decides the
+            # appropriate grouping dimension.  Forcing month into group_by would
+            # turn a "Q1 total" into a per-month breakdown, which contradicts
+            # the expected quarter-aggregate semantics.
+            intent['_quarter_expanded'] = True
+            logger.info(
+                f"_detect_and_expand_quarter: {_qname} → months {_qmonths}")
+        # Multi-quarter queries (Q1 2025 vs Q1 2024) handled by comparison
+        # infrastructure — no additional expansion needed here.
+        return intent
+
+    def _detect_fy_total(
+            self, intent: Dict[str, Any], query: str) -> Dict[str, Any]:
+        """
+        Detect "FY2025", "full year 2025", "fiscal year 2025" and remove
+        the month filter so the query aggregates across the entire fiscal year.
+        """
+        _q_lower = query.lower()
+        _fy_year = None
+        for pattern in [
+            r'\bfy\s*(\d{4})\b',
+            r'\bfull\s+year\s+(\d{4})\b',
+            r'\bfiscal\s+year\s+(\d{4})\b',
+        ]:
+            _m = re.search(pattern, _q_lower)
+            if _m:
+                _fy_year = int(_m.group(1))
+                break
+        if _fy_year is None:
+            return intent
+
+        # Remove month filter; ensure correct year is set
+        intent['filters'] = [
+            f for f in intent.get('filters', [])
+            if f.get('column') != 'month'
+        ]
+        _yf = next((f for f in intent.get('filters', [])
+                    if f.get('column') == 'year'), None)
+        if _yf:
+            _yf['value'] = _fy_year
+            _yf['operator'] = '='
+        else:
+            intent.setdefault('filters', []).append(
+                {'column': 'year', 'operator': '=', 'value': _fy_year})
+        # Remove month from group_by if present
+        if 'month' in intent.get('group_by', []):
+            intent['group_by'] = [c for c in intent['group_by']
+                                   if c != 'month']
+        intent['_fy_total'] = True
+        logger.info(f"_detect_fy_total: full-year aggregate → year={_fy_year}")
+        return intent
+
+    def _detect_last_n_months_and_inject(
+            self, intent: Dict[str, Any], cube_id: str,
+            query: str) -> Dict[str, Any]:
+        """
+        Detect "last N months" and inject time filters for the N most recent
+        available periods.  Queries cube_fact_data for actual data availability
+        so the result is always grounded in real data.
+        """
+        _m = re.search(r'\blast\s+(\d+)\s+months?\b', query.lower())
+        if not _m:
+            return intent
+        n = int(_m.group(1))
+        try:
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT DISTINCT year, month FROM cube_fact_data
+                   WHERE cube_id = %s AND year IS NOT NULL AND month IS NOT NULL
+                   ORDER BY year DESC, month DESC LIMIT %s""",
+                (cube_id, n)
+            )
+            periods = [(r[0], r[1]) for r in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+        except Exception as _e:
+            logger.warning(
+                f"_detect_last_n_months_and_inject DB error: {_e}")
+            return intent
+
+        if not periods:
+            return intent
+
+        # Replace existing time filters with the detected N periods
+        intent['filters'] = [
+            f for f in intent.get('filters', [])
+            if f.get('column') not in ('year', 'month', '__raw__')
+        ]
+        _years_in = sorted(set(p[0] for p in periods))
+        if len(_years_in) == 1:
+            _y = _years_in[0]
+            _months_in = sorted(p[1] for p in periods)
+            intent['filters'].append(
+                {'column': 'year', 'operator': '=', 'value': _y})
+            intent['filters'].append(
+                {'column': 'month', 'operator': 'IN', 'value': _months_in})
+        else:
+            # Spans multiple calendar years — use OR filter
+            _by_year: Dict[int, list] = {}
+            for _y, _mo in periods:
+                _by_year.setdefault(_y, []).append(_mo)
+            _clauses = ' OR '.join(
+                f"(year = {_y} AND month IN ({', '.join(str(mo) for mo in sorted(_by_year[_y]))}))"
+                for _y in sorted(_by_year)
+            )
+            intent['filters'].append(
+                {'column': '__raw__', 'operator': 'RAW',
+                 'value': f'({_clauses})'})
+        intent['_last_n_months'] = n
+        logger.info(
+            f"_detect_last_n_months_and_inject: last {n} months → {periods}")
+        return intent
+
+    def _get_period_pairs_from_query(self, query: str):
+        """
+        Parse two explicit time periods from a query string.
+        Handles "between Jan and Mar 2026", "Jan 2025 vs Mar 2026", etc.
+        Returns up to two (month_int, year_int) tuples, or [].
+        """
+        _MONTH_MAP = {
+            'january': 1, 'february': 2, 'march': 3, 'april': 4,
+            'may': 5, 'june': 6, 'july': 7, 'august': 8,
+            'september': 9, 'october': 10, 'november': 11, 'december': 12,
+            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4,
+            'jun': 6, 'jul': 7, 'aug': 8, 'sep': 9,
+            'oct': 10, 'nov': 11, 'dec': 12,
+        }
+        _mp = '|'.join(sorted(_MONTH_MAP.keys(), key=lambda x: -len(x)))
+        _pair_re = re.compile(
+            r'\b(?:(' + _mp + r')[a-z]*\s+(20\d{2})'
+            r'|(20\d{2})\s+(' + _mp + r')[a-z]*)\b',
+            re.IGNORECASE
+        )
+        pairs: list = []
+        seen: set = set()
+        for _m in _pair_re.finditer(query):
+            if _m.group(1) and _m.group(2):
+                mo = (_MONTH_MAP.get(_m.group(1).lower()[:3])
+                      or _MONTH_MAP.get(_m.group(1).lower()))
+                yr = int(_m.group(2))
+            else:
+                mo = (_MONTH_MAP.get(_m.group(4).lower()[:3])
+                      or _MONTH_MAP.get(_m.group(4).lower()))
+                yr = int(_m.group(3))
+            if mo and (mo, yr) not in seen:
+                pairs.append((mo, yr))
+                seen.add((mo, yr))
+
+        # Handle "between Jan and Mar 2026" — month names without explicit year
+        if len(pairs) < 2:
+            _yrs = re.findall(r'\b(20\d{2})\b', query)
+            _mons_raw = re.findall(r'\b(' + _mp + r')\b', query, re.IGNORECASE)
+            if _yrs and len(_mons_raw) >= 2:
+                yr = int(_yrs[-1])
+                for _mname in _mons_raw[:2]:
+                    mo = (_MONTH_MAP.get(_mname.lower()[:3])
+                          or _MONTH_MAP.get(_mname.lower()))
+                    if mo and (mo, yr) not in seen:
+                        pairs.append((mo, yr))
+                        seen.add((mo, yr))
+        return pairs[:2]
+
+    def _build_difference_sql(
+            self, intent: Dict[str, Any],
+            cube_id: str, domain: str = None) -> Dict[str, Any]:
+        """
+        Compute delta between two time periods for a detected metric.
+        Triggered by "difference between X and Y", "delta between".
+        Runs two SQL queries internally and subtracts the results.
+        """
+        import copy as _copy, time as _t
+        _start = _t.time()
+        _q = intent.get('original_query', '')
+        pairs = self._get_period_pairs_from_query(_q)
+        if len(pairs) < 2:
+            return {
+                'success': False,
+                'error': 'Could not extract two time periods for difference',
+                'use_rag': True,
+            }
+
+        (mo_a, yr_a), (mo_b, yr_b) = pairs[0], pairs[1]
+        _MN = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
+
+        _all_m = self.get_matching_calculation(
+            _q, {'calculations': []}, return_all=True)
+        _calc_name = (_all_m[0].get('calculation_name', '')
+                      if _all_m else '')
+        if not _calc_name:
+            return {
+                'success': False,
+                'error': 'Could not identify metric for difference',
+                'use_rag': True,
+            }
+
+        def _run_period(mo, yr):
+            pi = _copy.deepcopy(intent)
+            pi['filters'] = [
+                f for f in pi.get('filters', [])
+                if f.get('column') not in ('year', 'month', '__raw__')
+            ]
+            pi['filters'].extend([
+                {'column': 'year',  'operator': '=', 'value': yr},
+                {'column': 'month', 'operator': '=', 'value': mo},
+            ])
+            pi['group_by'] = pi.get('group_by', ['region_entity'])
+            r = self.compile_calculation_sql(_calc_name, cube_id, pi, domain)
+            if not r.get('success'):
+                return 0.0
+            er = self.execute_query(
+                r.get('sql', ''), r.get('params', []),
+                cube_id, 'system', skip_logging=True)
+            if not er.get('success') or not er.get('results'):
+                return 0.0
+            rows = er['results']
+            for vcol in ['amount_usd', 'amount_inr', 'value', 'total']:
+                if rows and vcol in rows[0]:
+                    return sum(float(row.get(vcol, 0) or 0) for row in rows)
+            return 0.0
+
+        val_a = _run_period(mo_a, yr_a)
+        val_b = _run_period(mo_b, yr_b)
+        delta = val_b - val_a
+        pct = round((delta / val_a) * 100, 2) if val_a != 0 else None
+        lbl_a = f"{_MN[mo_a]} {yr_a}"
+        lbl_b = f"{_MN[mo_b]} {yr_b}"
+
+        row = {
+            'metric': _calc_name.replace('_', ' ').title(),
+            f'value_{lbl_a.replace(" ", "_").lower()}': round(val_a, 2),
+            f'value_{lbl_b.replace(" ", "_").lower()}': round(val_b, 2),
+            'difference': round(delta, 2),
+            'change_pct': pct,
+        }
+        elapsed_ms = int((_t.time() - _start) * 1000)
+        logger.info(
+            f"_build_difference_sql: {lbl_a}={val_a}, {lbl_b}={val_b}, "
+            f"delta={delta}")
+        return {
+            'success': True,
+            'results': [row],
+            'row_count': 1,
+            'columns': list(row.keys()),
+            'sql_query': f'-- Difference: {lbl_a} vs {lbl_b} for {_calc_name}',
+            'execution_ms': elapsed_ms,
+            'currency': intent.get('currency', 'usd'),
+            'calculation_type': 'difference',
+        }
+
+    def _build_pct_contribution_sql(
+            self, intent: Dict[str, Any],
+            cube_id: str, domain: str = None) -> Dict[str, Any]:
+        """
+        Compute (part / whole) × 100 for percentage-contribution queries.
+        Triggered by "what % of X is Y", "percentage of", "share of".
+        Identifies part and whole metrics via calculation matching.
+        """
+        import copy as _copy, time as _t
+        _start = _t.time()
+        _q = intent.get('original_query', '')
+        _all_m = self.get_matching_calculation(
+            _q, {'calculations': []}, return_all=True)
+        _all_names = list(dict.fromkeys(
+            c.get('calculation_name', '')
+            for c in _all_m if c.get('calculation_name')
+        ))
+        if len(_all_names) < 2:
+            return {
+                'success': False,
+                'error': 'Need two metrics for percentage contribution',
+                'use_rag': True,
+            }
+        _part_name  = _all_names[0]   # numerator
+        _whole_name = _all_names[-1]  # denominator
+
+        def _run(calc_name):
+            pi = _copy.deepcopy(intent)
+            r = self.compile_calculation_sql(calc_name, cube_id, pi, domain)
+            if not r.get('success'):
+                return 0.0
+            er = self.execute_query(
+                r.get('sql', ''), r.get('params', []),
+                cube_id, 'system', skip_logging=True)
+            if not er.get('success') or not er.get('results'):
+                return 0.0
+            rows = er['results']
+            for vcol in ['amount_usd', 'amount_inr', 'value', 'total']:
+                if rows and vcol in rows[0]:
+                    return sum(float(row.get(vcol, 0) or 0) for row in rows)
+            return 0.0
+
+        val_part  = _run(_part_name)
+        val_whole = _run(_whole_name)
+        pct = round((val_part / val_whole) * 100, 2) if val_whole != 0 else 0.0
+
+        row = {
+            'metric': f'{_part_name} as % of {_whole_name}',
+            'percentage': pct,
+            f'{_part_name.replace(" ", "_").lower()}_value':  round(val_part, 2),
+            f'{_whole_name.replace(" ", "_").lower()}_value': round(val_whole, 2),
+        }
+        elapsed_ms = int((_t.time() - _start) * 1000)
+        logger.info(
+            f"_build_pct_contribution_sql: {_part_name}={val_part}, "
+            f"{_whole_name}={val_whole}, pct={pct}%")
+        return {
+            'success': True,
+            'results': [row],
+            'row_count': 1,
+            'columns': list(row.keys()),
+            'sql_query': f'-- PCT: {_part_name} / {_whole_name}',
+            'execution_ms': elapsed_ms,
+            'currency': intent.get('currency', 'usd'),
+            'calculation_type': 'pct_contribution',
+        }
+
+    def _build_variance_sql(
+            self, intent: Dict[str, Any],
+            cube_id: str, domain: str = None) -> Dict[str, Any]:
+        """
+        Compute absolute and percentage variance between two periods (months or years).
+        Triggered by "variance of X between Y and Z" / "variance between years".
+        """
+        import copy as _copy, time as _t
+        _start = _t.time()
+        _q = intent.get('original_query', '')
+        _MN = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
+
+        pairs = self._get_period_pairs_from_query(_q)
+        _years = sorted(set(int(y) for y in re.findall(r'\b(20\d{2})\b', _q)))
+
+        _all_m = self.get_matching_calculation(
+            _q, {'calculations': []}, return_all=True)
+        _calc_name = (_all_m[0].get('calculation_name', '')
+                      if _all_m else '')
+        if not _calc_name:
+            return {
+                'success': False,
+                'error': 'Could not identify metric for variance',
+                'use_rag': True,
+            }
+
+        def _run(mo, yr, full_year=False):
+            pi = _copy.deepcopy(intent)
+            pi['filters'] = [
+                f for f in pi.get('filters', [])
+                if f.get('column') not in ('year', 'month', '__raw__')
+            ]
+            pi['filters'].append(
+                {'column': 'year', 'operator': '=', 'value': yr})
+            if not full_year and mo:
+                pi['filters'].append(
+                    {'column': 'month', 'operator': '=', 'value': mo})
+            r = self.compile_calculation_sql(_calc_name, cube_id, pi, domain)
+            if not r.get('success'):
+                return 0.0
+            er = self.execute_query(
+                r.get('sql', ''), r.get('params', []),
+                cube_id, 'system', skip_logging=True)
+            if not er.get('success') or not er.get('results'):
+                return 0.0
+            rows = er['results']
+            for vcol in ['amount_usd', 'amount_inr', 'value', 'total']:
+                if rows and vcol in rows[0]:
+                    return sum(float(row.get(vcol, 0) or 0) for row in rows)
+            return 0.0
+
+        if pairs and len(pairs) >= 2:
+            (mo_a, yr_a), (mo_b, yr_b) = pairs[0], pairs[1]
+            val_a = _run(mo_a, yr_a)
+            val_b = _run(mo_b, yr_b)
+            lbl_a = f"{_MN[mo_a]} {yr_a}"
+            lbl_b = f"{_MN[mo_b]} {yr_b}"
+        elif len(_years) >= 2:
+            yr_a, yr_b = _years[0], _years[1]
+            val_a = _run(None, yr_a, full_year=True)
+            val_b = _run(None, yr_b, full_year=True)
+            lbl_a, lbl_b = str(yr_a), str(yr_b)
+        else:
+            return {
+                'success': False,
+                'error': 'Could not extract two periods for variance',
+                'use_rag': True,
+            }
+
+        var_abs = val_b - val_a
+        var_pct = round((var_abs / val_a) * 100, 2) if val_a != 0 else None
+        row = {
+            'metric': _calc_name.replace('_', ' ').title(),
+            f'value_{lbl_a.replace(" ", "_").lower()}': round(val_a, 2),
+            f'value_{lbl_b.replace(" ", "_").lower()}': round(val_b, 2),
+            'variance_absolute': round(var_abs, 2),
+            'variance_pct': var_pct,
+        }
+        elapsed_ms = int((_t.time() - _start) * 1000)
+        logger.info(
+            f"_build_variance_sql: {lbl_a}={val_a}, {lbl_b}={val_b}, "
+            f"variance={var_abs}")
+        return {
+            'success': True,
+            'results': [row],
+            'row_count': 1,
+            'columns': list(row.keys()),
+            'sql_query': f'-- Variance: {lbl_a} vs {lbl_b} for {_calc_name}',
+            'execution_ms': elapsed_ms,
+            'currency': intent.get('currency', 'usd'),
+            'calculation_type': 'variance',
+        }
+
+    def _build_spike_detection_sql(
+            self, intent: Dict[str, Any],
+            cube_id: str, domain: str = None) -> Dict[str, Any]:
+        """
+        Fetch all monthly data for a year, compute MoM growth %, and flag
+        months where |growth| > SPIKE_THRESHOLD.
+        Only triggered when "Trends Highlights" is present in the query.
+        Hardcoded 30% threshold per Bosch specification.
+        """
+        import copy as _copy, time as _t
+        _start = _t.time()
+        _q = intent.get('original_query', '')
+        SPIKE_THRESHOLD = 30.0
+        _MN = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
+
+        _yrs = re.findall(r'\b(20\d{2})\b', _q)
+        _year = int(_yrs[0]) if _yrs else 2025
+
+        _all_m = self.get_matching_calculation(
+            _q, {'calculations': []}, return_all=True)
+        _calc_name = (_all_m[0].get('calculation_name', '')
+                      if _all_m else 'Outsourcing Cost')
+
+        # Fetch all months for this year grouped by month
+        pi = _copy.deepcopy(intent)
+        pi['filters'] = [
+            f for f in pi.get('filters', [])
+            if f.get('column') not in ('year', 'month', '__raw__')
+        ]
+        pi['filters'].append(
+            {'column': 'year', 'operator': '=', 'value': _year})
+        pi['group_by'] = ['month']
+
+        r = self.compile_calculation_sql(_calc_name, cube_id, pi, domain)
+        if not r.get('success'):
+            return {
+                'success': False,
+                'error': f'Spike detection compile failed for {_calc_name}',
+                'use_rag': True,
+            }
+        er = self.execute_query(
+            r.get('sql', ''), r.get('params', []),
+            cube_id, 'system', skip_logging=True)
+        if not er.get('success') or not er.get('results'):
+            return {
+                'success': False,
+                'error': 'No monthly data for spike detection',
+                'use_rag': True,
+            }
+
+        rows = er['results']
+        _vcol = next(
+            (c for c in ['amount_usd', 'amount_inr', 'value', 'total']
+             if rows and c in rows[0]),
+            None
+        )
+        if not _vcol:
+            return {
+                'success': False,
+                'error': 'No value column found for spike detection',
+                'use_rag': True,
+            }
+
+        rows_sorted = sorted(
+            rows, key=lambda rw: int(rw.get('month', 0) or 0))
+
+        results = []
+        for i, row in enumerate(rows_sorted):
+            mo = int(row.get('month', 0) or 0)
+            val = float(row.get(_vcol, 0) or 0)
+            if i == 0:
+                mom_pct = None
+                is_spike = False
+            else:
+                prev_val = float(rows_sorted[i - 1].get(_vcol, 0) or 0)
+                if prev_val != 0:
+                    mom_pct = round((val - prev_val) / abs(prev_val) * 100, 2)
+                    is_spike = abs(mom_pct) > SPIKE_THRESHOLD
+                else:
+                    mom_pct = None
+                    is_spike = False
+            results.append({
+                'month': mo,
+                'month_name': _MN[mo] if 0 < mo <= 12 else str(mo),
+                'year': _year,
+                _vcol: val,
+                'mom_growth_pct': mom_pct,
+                'is_spike': is_spike,
+                'spike_threshold_pct': SPIKE_THRESHOLD,
+            })
+
+        spike_months = [rs['month_name'] for rs in results if rs['is_spike']]
+        elapsed_ms = int((_t.time() - _start) * 1000)
+        logger.info(
+            f"_build_spike_detection_sql: {len(rows_sorted)} months, "
+            f"{len(spike_months)} spikes: {spike_months}")
+        return {
+            'success': True,
+            'results': results,
+            'row_count': len(results),
+            'columns': list(results[0].keys()) if results else [],
+            'sql_query': (
+                f'-- Spike detection: {_calc_name} {_year} '
+                f'(threshold >{SPIKE_THRESHOLD}%)'),
+            'execution_ms': elapsed_ms,
+            'currency': intent.get('currency', 'usd'),
+            'calculation_type': 'spike_detection',
+            'spike_months': spike_months,
+        }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ══════════════════════════  END P2 HELPERS  ═══════════════════════════════
+    # ──────────────────────────────────────────────────────────────────────────
+
     def compile_sql(self,
                     intent: Dict[str, Any],
                     cube_id: str,
@@ -14050,6 +14634,134 @@ Return a JSON object with:
                         logger.info(
                             f"Currency propagation: detected INR from query, setting intent['currency']='inr'"
                         )
+
+            # ================================================================
+            # BOSCH P2 ANALYTICS PRE-PROCESSING
+            # Applied to all non-Nemko queries before any fast-path dispatch.
+            # Order matters: time expansion first (quarter/FY/last-N), then
+            # structural detections (ranking, "which month"), then early-return
+            # builders (spike, difference, pct, variance).
+            # ================================================================
+            if not is_nemko:
+                _p2_raw_q = intent.get('original_query', '')
+                _p2_q_lower = _p2_raw_q.lower() if _p2_raw_q else ''
+
+                if _p2_raw_q:
+                    # ── Group C: Quarter expansion ────────────────────────────
+                    # Q1→month IN(1,2,3), Q2→(4,5,6), etc.
+                    # Revenue fast-path also does this, but marks _quarter_expanded
+                    # so the expansion is never applied twice.
+                    intent = self._detect_and_expand_quarter(intent, _p2_raw_q)
+
+                    # ── Group C: FY total ─────────────────────────────────────
+                    # "FY2025" / "full year 2025" → remove month filter so the
+                    # builder aggregates across the whole fiscal year.
+                    if not intent.get('_quarter_expanded'):
+                        intent = self._detect_fy_total(intent, _p2_raw_q)
+
+                    # ── Group A: Last N months ────────────────────────────────
+                    # Queries DB for the N most recent data periods and injects
+                    # the exact (year, month) combinations into the filter.
+                    if re.search(r'\blast\s+\d+\s+months?\b', _p2_q_lower):
+                        intent = self._detect_last_n_months_and_inject(
+                            intent, cube_id, _p2_raw_q)
+
+                    # ── Group A: Ranking detection ────────────────────────────
+                    # Store ranking params in intent for the route handler to
+                    # apply as a Python-level sort + slice after execution.
+                    _p2_rmode, _p2_rlimit, _p2_rdir = \
+                        self._detect_ranking_params(_p2_q_lower)
+                    if _p2_rmode:
+                        intent['_ranking_mode']  = _p2_rmode
+                        intent['_ranking_limit'] = _p2_rlimit
+                        intent['_ranking_dir']   = _p2_rdir
+                        logger.info(
+                            f"compile_sql P2: ranking={_p2_rmode}, "
+                            f"limit={_p2_rlimit}, dir={_p2_rdir}")
+
+                    # ── Group D: "which month" → group_by month only ──────────
+                    # "Which month has highest OS cost?" should return one row
+                    # per month, not per entity — swap the group_by accordingly.
+                    if re.search(r'\bwhich\s+month\b', _p2_q_lower):
+                        intent['group_by'] = ['month']
+                        logger.info(
+                            "compile_sql P2: 'which month' → group_by=['month']")
+
+                    # ── Group E: Spike detection (early return) ───────────────
+                    # Only fires when "Trends Highlights" is present per spec.
+                    if any(t in _p2_q_lower for t in [
+                            'trends highlights', 'trend highlights',
+                            'trends highlight']):
+                        logger.info(
+                            "compile_sql P2: Trends Highlights → spike detection")
+                        return self._build_spike_detection_sql(
+                            intent, cube_id, domain)
+
+                    # ── Group B: Difference/delta (early return) ──────────────
+                    # Guard: only dispatch if the query contains two parseable
+                    # time periods.  Without this, "difference between regions"
+                    # would always fail with use_rag and bypass the SQL path.
+                    if re.search(
+                            r'\b(?:difference|delta)\b.*\bbetween\b'
+                            r'|\bbetween\b.*\b(?:difference|delta)\b'
+                            r'|\bhow\s+much\s+did\b.*\bchange\b',
+                            _p2_q_lower):
+                        _diff_pairs = self._get_period_pairs_from_query(
+                            _p2_raw_q)
+                        if len(_diff_pairs) >= 2:
+                            logger.info(
+                                "compile_sql P2: difference/delta → "
+                                "_build_difference_sql "
+                                f"(periods={_diff_pairs})")
+                            return self._build_difference_sql(
+                                intent, cube_id, domain)
+                        # else: no two parseable periods → fall through to
+                        # normal single-period SQL path
+
+                    # ── Group B: Percentage contribution (early return) ────────
+                    # Guard: require two distinct matched metric names so that
+                    # single-metric queries mentioning "%" (e.g. "billing util
+                    # pct") are not hijacked by this builder.
+                    if re.search(
+                            r'\bwhat\s+(?:is\s+the\s+)?(?:percentage|%|percent)\s+of\b'
+                            r'|\bwhat\s+%\s+of\b'
+                            r'|\bwhat\s+share\s+of\b'
+                            r'|\bwhat\s+proportion\s+of\b',
+                            _p2_q_lower):
+                        _pct_calcs = self.get_matching_calculation(
+                            _p2_raw_q, {'calculations': []}, return_all=True)
+                        _pct_names = list(dict.fromkeys(
+                            c.get('calculation_name', '')
+                            for c in _pct_calcs
+                            if c.get('calculation_name')
+                        ))
+                        if len(_pct_names) >= 2:
+                            logger.info(
+                                "compile_sql P2: pct contribution → "
+                                "_build_pct_contribution_sql "
+                                f"(metrics={_pct_names[:2]})")
+                            return self._build_pct_contribution_sql(
+                                intent, cube_id, domain)
+                        # else: single metric or none detected → normal path
+
+                    # ── Group B: Variance (early return) ─────────────────────
+                    # Guard: require two parseable periods or two distinct years.
+                    if re.search(r'\bvariance\b', _p2_q_lower) and \
+                            re.search(
+                                r'\bbetween\b|\bvs\.?\b|\bversus\b'
+                                r'|\band\s+20\d{2}\b',
+                                _p2_q_lower):
+                        _var_pairs = self._get_period_pairs_from_query(
+                            _p2_raw_q)
+                        _var_yrs = list(set(
+                            re.findall(r'\b(20\d{2})\b', _p2_raw_q)))
+                        if len(_var_pairs) >= 2 or len(_var_yrs) >= 2:
+                            logger.info(
+                                "compile_sql P2: variance → _build_variance_sql "
+                                f"(pairs={_var_pairs}, years={_var_yrs})")
+                            return self._build_variance_sql(
+                                intent, cube_id, domain)
+                        # else: not enough temporal info → normal path
 
             if is_nemko:
                 # If use_calculation is specified, try _compile_nemko_sql first for P&L calculations

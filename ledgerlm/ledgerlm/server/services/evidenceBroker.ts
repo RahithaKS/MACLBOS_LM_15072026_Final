@@ -2098,7 +2098,22 @@ export class EvidenceBroker {
       : chartData;
 
     const chartSpec = {
-      type: (isTimeSeries && this.wantsLineChart(userQuery)) ? ("line" as const) : ("bar" as const),
+      // Auto-select line chart when:
+      //   1. User explicitly requested a line chart / trend line, OR
+      //   2. Data is time-series by month AND has ≥3 data points AND query
+      //      carries trend intent (MoM, monthly, over time, trend, growth).
+      //      This covers P2 "Trend chart" requirement without forcing line on
+      //      all bar charts.
+      type: (
+        isTimeSeries && (
+          this.wantsLineChart(userQuery) ||
+          (
+            labelCol === 'month' &&
+            chartData.length >= 3 &&
+            /\b(trend|mom|month.?over.?month|monthly|over\s+time|growth|spike|highlights?)\b/i.test(userQuery)
+          )
+        )
+      ) ? ("line" as const) : ("bar" as const),
       title: friendlyTitle,
       data: specData,
       config: {
