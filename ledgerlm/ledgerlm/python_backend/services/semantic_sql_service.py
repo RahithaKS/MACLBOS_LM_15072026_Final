@@ -1496,6 +1496,99 @@ def detect_cost_class_from_query(query: str) -> Optional[str]:
     return None
 
 
+# ============================================================================
+# MOM / AVERAGE-MONTHLY DETECTION HELPERS
+# These fire in the intent builders (cost-class and entity P&L fast paths)
+# to set mom_mode / avg_monthly_mode flags before SQL generation.
+# ============================================================================
+
+def detect_mom_intent(query: str) -> bool:
+    """Return True when the query asks for per-month individual values (MoM breakdown).
+
+    Triggers on: 'month on month', 'mom', 'month wise', 'month by month',
+    'monthly comparison', 'monthly breakdown', 'monthly split', 'month over month',
+    'monthly trend', 'each month', 'per month comparison'.
+    """
+    q = query.lower()
+    # Keyword triggers (substring match)
+    _mom_triggers = [
+        'month on month', 'month-on-month',
+        'month wise', 'month-wise', 'monthwise',
+        'month by month', 'month-by-month',
+        'month over month', 'monthly comparison',
+        'monthly breakdown', 'monthly split',
+        'monthly trend', 'per month comparison',
+        'month to month',
+    ]
+    if any(t in q for t in _mom_triggers):
+        return True
+    # Word-boundary match for 'mom' (handles: "MoM", "MoM Jan-Mar", "(MoM)")
+    if re.search(r'\bmom\b', q):
+        return True
+    return False
+
+
+def detect_avg_monthly_intent(query: str) -> bool:
+    """Return True when the query asks for the average across months (YTD ÷ months).
+
+    Handles both contiguous phrases ('average monthly') and non-adjacent combinations
+    ('average resource cost per month') where 'average'/'avg' + 'per month' appear
+    anywhere in the query regardless of words in between.
+    """
+    q = query.lower()
+    # Contiguous phrase triggers
+    _avg_triggers = [
+        'average monthly', 'avg monthly', 'monthly average', 'monthly avg',
+        'average per month', 'avg per month', 'average cost per month',
+        'mean monthly', 'average month',
+    ]
+    if any(t in q for t in _avg_triggers):
+        return True
+    # Non-adjacent: 'average' (or 'avg') AND 'per month' both present anywhere
+    _has_avg_word = bool(re.search(r'\b(?:average|avg|mean)\b', q))
+    _has_per_month = 'per month' in q
+    if _has_avg_word and _has_per_month:
+        return True
+    return False
+
+
+def extract_month_range_from_text(query: str) -> Optional[List[int]]:
+    """Detect a contiguous month range from 'jan to mar', 'jan-mar', etc.
+
+    Returns a sorted list of month integers, or None when no range is found.
+    Handles optional year between start month and 'to', e.g. 'Jan 2026 to Mar 2026'.
+    """
+    q = query.lower()
+    _m = {
+        'jan': 1, 'january': 1, 'feb': 2, 'february': 2,
+        'mar': 3, 'march': 3, 'apr': 4, 'april': 4,
+        'may': 5, 'jun': 6, 'june': 6, 'jul': 7, 'july': 7,
+        'aug': 8, 'august': 8, 'sep': 9, 'september': 9,
+        'oct': 10, 'october': 10, 'nov': 11, 'november': 11,
+        'dec': 12, 'december': 12,
+    }
+    _abbr = '|'.join([
+        'jan(?:uary)?', 'feb(?:ruary)?', 'mar(?:ch)?', 'apr(?:il)?',
+        'may', 'jun(?:e)?', 'jul(?:y)?', 'aug(?:ust)?',
+        'sep(?:tember)?', 'oct(?:ober)?', 'nov(?:ember)?', 'dec(?:ember)?',
+    ])
+    # Pattern 1: "jan [yyyy] to mar [yyyy]"  — space-separated separator
+    # Pattern 2: "jan-mar"                   — compact hyphen (no spaces)
+    # \s* around the separator makes it flexible for both cases.
+    rng = re.search(
+        r'\b(' + _abbr + r')(?:\s+\d{4})?\s*(?:to|through|thru|-)\s*(' + _abbr + r')\b',
+        q
+    )
+    if rng:
+        s = rng.group(1)[:3]
+        e = rng.group(2)[:3]
+        sn = _m.get(s, 0)
+        en = _m.get(e, 0)
+        if sn and en and sn <= en:
+            return list(range(sn, en + 1))
+    return None
+
+
 # Dimension columns (used for filtering and grouping)
 DIMENSION_COLUMNS = [
     'year',
@@ -6001,15 +6094,48 @@ Return a JSON object with:
             'dec': 12,
             'december': 12
         }
-        # Collect ALL months mentioned (longer names first to avoid partial matches).
-        # When multiple months are detected, use IN operator and add month+year to group_by.
-        _ccl_seen_months: set = set()
-        for month_name, month_num in sorted(month_names.items(),
-                                            key=lambda x: len(x[0]),
-                                            reverse=True):
-            if re.search(r'\b' + month_name + r'\b', query_lower) and month_num not in _ccl_seen_months:
-                _ccl_seen_months.add(month_num)
-        _ccl_detected_months = sorted(_ccl_seen_months)
+        # ── Month detection: range-aware (MoM fix) ───────────────────────────
+        # Priority 1: explicit range "jan to mar" → [1,2,3]
+        # Priority 2: MoM mode + single max-month → expand to 1..max
+        # Priority 3: individual month mentions (fallback)
+        _ccl_detected_months: List[int] = []
+        _ccl_range = extract_month_range_from_text(query)
+        if _ccl_range:
+            _ccl_detected_months = _ccl_range
+            logger.info(f"_build_cost_class_intent: month range detected → {_ccl_detected_months}")
+        else:
+            # Individual month detection fallback
+            _ccl_seen_months: set = set()
+            for month_name, month_num in sorted(month_names.items(),
+                                                key=lambda x: len(x[0]),
+                                                reverse=True):
+                if re.search(r'\b' + month_name + r'\b', query_lower) and month_num not in _ccl_seen_months:
+                    _ccl_seen_months.add(month_num)
+            _ccl_detected_months = sorted(_ccl_seen_months)
+            # MoM mode: single max-month → expand to full 1..max range so every
+            # preceding month appears as its own row (e.g. "MoM Jan-Mar" found as
+            # just "Mar" → expand to [1,2,3])
+            if detect_mom_intent(query) and len(_ccl_detected_months) == 1:
+                _ccl_detected_months = list(range(1, _ccl_detected_months[0] + 1))
+                logger.info(
+                    f"_build_cost_class_intent: MoM mode — expanded month to {_ccl_detected_months}")
+
+        # Average monthly mode: preserve any explicit month constraints so the wrapper
+        # divides only over the requested period (e.g. Jan-Mar avg = sum/3, not sum/12).
+        # If no months are specified the full year is used (no month filter).
+        # month MUST be in group_by so the base SQL produces one row per month —
+        # the wrapper's COUNT(DISTINCT month) depends on this.
+        _ccl_avg_monthly = detect_avg_monthly_intent(query)
+        if _ccl_avg_monthly:
+            # Keep _ccl_detected_months as-is (preserves range/individual month constraints)
+            intent['avg_monthly_mode'] = True
+            # Ensure month is in group_by for the base SQL (wrapper needs it)
+            if 'month' not in intent['group_by']:
+                intent['group_by'] = ['month'] + intent['group_by']
+            logger.info(
+                f"_build_cost_class_intent: avg_monthly_mode=True, months={_ccl_detected_months or 'all'}"
+            )
+
         if len(_ccl_detected_months) == 1:
             intent['filters'].append({
                 'column': 'month',
@@ -6027,6 +6153,13 @@ Return a JSON object with:
                 intent['group_by'] = ['month'] + intent['group_by']
             if 'year' not in intent['group_by']:
                 intent['group_by'] = intent['group_by'] + ['year']
+
+        # MoM mode flag: ensure month is in group_by even for single-month queries
+        # (compile_sql uses this to apply per-month breakdown)
+        if detect_mom_intent(query) and not _ccl_avg_monthly:
+            intent['mom_mode'] = True
+            if len(_ccl_detected_months) > 1 and 'month' not in intent['group_by']:
+                intent['group_by'] = ['month'] + intent['group_by']
 
         # Quarter detection: Q1→[1,2,3], Q2→[4,5,6], Q3→[7,8,9], Q4→[10,11,12]
         # Collect ALL quarters mentioned (ranges, individual Q1/Q2/Q3/Q4, text-based)
@@ -6223,32 +6356,70 @@ Return a JSON object with:
             'dec': 12,
             'december': 12
         }
-        # Collect ALL months mentioned (longer names first to avoid partial matches).
-        # When multiple months are detected, use IN operator and add month+year to group_by.
-        _ebit_seen_months: set = set()
-        for month_name, month_num in sorted(month_names.items(),
-                                            key=lambda x: len(x[0]),
-                                            reverse=True):
-            if re.search(r'\b' + month_name + r'\b', query_lower) and month_num not in _ebit_seen_months:
-                _ebit_seen_months.add(month_num)
-        _ebit_detected_months = sorted(_ebit_seen_months)
-        if len(_ebit_detected_months) == 1:
+        # ── Month detection: range-aware (MoM fix) ───────────────────────────
+        # Priority 1: explicit range "jan to mar" → [1,2,3]
+        # Priority 2: MoM mode + single max-month → expand to 1..max
+        # Priority 3: individual month mentions (fallback)
+        _epl_detected_months: List[int] = []
+        _epl_range = extract_month_range_from_text(query)
+        if _epl_range:
+            _epl_detected_months = _epl_range
+            logger.info(f"_build_entity_pl_intent: month range detected → {_epl_detected_months}")
+        else:
+            _ebit_seen_months: set = set()
+            for month_name, month_num in sorted(month_names.items(),
+                                                key=lambda x: len(x[0]),
+                                                reverse=True):
+                if re.search(r'\b' + month_name + r'\b', query_lower) and month_num not in _ebit_seen_months:
+                    _ebit_seen_months.add(month_num)
+            _epl_detected_months = sorted(_ebit_seen_months)
+            # MoM mode: single max-month → expand to full 1..max range
+            if detect_mom_intent(query) and len(_epl_detected_months) == 1:
+                _epl_detected_months = list(range(1, _epl_detected_months[0] + 1))
+                logger.info(
+                    f"_build_entity_pl_intent: MoM mode — expanded month to {_epl_detected_months}")
+
+        # Average monthly mode: preserve any explicit month constraints so the wrapper
+        # divides only over the requested period (e.g. Jan-Mar avg = sum/3, not sum/12).
+        # If no months are specified the full year is used (no month filter).
+        # month MUST be in group_by so the base SQL produces one row per month.
+        _epl_avg_monthly = detect_avg_monthly_intent(query)
+        if _epl_avg_monthly:
+            # Keep _epl_detected_months as-is (preserves range/individual month constraints)
+            intent['avg_monthly_mode'] = True
+            logger.info(
+                f"_build_entity_pl_intent: avg_monthly_mode=True, months={_epl_detected_months or 'all'}"
+            )
+
+        # For avg_monthly we need month in group_by so the base SQL groups per month
+        # before the wrapper divides. For MoM we need month in group_by for per-row display.
+        _epl_needs_month_in_gb = (_epl_avg_monthly or detect_mom_intent(query))
+
+        if len(_epl_detected_months) == 1:
             intent['filters'].append({
                 'column': 'month',
                 'operator': '=',
-                'value': _ebit_detected_months[0]
+                'value': _epl_detected_months[0]
             })
-        elif len(_ebit_detected_months) > 1:
+        elif len(_epl_detected_months) > 1:
             intent['filters'].append({
                 'column': 'month',
                 'operator': 'IN',
-                'value': _ebit_detected_months
+                'value': _epl_detected_months
             })
             # Add month and year to group_by so each month appears as its own column
             if 'month' not in intent['group_by']:
                 intent['group_by'] = ['month'] + intent['group_by']
             if 'year' not in intent['group_by']:
                 intent['group_by'] = intent['group_by'] + ['year']
+
+        # Ensure month in group_by for MoM and avg_monthly modes
+        if _epl_needs_month_in_gb and 'month' not in intent['group_by']:
+            intent['group_by'] = ['month'] + intent['group_by']
+
+        # Propagate MoM flag
+        if detect_mom_intent(query) and not _epl_avg_monthly:
+            intent['mom_mode'] = True
 
         if len(detected_entities_epl) == 1:
             intent['filters'].append({
@@ -8356,6 +8527,104 @@ Return a JSON object with:
         except Exception as e:
             logger.error(f"Failed to compile calculation SQL: {e}")
             return {'success': False, 'error': str(e)}
+
+    # =========================================================================
+    # AVERAGE MONTHLY SQL WRAPPER
+    # Wraps a cost-builder result so it returns avg_monthly_value = SUM / n_months
+    # Precondition: base SQL must have month in GROUP BY (so one row per month).
+    # =========================================================================
+
+    def _apply_avg_monthly_sql_wrapper(
+            self, result: Dict[str, Any], intent: Dict[str, Any]) -> Dict[str, Any]:
+        """Wrap a cost builder's SQL to compute average monthly value.
+
+        Takes the base SQL (which already groups by month so each month is a row),
+        wraps it in a CTE, then aggregates with SUM(value) / COUNT(DISTINCT month).
+        This gives the true average across all available months in the period.
+
+        Safe to call when result['success'] is True. Returns result unchanged on
+        any parse failure so existing behaviour is preserved.
+        """
+        original_sql = result.get('sql', '').strip()
+        if not original_sql:
+            return result
+
+        # Find the primary numeric value alias.
+        # Builders produce:  ROUND(SUM(amt_col)::numeric, n) as resource_cost
+        # We find all "AS alias" tokens in the SELECT portion (before FROM) and
+        # take the last one — that is always the metric column.
+        _from_idx = original_sql.upper().find('\nFROM ')
+        if _from_idx == -1:
+            _from_idx = original_sql.upper().find(' FROM ')
+        select_part = original_sql[:_from_idx] if _from_idx != -1 else original_sql
+        _aliases = re.findall(r'(?i)\bas\s+(\w+)', select_part)
+        if not _aliases:
+            logger.warning(
+                "_apply_avg_monthly_sql_wrapper: could not detect value alias, skipping")
+            return result
+        value_alias = _aliases[-1]  # last alias in SELECT = the metric
+
+        # Extract the GROUP BY clause to figure out the outer (non-month) dimensions.
+        gb_match = re.search(
+            r'\bGROUP\s+BY\s+(.+?)(?=\s*ORDER\s+BY|\s*LIMIT|\s*;?\s*$)',
+            original_sql, re.IGNORECASE | re.DOTALL
+        )
+        if not gb_match:
+            logger.warning(
+                "_apply_avg_monthly_sql_wrapper: could not detect GROUP BY, skipping")
+            return result
+
+        gb_raw = gb_match.group(1).strip()
+        # Outer GROUP BY removes 'month' (we're averaging across months)
+        outer_gb_cols = [
+            c.strip() for c in gb_raw.split(',')
+            if c.strip().lower() != 'month'
+        ]
+
+        # Strip trailing ORDER BY / LIMIT from inner SQL so we can wrap cleanly
+        clean_sql = re.sub(
+            r'\s*ORDER\s+BY\s+.*?(?=\s*LIMIT\s|\s*;?\s*$)',
+            '', original_sql, flags=re.IGNORECASE | re.DOTALL
+        ).strip()
+        clean_sql = re.sub(
+            r'\s*LIMIT\s+\d+', '', clean_sql, flags=re.IGNORECASE
+        ).strip()
+
+        if outer_gb_cols:
+            select_dims = ', '.join(outer_gb_cols) + ','
+            group_clause = 'GROUP BY ' + ', '.join(outer_gb_cols)
+        else:
+            select_dims = ''
+            group_clause = ''
+
+        # Build wrapped SQL using string concat to avoid f-string/regex escaping issues
+        inner = clean_sql
+        parts = ['WITH _monthly_base AS (']
+        parts.append(inner)
+        parts.append(')')
+        parts.append('SELECT')
+        if select_dims:
+            parts.append('    ' + select_dims)
+        parts.append(
+            '    ROUND(\n'
+            '        SUM(' + value_alias + ')::numeric / NULLIF(COUNT(DISTINCT month), 0),\n'
+            '        2\n'
+            '    ) AS avg_monthly_value,\n'
+            '    COUNT(DISTINCT month) AS months_counted'
+        )
+        parts.append('FROM _monthly_base')
+        if group_clause:
+            parts.append(group_clause)
+        parts.append('ORDER BY avg_monthly_value DESC')
+        wrapped_sql = '\n'.join(parts)
+
+        updated = dict(result)
+        updated['sql'] = wrapped_sql
+        updated['avg_monthly_mode'] = True
+        logger.info(
+            '_apply_avg_monthly_sql_wrapper: wrapped %r -> avg_monthly_value' % value_alias
+        )
+        return updated
 
     def _extract_ctg_month_clause(self, where_parts: List[str]) -> str:
         """Extract month clause for CTG plan data lookups from where_parts.
@@ -13733,8 +14002,12 @@ Return a JSON object with:
                 _pre_calc_query = intent.get('original_query', '')
                 if _pre_calc_query:
                     intent = self._inject_time_from_query(intent, _pre_calc_query)
-                return self.compile_calculation_sql(
+                _pre_result = self.compile_calculation_sql(
                     _pre_use_calc, cube_id, intent, domain)
+                # Apply avg_monthly wrapper for cost queries when avg_monthly_mode set
+                if _pre_result.get('success') and intent.get('avg_monthly_mode'):
+                    _pre_result = self._apply_avg_monthly_sql_wrapper(_pre_result, intent)
+                return _pre_result
 
             # ================================================================
             # COST CLASS FAST PATH - skip LLM routing if intent has cost_category_class filter
@@ -14425,7 +14698,11 @@ Return a JSON object with:
             limit = min(intent.get('limit', 100), 1000)  # Cap at 1000
             sql += f" LIMIT {limit}"
 
-            return {'success': True, 'sql': sql, 'params': params}
+            generic_result = {'success': True, 'sql': sql, 'params': params}
+            # Apply avg_monthly wrapper when intent flag is set (entity P&L avg queries)
+            if intent.get('avg_monthly_mode'):
+                generic_result = self._apply_avg_monthly_sql_wrapper(generic_result, intent)
+            return generic_result
 
         except Exception as e:
             logger.error(f"SQL compilation failed: {e}")
