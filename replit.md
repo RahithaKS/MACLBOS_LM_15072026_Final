@@ -1,15 +1,23 @@
-# [Project name]
+# LedgerLM
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+AI-powered financial analysis platform: upload financial documents, ask questions via chat, and get RAG-enhanced insights across PDFs, Excel, DOCX, and more.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- **Workflow**: `LedgerLM` — runs `cd ledgerlm/ledgerlm && npm run dev` (starts both services)
+- Node.js/Express + Vite dev server on port 5000 (serves React frontend + API)
+- Python FastAPI backend on port 8000 (internal, auto-started by Node server; not externally exposed)
+- `cd ledgerlm/ledgerlm && npm run db:push` — push DB schema changes (dev only)
+
+## Required Secrets (all configured)
+
+- `DATABASE_URL` — Postgres connection string (Neon)
+- `OPENAI_API_KEY` — OpenAI API key for chat + embeddings
+- `GOOGLE_API_KEY` / `GOOGLE_CSE_ID` — Google Search for RAG web context
+- `SESSION_SECRET` — Express session secret
+- SMTP secrets (`SMTP_HOST`, `SMTP_USER`, etc.) — email OTP auth
+- Anaplan secrets — data sync automation
+- `APP_URL` — base URL for the app
 
 ## Stack
 

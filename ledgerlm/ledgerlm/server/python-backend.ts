@@ -28,7 +28,12 @@ export function startPythonBackend() {
   ], {
     cwd: pythonBackendDir,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PYTHONUNBUFFERED: '1' }
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: '1',
+      PYTHONPATH: `${process.env.HOME}/workspace/.pythonlibs/lib/python3.12/site-packages`,
+      PATH: `${process.env.HOME}/workspace/.pythonlibs/bin:${process.env.PATH}`,
+    }
   });
 
   if (pythonProcess.stdout) {
