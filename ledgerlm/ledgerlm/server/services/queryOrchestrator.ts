@@ -859,11 +859,26 @@ export class QueryOrchestrator {
       // If the raw query text mentions 2+ distinct years, the primary SQL already
       // handles them via year IN (...) GROUP BY year.  Skip comparison entirely
       // regardless of what the intent filters say (they may not be upgraded yet).
-      const rawQueryYears = [...new Set(
-        [...originalQuery.matchAll(/\b(20\d{2})\b/g)].map(m => parseInt(m[1]))
-      )];
+      // Also detect abbreviated years like '26 → 2026, '25 → 2025 (e.g. "Mar '26 vs Mar '25").
+      // Use Array.from() to avoid TS downlevelIteration requirement on iterator spread.
+      const fullYears: number[] = Array.from(
+        originalQuery.matchAll(/\b(20\d{2})\b/g), (m: RegExpExecArray) => parseInt(m[1])
+      );
+      const abbrevYears: number[] = Array.from(
+        originalQuery.matchAll(/'(\d{2})\b/g), (m: RegExpExecArray) => 2000 + parseInt(m[1])
+      ).filter((y: number) => y >= 2020 && y <= 2035);
+      const rawQueryYears: number[] = Array.from(
+        new Set<number>(fullYears.concat(abbrevYears))
+      );
       if (rawQueryYears.length >= 2) {
-        console.log(`📊 Comparison query skipped: query text has ${rawQueryYears.length} years (${rawQueryYears.join(', ')})`);
+        console.log(`📊 Comparison query skipped: query text has ${rawQueryYears.length} explicit year refs (${rawQueryYears.join(', ')})`);
+        return [];
+      }
+
+      // Also honour an explicit strict_period_filter flag set by the Python intent parser
+      // (signals that the user named two specific periods — no auto-fill needed).
+      if (structuredQuery.strict_period_filter) {
+        console.log(`📊 Comparison query skipped: strict_period_filter set in intent`);
         return [];
       }
 
@@ -880,10 +895,11 @@ export class QueryOrchestrator {
             queryYear = Math.max(...queryYears);
           } else if (typeof f.value === 'number') {
             queryYear = f.value;
-            queryYears = [queryYear];
+            queryYears = [f.value];
           } else {
-            queryYear = parseInt(f.value);
-            queryYears = [queryYear];
+            const parsed = parseInt(f.value);
+            queryYear = parsed;
+            queryYears = [parsed];
           }
         } else if (col === 'month') {
           if (Array.isArray(f.value)) {

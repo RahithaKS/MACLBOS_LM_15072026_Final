@@ -14121,6 +14121,39 @@ Return a JSON object with:
                             f"compile_sql: fallback multi-metric detection "
                             f"from original_query → {_all_names}")
                         _multi_calcs = _all_names
+
+                    # ── Capacity avg+end combo detection (Bosch P2) ──────────
+                    # "outsourcing average and end capacity" → two side-by-side
+                    # metrics instead of a single summed number.
+                    # Pattern: avg-keyword and end-keyword close together.
+                    if not _multi_calcs and _orig_q:
+                        _oq_l = _orig_q.lower()
+                        _cap_avg_end = bool(re.search(
+                            r'\b(?:avg|average)\b.{1,20}\bend\b'
+                            r'|\bend\b.{1,20}\b(?:avg|average)\b',
+                            _oq_l
+                        ))
+                        if _cap_avg_end and 'capacity' in _oq_l:
+                            if any(kw in _oq_l for kw in [
+                                    'outsourcing', 'external cap']):
+                                _multi_calcs = [
+                                    'outsourcing_capacity_avg',
+                                    'outsourcing_capacity_end']
+                                logger.info(
+                                    "compile_sql: avg+end outsourcing combo → multi-metric")
+                            elif 'offshore' in _oq_l:
+                                _multi_calcs = [
+                                    'offshore_capacity_avg',
+                                    'offshore_capacity_end']
+                                logger.info(
+                                    "compile_sql: avg+end offshore combo → multi-metric")
+                            elif 'total' in _oq_l:
+                                _multi_calcs = [
+                                    'total_capacity_avg',
+                                    'total_capacity_end']
+                                logger.info(
+                                    "compile_sql: avg+end total capacity combo → multi-metric")
+
             if _multi_calcs and len(_multi_calcs) > 1:
                 metric_ids = [c.lower().replace(' ', '_') for c in _multi_calcs]
                 logger.info(
