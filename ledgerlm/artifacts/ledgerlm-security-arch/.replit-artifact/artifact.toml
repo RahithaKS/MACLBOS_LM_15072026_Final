@@ -12,7 +12,7 @@ version = "1.0.0"
 [[services]]
 name = "web"
 paths = [ "/ledgerlm-security-arch/" ]
-localPort = 18957
+localPort = 3002
 
 [services.development]
 run = "pnpm --filter @workspace/ledgerlm-security-arch run dev"
@@ -27,5 +27,5 @@ from = "/*"
 to = "/index.html"
 
 [services.env]
-PORT = "18957"
+PORT = "3002"
 BASE_PATH = "/ledgerlm-security-arch/"
