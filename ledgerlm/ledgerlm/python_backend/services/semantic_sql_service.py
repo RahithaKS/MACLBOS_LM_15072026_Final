@@ -5961,6 +5961,72 @@ Return a JSON object with:
         elif 'worldwide' in query_lower or 'world wide' in query_lower:
             intent['group_by'] = []  # No grouping for worldwide
 
+        # ── Revenue dimension filters (Task #5 additions) ─────────────────────
+        # ProjectGB filter: "project GB MA", "project gb for VM"
+        _pgb_m = re.search(
+            r'\bproject\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
+            query, re.IGNORECASE
+        )
+        if _pgb_m:
+            _pgb_val = _pgb_m.group(1).upper()
+            intent['filters'].append({
+                'column': 'project_gb', 'operator': '=', 'value': _pgb_val
+            })
+            logger.info(f"_build_kpi_intent_fast: ProjectGB filter = {_pgb_val}")
+
+        # PlanningGB filter: "planning GB MA", "planning gb for VM"
+        _plgb_m = re.search(
+            r'\bplanning\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
+            query, re.IGNORECASE
+        )
+        if _plgb_m:
+            _plgb_val = _plgb_m.group(1).upper()
+            intent['filters'].append({
+                'column': 'planning_gb', 'operator': '=', 'value': _plgb_val
+            })
+            logger.info(f"_build_kpi_intent_fast: PlanningGB filter = {_plgb_val}")
+
+        # Onsite/Offshore revenue split: group_by onsite_offshore
+        _oo_triggers = [
+            'offshore vs onsite', 'onsite vs offshore',
+            'onsite offshore split', 'offshore onsite split',
+            'by onsite offshore', 'onsite/offshore split',
+        ]
+        if any(t in query_lower for t in _oo_triggers):
+            if 'onsite_offshore' not in intent.get('group_by', []):
+                intent['group_by'] = ['onsite_offshore'] + intent.get('group_by', [])
+            logger.info('_build_kpi_intent_fast: onsite_offshore group_by injected')
+
+        # SDS split: group_by split_itrams_sds
+        _sds_triggers = [
+            'by sds', 'sds split', 'bosch sds', 'itrams split',
+            'split by sds', 'revenue split by sds', 'split of itrams',
+            'by itrams', 'sds wise', 'itrams sds',
+        ]
+        if any(t in query_lower for t in _sds_triggers):
+            if 'split_itrams_sds' not in intent.get('group_by', []):
+                intent['group_by'] = intent.get('group_by', []) + ['split_itrams_sds']
+            logger.info('_build_kpi_intent_fast: split_itrams_sds group_by injected')
+
+        # Org hierarchy filter: "BU AR", "section X", "dept Y", "group Z"
+        # Patterns: (label, column, regex)
+        _org_patterns = [
+            ('proj_bu',      r'\b(?:proj(?:ect)?\s+)?bu\s+([A-Z0-9_-]{1,20})\b'),
+            ('proj_section', r'\b(?:proj(?:ect)?\s+)?section\s+([A-Z0-9_-]{1,20})\b'),
+            ('proj_dept',    r'\b(?:proj(?:ect)?\s+)?dep(?:t|artment)\s+([A-Z0-9_-]{1,20})\b'),
+            ('proj_group',   r'\b(?:proj(?:ect)?\s+)?group\s+([A-Z0-9_-]{1,20})\b'),
+        ]
+        for _org_col, _org_pat in _org_patterns:
+            _org_m = re.search(_org_pat, query, re.IGNORECASE)
+            if _org_m:
+                _org_val = _org_m.group(1).upper()
+                # Skip stopwords that look like codes
+                if _org_val.lower() not in {'by', 'for', 'in', 'of', 'all', 'any'}:
+                    intent['filters'].append({
+                        'column': _org_col, 'operator': '=', 'value': _org_val
+                    })
+                    logger.info(f"_build_kpi_intent_fast: org filter {_org_col} = {_org_val}")
+
         # Merge entity filters from pre-detection
         if entity_filters:
             for ef in entity_filters:
@@ -8123,6 +8189,11 @@ Return a JSON object with:
                         order_dir=intent.get('_customer_order_dir', 'DESC'),
                         include_entity=intent.get('_customer_include_entity', False))
                 elif catalog_key == 'revenue':
+                    # Revenue type split (Bosch P1): CASE WHEN on order_reason
+                    if intent.get('revenue_type_split'):
+                        return self._build_revenue_type_sql(
+                            where_parts, params, select_cols,
+                            group_by_clause, rounding or 0, amt_col)
                     return self._build_revenue_sql(where_parts, params,
                                                    select_cols,
                                                    group_by_clause, rounding
@@ -8688,8 +8759,11 @@ Return a JSON object with:
 
             if col in [
                     'year', 'month', 'region_entity', 'sector', 'project_gb',
+                    'planning_gb', 'split_itrams_sds', 'split_of_itrams_sds',
                     'resource_type', 'onsite_offshore', 'service_area',
-                    'new_service_area', 'include_exclude'
+                    'new_service_area', 'include_exclude',
+                    'proj_bu', 'proj_section', 'proj_dept', 'proj_group',
+                    'proj_top_bu', 'proj_top_section',
             ]:
                 if op == 'ILIKE':
                     where_parts.append(f"{col} ILIKE %s")
@@ -8718,7 +8792,10 @@ Return a JSON object with:
         """Build valid group by column list."""
         valid_cols = [
             'region_entity', 'sector', 'year', 'month', 'project_gb',
-            'resource_type', 'onsite_offshore', 'service_area'
+            'planning_gb', 'resource_type', 'onsite_offshore', 'service_area',
+            'split_itrams_sds', 'split_of_itrams_sds',
+            'proj_bu', 'proj_top_bu', 'proj_section', 'proj_top_section',
+            'proj_dept', 'proj_group',
         ]
         group_cols = []
         for g in group_by:
@@ -12242,6 +12319,74 @@ Return a JSON object with:
             'calculation_type': 'budget_per_avg_capacity_entity'
         }
 
+    def _build_revenue_type_sql(
+            self,
+            where_parts: List[str],
+            params: List,
+            select_cols: str,
+            group_by_clause: str,
+            rounding: int,
+            amt_col: str = 'amount_usd') -> Dict[str, Any]:
+        """Revenue split by revenue type, derived from order_reason + gl_account.
+
+        Revenue type labels (Bosch mapping):
+          YEH / YEI / YEJ / YEK          → Reimbursement
+          YN0                              → Sale of Scrap
+          YN2                              → Asset Sales
+          Y36                              → Volume Discount
+          gl_account starts with 1394040823 AND order_reason = YN1 → InterLocation Stock
+          All else                         → Revenue
+
+        Groups by revenue_type (and any other dims already in group_by_clause).
+        Applies to _build_revenue_sql scope only (cost_category = 'Revenue Summary').
+        """
+        where_clause_with_values = self._embed_params_in_where(where_parts, params)
+
+        _type_case = (
+            "CASE"
+            " WHEN COALESCE(TRIM(order_reason), 'x') IN ('YEH','YEI','YEJ','YEK') THEN 'Reimbursement'"
+            " WHEN COALESCE(TRIM(order_reason), 'x') = 'YN0' THEN 'Sale of Scrap'"
+            " WHEN COALESCE(TRIM(order_reason), 'x') = 'YN2' THEN 'Asset Sales'"
+            " WHEN COALESCE(TRIM(order_reason), 'x') = 'Y36' THEN 'Volume Discount'"
+            " WHEN TRIM(gl_account) LIKE '1394040823%%' AND COALESCE(TRIM(order_reason),'x') = 'YN1' THEN 'InterLocation Stock'"
+            " ELSE 'Revenue'"
+            " END"
+        )
+
+        # Add revenue_type to existing group_by/select; remove trailing ORDER BY if present
+        # so we can append our own.
+        _gb_cols = [c.strip() for c in group_by_clause.split(',') if c.strip()]
+        _gb_with_type = ', '.join(_gb_cols + ['revenue_type'])
+        _sel_with_type = (f"{select_cols}, " if select_cols.strip() else "") + "revenue_type"
+
+        col_alias = 'revenue_inr' if amt_col == 'amount_inr' else 'revenue'
+
+        sql = f"""
+            SELECT
+                {_sel_with_type},
+                ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) AS {col_alias}
+            FROM (
+                SELECT
+                    *,
+                    {_type_case} AS revenue_type
+                FROM cube_fact_data
+                WHERE {where_clause_with_values}
+                  AND cost_category = 'Revenue Summary'
+            ) _typed
+            GROUP BY {_gb_with_type}
+            ORDER BY {col_alias} DESC
+        """
+        sql = sql.replace('%', '%%')
+        logger.info(
+            f"Generated Revenue Type SQL (order_reason CASE WHEN, col={amt_col})"
+        )
+        return {
+            'success': True,
+            'sql': sql,
+            'params': [],
+            'calculation_type': 'revenue_type'
+        }
+
     def _build_revenue_sql(self, where_parts: List[str], params: List,
                            select_cols: str, group_by_clause: str,
                            rounding: int,
@@ -14161,6 +14306,83 @@ Return a JSON object with:
                             if 'month' not in intent['group_by']:
                                 intent['group_by'] = ['month'] + intent['group_by']
                             break
+
+                    # ── Revenue dimension filters (Task #5) ────────────────────
+                    if 'filters' not in intent:
+                        intent['filters'] = []
+                    if 'group_by' not in intent:
+                        intent['group_by'] = ['region_entity']
+
+                    # 1. ProjectGB filter: "project GB MA"
+                    _rev_pgb = re.search(
+                        r'\bproject\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
+                        original_query, re.IGNORECASE
+                    )
+                    if _rev_pgb:
+                        _rev_pgb_val = _rev_pgb.group(1).upper()
+                        intent['filters'].append({
+                            'column': 'project_gb', 'operator': '=',
+                            'value': _rev_pgb_val
+                        })
+
+                    # 2. PlanningGB filter: "planning GB MA"
+                    _rev_plgb = re.search(
+                        r'\bplanning\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
+                        original_query, re.IGNORECASE
+                    )
+                    if _rev_plgb:
+                        _rev_plgb_val = _rev_plgb.group(1).upper()
+                        intent['filters'].append({
+                            'column': 'planning_gb', 'operator': '=',
+                            'value': _rev_plgb_val
+                        })
+
+                    # 3. Onsite/Offshore split: group_by onsite_offshore
+                    _rev_oo_triggers = [
+                        'offshore vs onsite', 'onsite vs offshore',
+                        'onsite offshore split', 'offshore onsite split',
+                        'by onsite offshore', 'onsite/offshore split',
+                    ]
+                    if any(t in _q_lower for t in _rev_oo_triggers):
+                        if 'onsite_offshore' not in intent['group_by']:
+                            intent['group_by'] = ['onsite_offshore'] + intent['group_by']
+
+                    # 4. Revenue type split: CASE WHEN on order_reason
+                    _rev_type_triggers = [
+                        'revenue type', 'by revenue type', 'split by revenue type',
+                        'split of revenue by type', 'revenue split by type',
+                        'type of revenue', 'revenue breakdown by type',
+                    ]
+                    if any(t in _q_lower for t in _rev_type_triggers):
+                        intent['revenue_type_split'] = True
+
+                    # 5. SDS split: group_by split_itrams_sds
+                    _rev_sds_triggers = [
+                        'by sds', 'sds split', 'bosch sds', 'itrams split',
+                        'split by sds', 'revenue split by sds', 'split of itrams',
+                        'by itrams', 'sds wise', 'itrams sds',
+                    ]
+                    if any(t in _q_lower for t in _rev_sds_triggers):
+                        if 'split_itrams_sds' not in intent['group_by']:
+                            intent['group_by'] = intent['group_by'] + ['split_itrams_sds']
+
+                    # 6. Org hierarchy filter: "BU AR", "section X", etc.
+                    _rev_org_patterns = [
+                        ('proj_bu',      r'\b(?:proj(?:ect)?\s+)?bu\s+([A-Z0-9_-]{1,20})\b'),
+                        ('proj_section', r'\b(?:proj(?:ect)?\s+)?section\s+([A-Z0-9_-]{1,20})\b'),
+                        ('proj_dept',    r'\b(?:proj(?:ect)?\s+)?dep(?:t|artment)\s+([A-Z0-9_-]{1,20})\b'),
+                        ('proj_group',   r'\b(?:proj(?:ect)?\s+)?group\s+([A-Z0-9_-]{1,20})\b'),
+                    ]
+                    _rev_stopwords = {'by', 'for', 'in', 'of', 'all', 'any', 'the'}
+                    for _oc, _op in _rev_org_patterns:
+                        _om = re.search(_op, original_query, re.IGNORECASE)
+                        if _om:
+                            _ov = _om.group(1).upper()
+                            if _ov.lower() not in _rev_stopwords:
+                                intent['filters'].append({
+                                    'column': _oc, 'operator': '=', 'value': _ov
+                                })
+
                     logger.info(
                         f"Revenue fast-path: currency={_currency}, bypassing LLM routing"
                     )
