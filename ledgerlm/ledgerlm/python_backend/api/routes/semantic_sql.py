@@ -83,6 +83,7 @@ class StructuredQueryResponse(BaseModel):
     currency: Optional[str] = None          # 'usd' or 'inr' — drives formatter in TypeScript
     calculation_type: Optional[str] = None  # e.g. 'resource_cost', 'ebit', 'gross_margin'
     view_type: Optional[str] = None         # e.g. 'PS View', 'MS View', 'SX View' — for LLM context
+    time_agg: Optional[str] = None          # 'MTD' | 'YTD' — from _resolve_time_aggregation()
 
 
 def _extract_time_filter(intent: Dict[str, Any]) -> Optional[TimeFilter]:
@@ -295,6 +296,7 @@ async def execute_structured_query(request: StructuredQueryRequest):
                 time_filter=_extract_time_filter(intent),
                 currency=intent.get('currency', 'usd'),
                 calculation_type=calc_type,
+                time_agg=sql_result.get('time_agg', intent.get('_time_agg', 'YTD')),
                 error=None
             )
 
@@ -326,7 +328,8 @@ async def execute_structured_query(request: StructuredQueryRequest):
             narrative=formatted.get('narrative'),
             time_filter=time_filter,
             currency=intent.get('currency', 'usd'),
-            calculation_type=calc_type
+            calculation_type=calc_type,
+            time_agg=sql_result.get('time_agg', intent.get('_time_agg', 'YTD'))
         )
         
     except Exception as e:
