@@ -14759,6 +14759,36 @@ Return a JSON object with:
                         logger.info(
                             "compile_sql P2: 'which month' → group_by=['month']")
 
+                    # ── Group D: MoM / monthly trend → add month to group_by ──
+                    # "month over month", "monthly trend", "analyze month", etc.
+                    # Need per-month rows — add month to group_by and strip any
+                    # single-month filter so all months in the year are returned.
+                    elif detect_mom_intent(_p2_raw_q) or re.search(
+                            r'\b(?:analyze|analyse)\s+month\b'
+                            r'|\beach\s+month\b'
+                            r'|\bmonth(?:ly)?\s+trend\b'
+                            r'|\btrend\s+(?:for|of|in)\b.*\brevenue\b'
+                            r'|\brevenue\b.*\btrend\b',
+                            _p2_q_lower):
+                        intent['mom_mode'] = True
+                        _gb = intent.get('group_by', ['region_entity'])
+                        if 'month' not in _gb:
+                            intent['group_by'] = ['month'] + _gb
+                        # Remove single-month point filter so full year is shown.
+                        _filters = intent.get('filters', [])
+                        _month_filters = [f for f in _filters
+                                          if f.get('column', '').lower() == 'month'
+                                          and f.get('operator') in ('=', 'eq', '==', None)]
+                        if len(_month_filters) == 1:
+                            intent['filters'] = [f for f in _filters
+                                                  if f not in _month_filters]
+                            logger.info(
+                                "compile_sql P2: MoM/trend — removed single-month filter "
+                                f"(month={_month_filters[0].get('value')}) to return full-year series")
+                        logger.info(
+                            f"compile_sql P2: MoM/trend detected → group_by={intent['group_by']}, "
+                            f"mom_mode=True")
+
                     # ── Group E: Spike detection (early return) ───────────────
                     # Only fires when "Trends Highlights" is present per spec.
                     if any(t in _p2_q_lower for t in [
