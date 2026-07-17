@@ -166,7 +166,10 @@ export class EvidenceBroker {
         const citationId = `[CMP${idx + 1}]`;
         const label = sql.comparisonLabel || "Comparison Period";
 
-        const timeNote = " (YTD - Year-To-Date cumulative values)";
+        const timeAgg = sql.timeAgg ?? 'YTD';
+        const timeNote = timeAgg === 'MTD'
+          ? " (MTD - single month value, not cumulative)"
+          : " (YTD - Year-To-Date cumulative values)";
 
         citations.push(
           `${citationId} ${sql.cubeName} - ${label}${timeNote} (${sql.rowCount} records)`,

@@ -710,6 +710,7 @@ export class QueryOrchestrator {
             timeFilterApplied: compResult.time_filter?.description,
             isComparisonData: true,
             comparisonLabel: `Comparison Data (${compResult.label})`,
+            timeAgg: compResult.time_agg || primaryResult.time_agg || 'YTD',
           });
         }
       }
