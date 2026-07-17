@@ -7350,6 +7350,39 @@ Return a JSON object with:
 
         return intent
 
+    def _resolve_time_aggregation(self, query: str) -> str:
+        """
+        Single source of truth for MTD vs YTD intent resolution.
+
+        Called ONCE at the top of compile_sql and stored in intent['_time_agg'].
+        All revenue builders read from that flag — they never re-detect from the
+        query text themselves.
+
+        Rules (first match wins):
+          MTD keywords → 'MTD'  (single-month, cost_category = 'Revenue')
+          YTD keywords → 'YTD'  (cumulative,   cost_category = 'Revenue Summary')
+          No keyword   → 'YTD'  (default — preserves all existing behaviour)
+
+        P&L / EBIT / composite builders are ALWAYS YTD by financial definition
+        and do NOT read this flag.  Only standalone revenue builders use it:
+          • _build_revenue_sql
+          • _build_customer_revenue_sql
+        """
+        q = query.lower()
+        MTD_TERMS = [
+            'mtd', 'month to date', 'month-to-date',
+            'single month', 'monthly value',
+        ]
+        YTD_TERMS = [
+            'ytd', 'year to date', 'year-to-date',
+            'cumulative', 'full year',
+        ]
+        if any(t in q for t in MTD_TERMS):
+            return 'MTD'
+        if any(t in q for t in YTD_TERMS):
+            return 'YTD'
+        return 'YTD'  # safe default — no regression on existing queries
+
     def _fix_cost_category_and_metrics(self, intent: Dict[str, Any],
                                        query: str) -> Dict[str, Any]:
         """
@@ -8187,9 +8220,11 @@ Return a JSON object with:
                         rounding or 2, amt_col,
                         top_n=intent.get('_customer_top_n', 10),
                         order_dir=intent.get('_customer_order_dir', 'DESC'),
-                        include_entity=intent.get('_customer_include_entity', False))
+                        include_entity=intent.get('_customer_include_entity', False),
+                        time_agg=intent.get('_time_agg', 'YTD'))
                 elif catalog_key == 'revenue':
                     # Revenue type split (Bosch P1): CASE WHEN on order_reason
+                    # TODO: _build_revenue_type_sql always uses Revenue Summary; add MTD support if needed.
                     if intent.get('revenue_type_split'):
                         return self._build_revenue_type_sql(
                             where_parts, params, select_cols,
@@ -8198,7 +8233,8 @@ Return a JSON object with:
                                                    select_cols,
                                                    group_by_clause, rounding
                                                    or 0, amt_col,
-                                                   quarter_ytd_latest=intent.get('_quarter_ytd_latest', False))
+                                                   quarter_ytd_latest=intent.get('_quarter_ytd_latest', False),
+                                                   time_agg=intent.get('_time_agg', 'YTD'))
                 elif catalog_key == 'gb_pl_revenue':
                     return self._build_gb_pl_revenue_sql(
                         where_parts, params, select_cols, group_by_clause,
@@ -8540,14 +8576,16 @@ Return a JSON object with:
                     rounding or 2, amt_col,
                     top_n=intent.get('_customer_top_n', 10),
                     order_dir=intent.get('_customer_order_dir', 'DESC'),
-                    include_entity=intent.get('_customer_include_entity', False))
+                    include_entity=intent.get('_customer_include_entity', False),
+                    time_agg=intent.get('_time_agg', 'YTD'))
 
-            # Revenue (MTD or Summary) - simple SUM of Revenue Summary by entity
+            # Revenue (MTD or Summary) — cost_category driven by intent['_time_agg']
             elif 'revenue' in calc_name_lower:
                 return self._build_revenue_sql(where_parts, params,
                                                select_cols, group_by_clause,
                                                rounding or 0, amt_col,
-                                               quarter_ytd_latest=intent.get('_quarter_ytd_latest', False))
+                                               quarter_ytd_latest=intent.get('_quarter_ytd_latest', False),
+                                               time_agg=intent.get('_time_agg', 'YTD'))
 
             # Cost breakdown metrics
             elif 'travel cost' in calc_name_lower or 'travel expense' in calc_name_lower:
@@ -12391,11 +12429,22 @@ Return a JSON object with:
                            select_cols: str, group_by_clause: str,
                            rounding: int,
                            amt_col: str = 'amount_usd',
-                           quarter_ytd_latest: bool = False) -> Dict[str, Any]:
+                           quarter_ytd_latest: bool = False,
+                           time_agg: str = 'YTD') -> Dict[str, Any]:
         """
-        Revenue (MTD or Summary) - simple SUM of Revenue Summary by entity
-        Formula: SUM(amount_usd or amount_inr) WHERE cost_category = 'Revenue Summary'
-        Supports INR via amt_col='amount_inr'.
+        Revenue query builder — supports both MTD and YTD modes.
+
+        time_agg='YTD'  → cost_category = 'Revenue Summary'  (cumulative YTD values)
+        time_agg='MTD'  → cost_category = 'Revenue'          (single-month values)
+
+        The time_agg value is resolved ONCE per request in compile_sql via
+        _resolve_time_aggregation() and stored in intent['_time_agg'].
+        Never re-detect MTD/YTD inside this builder — always read from time_agg.
+
+        NOTE: P&L / EBIT / composite builders (_build_gb_pl_revenue_sql,
+        _build_entity_pl_revenue_sql, _build_gb_pl_summary_sql, etc.) always use
+        'Revenue Summary' and do NOT call this function — they are always YTD by
+        financial definition regardless of user intent.
 
         quarter_ytd_latest=True: data is YTD cumulative per month row.
           For quarter cross-year queries (e.g. "Q1 2025 vs Q1 2026"), summing all
@@ -12407,6 +12456,9 @@ Return a JSON object with:
             where_parts, params)
 
         col_alias = 'revenue_inr' if amt_col == 'amount_inr' else 'revenue'
+        # Single source of truth: MTD → 'Revenue' (individual month),
+        # YTD → 'Revenue Summary' (cumulative). Default is YTD.
+        cost_cat = 'Revenue' if time_agg == 'MTD' else 'Revenue Summary'
 
         if quarter_ytd_latest:
             # Strip 'month' from group_by to get the entity key for DISTINCT ON.
@@ -12419,13 +12471,13 @@ Return a JSON object with:
                 ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) as {col_alias}
             FROM cube_fact_data
             WHERE {where_clause_with_values}
-              AND cost_category = 'Revenue Summary'
+              AND cost_category = '{cost_cat}'
             GROUP BY {group_by_clause}
             ORDER BY {_entity_key}, month DESC
         """
             logger.info(
                 f"Generated Quarter YTD Revenue SQL (DISTINCT ON latest month per entity+year, "
-                f"column={amt_col}, alias={col_alias})")
+                f"time_agg={time_agg}, cost_category={cost_cat}, column={amt_col}, alias={col_alias})")
         else:
             sql = f"""
             SELECT 
@@ -12433,17 +12485,20 @@ Return a JSON object with:
                 ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) as {col_alias}
             FROM cube_fact_data
             WHERE {where_clause_with_values}
-              AND cost_category = 'Revenue Summary'
+              AND cost_category = '{cost_cat}'
             GROUP BY {group_by_clause}
             ORDER BY {col_alias} DESC
         """
-            logger.info(f"Generated Revenue SQL (column={amt_col}, alias={col_alias}, divided by 1M)")
+            logger.info(
+                f"Generated Revenue SQL (time_agg={time_agg}, cost_category={cost_cat}, "
+                f"column={amt_col}, alias={col_alias}, divided by 1M)")
         sql = sql.replace('%', '%%')
         return {
             'success': True,
             'sql': sql,
             'params': [],
-            'calculation_type': 'revenue'
+            'calculation_type': 'revenue',
+            'time_agg': time_agg,   # propagated → queryOrchestrator → evidenceBroker
         }
 
     def _build_customer_revenue_sql(
@@ -12457,14 +12512,15 @@ Return a JSON object with:
             top_n: int = 10,
             order_dir: str = 'DESC',  # DESC = top, ASC = least/bottom
             include_entity: bool = False,
+            time_agg: str = 'YTD',
     ) -> Dict[str, Any]:
         """Customer-wise Revenue — Top/Least N customers by BillToPartyLegalEntityFullName.
 
-        Formula: SUM(amount_usd or amount_inr) / 1_000_000
-        WHERE cost_category = 'Revenue Summary'
-        GROUP BY bill_to_party_legal_entity_full_name [, region_entity]
-        ORDER BY revenue DESC|ASC
-        LIMIT top_n
+        time_agg='YTD'  → cost_category = 'Revenue Summary'  (cumulative YTD)
+        time_agg='MTD'  → cost_category = 'Revenue'          (single-month)
+
+        Resolved once in compile_sql via _resolve_time_aggregation(); passed here
+        as intent['_time_agg'] by compile_calculation_sql.
 
         split_itrams_sds filter (Bosch-Internal / SDS-External / Mobility-External)
         is injected by the fast-path into where_parts before this builder is called.
@@ -12472,6 +12528,7 @@ Return a JSON object with:
         """
         where_clause = self._embed_params_in_where(where_parts, params)
         col_alias = 'revenue_inr' if amt_col == 'amount_inr' else 'revenue'
+        cost_cat = 'Revenue' if time_agg == 'MTD' else 'Revenue Summary'
 
         # Build SELECT and GROUP BY manually — _build_group_by_columns does not
         # know bill_to_party_legal_entity_full_name.
@@ -12494,7 +12551,7 @@ Return a JSON object with:
                     ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) AS {col_alias}
                 FROM cube_fact_data
                 WHERE {where_clause}
-                  AND cost_category = 'Revenue Summary'
+                  AND cost_category = '{cost_cat}'
                   AND bill_to_party_legal_entity_full_name IS NOT NULL
                   AND TRIM(bill_to_party_legal_entity_full_name) != ''
                 GROUP BY {_group_str}
@@ -12506,6 +12563,7 @@ Return a JSON object with:
         sql = sql.replace('%', '%%')
         logger.info(
             f"Generated Customer Revenue SQL ("
+            f"time_agg={time_agg}, cost_category={cost_cat}, "
             f"top_n={top_n}, order={order_dir}, col={amt_col}, "
             f"include_entity={include_entity})"
         )
@@ -12513,7 +12571,8 @@ Return a JSON object with:
             'success': True,
             'sql': sql,
             'params': [],
-            'calculation_type': 'customer_revenue'
+            'calculation_type': 'customer_revenue',
+            'time_agg': time_agg,   # propagated → queryOrchestrator → evidenceBroker
         }
 
     # ==================== P&L REVENUE BUILDERS (YTD + exclusions) ====================
@@ -14634,6 +14693,19 @@ Return a JSON object with:
                         logger.info(
                             f"Currency propagation: detected INR from query, setting intent['currency']='inr'"
                         )
+
+            # ================================================================
+            # MTD / YTD RESOLUTION  — set ONCE, before every fast-path.
+            # All standalone revenue builders read intent['_time_agg'].
+            # P&L / EBIT / composite builders ignore this flag (always YTD).
+            # ================================================================
+            if not is_nemko and '_time_agg' not in intent:
+                _orig_q_ta = intent.get('original_query', '')
+                if _orig_q_ta:
+                    intent['_time_agg'] = self._resolve_time_aggregation(_orig_q_ta)
+                    logger.info(
+                        f"Time aggregation resolved: intent['_time_agg']='{intent['_time_agg']}'"
+                    )
 
             # ================================================================
             # BOSCH P2 ANALYTICS PRE-PROCESSING

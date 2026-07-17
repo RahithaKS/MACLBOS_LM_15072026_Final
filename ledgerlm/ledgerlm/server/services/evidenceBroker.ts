@@ -131,8 +131,11 @@ export class EvidenceBroker {
         const citationId = `[SQL${idx + 1}]`;
 
         const isMultiMonth = this.isMultiMonthResult(sql);
+        const timeAgg = sql.timeAgg ?? 'YTD';
         const timeNote =
-          isMultiMonth
+          timeAgg === 'MTD'
+            ? " (MTD - single month value, not cumulative)"
+            : isMultiMonth
             ? " (YTD per month — each month shows the cumulative total through that month)"
             : " (YTD - Year-To-Date cumulative values)";
 

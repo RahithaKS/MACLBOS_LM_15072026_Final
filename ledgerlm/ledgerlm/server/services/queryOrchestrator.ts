@@ -57,6 +57,7 @@ export interface SemanticSQLEvidence {
   currency?: string;          // 'usd' or 'inr' — from Python detect_currency()
   calculationType?: string;   // e.g. 'resource_cost', 'ebit', 'gross_margin'
   viewType?: string;          // e.g. 'PS View', 'MS View', 'SX View' — for LLM context
+  timeAgg?: string;           // 'MTD' | 'YTD' — resolved by _resolve_time_aggregation() in Python
 }
 
 export type Evidence = DocumentEvidence | WebEvidence | DatabaseEvidence | SemanticSQLEvidence;
@@ -678,6 +679,7 @@ export class QueryOrchestrator {
         currency: primaryResult.currency || 'usd',
         calculationType: primaryResult.calculation_type || undefined,
         viewType: detectedViewType,
+        timeAgg: primaryResult.time_agg || 'YTD',
       }];
 
       // Push one evidence object per comparison period (each has correct month/year metadata).
