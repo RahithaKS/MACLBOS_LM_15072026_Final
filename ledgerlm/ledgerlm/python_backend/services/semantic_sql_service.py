@@ -16753,44 +16753,47 @@ GROUP BY dept
 ORDER BY dept""",
 
             # Cost — by category (CoE / Project / DNA …)
+            # Inner subquery takes MAX(yearly_approved) per project to avoid
+            # summing the same annual budget once per month row (overcounting).
             'by_category': """SELECT category,
-  ROUND(SUM(CASE WHEN yearly_approved_tusd = 0
-                 THEN monthly_approved_tusd
-                 ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
-  ROUND(SUM(actual_tusd)::numeric, 1) AS actual_tusd,
-  ROUND((SUM(CASE WHEN yearly_approved_tusd = 0
-                  THEN monthly_approved_tusd
-                  ELSE yearly_approved_tusd END) - SUM(actual_tusd))::numeric, 1) AS balance_tusd
-FROM cube_investment_data
-WHERE cube_id = %(cube_id)s AND type = 'Cost'
-  {year_clause} {extra_filters}
+  ROUND(SUM(yr_budget)::numeric,    1) AS approved_tusd,
+  ROUND(SUM(actual_sum)::numeric,   1) AS actual_tusd,
+  ROUND((SUM(yr_budget) - SUM(actual_sum))::numeric, 1) AS balance_tusd
+FROM (
+  SELECT category, proj_display_id,
+    MAX(yearly_approved_tusd) AS yr_budget,
+    SUM(actual_tusd)          AS actual_sum
+  FROM cube_investment_data
+  WHERE cube_id = %(cube_id)s AND type = 'Cost'
+    {year_clause} {extra_filters}
+  GROUP BY category, proj_display_id
+) sub
 GROUP BY category
 ORDER BY category""",
 
             # Cost — by dept
             'by_dept': """SELECT dept,
-  ROUND(SUM(CASE WHEN yearly_approved_tusd = 0
-                 THEN monthly_approved_tusd
-                 ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
-  ROUND(SUM(actual_tusd)::numeric, 1) AS actual_tusd,
-  ROUND((SUM(CASE WHEN yearly_approved_tusd = 0
-                  THEN monthly_approved_tusd
-                  ELSE yearly_approved_tusd END) - SUM(actual_tusd))::numeric, 1) AS balance_tusd
-FROM cube_investment_data
-WHERE cube_id = %(cube_id)s AND type = 'Cost'
-  {year_clause} {extra_filters}
+  ROUND(SUM(yr_budget)::numeric,    1) AS approved_tusd,
+  ROUND(SUM(actual_sum)::numeric,   1) AS actual_tusd,
+  ROUND((SUM(yr_budget) - SUM(actual_sum))::numeric, 1) AS balance_tusd
+FROM (
+  SELECT dept, proj_display_id,
+    MAX(yearly_approved_tusd) AS yr_budget,
+    SUM(actual_tusd)          AS actual_sum
+  FROM cube_investment_data
+  WHERE cube_id = %(cube_id)s AND type = 'Cost'
+    {year_clause} {extra_filters}
+  GROUP BY dept, proj_display_id
+) sub
 GROUP BY dept
 ORDER BY dept""",
 
-            # Cost — by project
+            # Cost — by project (GROUP BY proj_display_id already unique;
+            # MAX(yearly_approved) gives the single annual budget for that project)
             'by_project': """SELECT dept, project_name, proj_display_id, category,
-  ROUND(SUM(CASE WHEN yearly_approved_tusd = 0
-                 THEN monthly_approved_tusd
-                 ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
-  ROUND(SUM(actual_tusd)::numeric, 1) AS actual_tusd,
-  ROUND((SUM(CASE WHEN yearly_approved_tusd = 0
-                  THEN monthly_approved_tusd
-                  ELSE yearly_approved_tusd END) - SUM(actual_tusd))::numeric, 1) AS balance_tusd
+  ROUND(MAX(yearly_approved_tusd)::numeric, 1) AS approved_tusd,
+  ROUND(SUM(actual_tusd)::numeric,          1) AS actual_tusd,
+  ROUND((MAX(yearly_approved_tusd) - SUM(actual_tusd))::numeric, 1) AS balance_tusd
 FROM cube_investment_data
 WHERE cube_id = %(cube_id)s AND type = 'Cost'
   AND proj_display_id IS NOT NULL AND proj_display_id != ''
@@ -16798,18 +16801,20 @@ WHERE cube_id = %(cube_id)s AND type = 'Cost'
 GROUP BY dept, project_name, proj_display_id, category
 ORDER BY dept, project_name""",
 
-            # Default — grand-total summary (3 numbers)
+            # Default — grand-total summary across all Cost projects
             'total_summary': """SELECT
-  ROUND(SUM(CASE WHEN yearly_approved_tusd = 0
-                 THEN monthly_approved_tusd
-                 ELSE yearly_approved_tusd END)::numeric, 1) AS total_approved_tusd,
-  ROUND(SUM(actual_tusd)::numeric, 1) AS total_actual_tusd,
-  ROUND((SUM(CASE WHEN yearly_approved_tusd = 0
-                  THEN monthly_approved_tusd
-                  ELSE yearly_approved_tusd END) - SUM(actual_tusd))::numeric, 1) AS balance_tusd
-FROM cube_investment_data
-WHERE cube_id = %(cube_id)s AND type = 'Cost'
-  {year_clause} {extra_filters}""",
+  ROUND(SUM(yr_budget)::numeric,    1) AS total_approved_tusd,
+  ROUND(SUM(actual_sum)::numeric,   1) AS total_actual_tusd,
+  ROUND((SUM(yr_budget) - SUM(actual_sum))::numeric, 1) AS balance_tusd
+FROM (
+  SELECT proj_display_id,
+    MAX(yearly_approved_tusd) AS yr_budget,
+    SUM(actual_tusd)          AS actual_sum
+  FROM cube_investment_data
+  WHERE cube_id = %(cube_id)s AND type = 'Cost'
+    {year_clause} {extra_filters}
+  GROUP BY proj_display_id
+) sub""",
         }
 
         # ── Assemble WHERE extras ───────────────────────────────────────
@@ -16863,12 +16868,13 @@ WHERE cube_id = %(cube_id)s AND type = 'Cost'
             'type':               'Type',
             'approved_pmo':       'Approved PMO (tUSD)',
             'actual_pmo':         'Actual PMO (tUSD)',
-            'balance_pmo':        'Balance PMO (tUSD)',
+            'balance_pmo':        'Balance (tUSD)',     # per spec: balance_pmo → Balance (tUSD)
             'approved_tusd':      'Approved (tUSD)',
             'actual_tusd':        'Actual (tUSD)',
             'balance_tusd':       'Balance (tUSD)',
             'approved_minr':      'Approved (mINR)',
             'actual_minr':        'Actual (mINR)',
+            'balance_minr':       'Balance (mINR)',
             'utilized_tusd':      'Utilized (tUSD)',
             'total_approved_tusd':'Total Approved (tUSD)',
             'total_actual_tusd':  'Total Actual (tUSD)',
