@@ -683,6 +683,7 @@ class IntentResponse(BaseModel):
     structured_query: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     view_type: Optional[str] = None  # e.g. 'PS View', 'MS View', 'SX View'
+    schema_type: Optional[str] = None  # 'kpi' | 'investment_capex_pmo'
 
 
 def is_nemko_domain(domain: str) -> bool:
@@ -709,7 +710,7 @@ async def get_query_intent(request: IntentRequest):
         # Check for fact data in both possible tables
         is_nemko = is_nemko_domain(request.domain)
         
-        # First check cube_fact_data (standard structure)
+        # First check cube_fact_data (standard KPI structure)
         cursor.execute("SELECT COUNT(*) as count FROM cube_fact_data WHERE cube_id = %s", (request.cube_id,))
         row_count = cursor.fetchone()['count']
         
@@ -718,14 +719,37 @@ async def get_query_intent(request: IntentRequest):
             cursor.execute("SELECT COUNT(*) as count FROM nemko_pl_fact_data WHERE cube_id = %s OR cube_id IS NULL", (request.cube_id,))
             nemko_count = cursor.fetchone()['count']
             row_count = nemko_count
+
+        # Check investment/CAPEX/PMO table if KPI table is empty
+        is_investment = False
+        if row_count == 0:
+            cursor.execute("SELECT COUNT(*) as count FROM cube_investment_data WHERE cube_id = %s", (request.cube_id,))
+            inv_count = cursor.fetchone()['count']
+            if inv_count > 0:
+                row_count = inv_count
+                is_investment = True
+                logger.info(f"Intent check: cube {request.cube_id} has {inv_count} investment rows — routing to investment query path")
         
         cursor.close()
         conn.close()
         
-        logger.info(f"Intent check: domain={request.domain}, is_nemko={is_nemko}, cube_id={request.cube_id}, row_count={row_count}")
+        logger.info(f"Intent check: domain={request.domain}, is_nemko={is_nemko}, cube_id={request.cube_id}, row_count={row_count}, is_investment={is_investment}")
         
         if row_count == 0:
             raise HTTPException(status_code=404, detail=f"No fact data found for cube {request.cube_id}")
+
+        # For investment cubes: return a lightweight intent that tells the orchestrator to
+        # use the dedicated investment-query endpoint instead of the KPI SQL pipeline.
+        if is_investment:
+            return IntentResponse(
+                success=True,
+                schema_type='investment_capex_pmo',
+                structured_query={
+                    'schema_type': 'investment_capex_pmo',
+                    'original_query': request.query,
+                    '_skip_kpi_sql': True,
+                },
+            )
         
         # If caller provides pre-parsed context, skip LLM intent parsing entirely
         if request.query_context:
@@ -768,6 +792,61 @@ async def get_query_intent(request: IntentRequest):
             success=False,
             error=str(e)
         )
+
+
+class InvestmentQueryRequest(BaseModel):
+    query: str
+    cube_id: str
+    domain: Optional[str] = None
+
+
+class InvestmentQueryResponse(BaseModel):
+    success: bool
+    results: Optional[List[Dict[str, Any]]] = None
+    row_count: Optional[int] = None
+    sql_query: Optional[str] = None
+    columns: Optional[List[str]] = None
+    narrative: Optional[str] = None
+    schema_type: str = 'investment_capex_pmo'
+    error: Optional[str] = None
+
+
+@router.post("/semantic-sql/investment-query", response_model=InvestmentQueryResponse)
+async def execute_investment_query_endpoint(request: InvestmentQueryRequest):
+    """
+    Execute a natural language query against cube_investment_data.
+    Called by the Node.js orchestrator when intent check detects schema_type='investment_capex_pmo'.
+    """
+    try:
+        # Content safety check
+        allowed, reason = await screen_prompt(request.query)
+        if not allowed:
+            return InvestmentQueryResponse(success=False, error=f"Query blocked: {reason}")
+
+        result = semantic_sql_service.execute_investment_query(request.query, request.cube_id)
+
+        if not result.get('success'):
+            return InvestmentQueryResponse(
+                success=False,
+                error=result.get('error', 'Investment query failed')
+            )
+
+        results = result.get('results', [])
+        row_count = len(results)
+        narrative = result.get('narrative', f"Found {row_count} records from Investment/CAPEX/PMO data.")
+
+        return InvestmentQueryResponse(
+            success=True,
+            results=results,
+            row_count=row_count,
+            sql_query=result.get('sql'),
+            columns=list(results[0].keys()) if results else [],
+            narrative=narrative,
+            schema_type='investment_capex_pmo',
+        )
+    except Exception as e:
+        logger.error(f"Investment query error: {e}")
+        return InvestmentQueryResponse(success=False, error=str(e))
 
 
 @router.post("/semantic-sql/ingest", response_model=IngestionResponse)

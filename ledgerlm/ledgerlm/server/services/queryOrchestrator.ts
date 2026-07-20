@@ -623,6 +623,12 @@ export class QueryOrchestrator {
         return { source: `semantic_sql_${cubeId}`, success: true, evidence: [] };
       }
 
+      // ── Investment/CAPEX/PMO: dedicated query path ────────────────────────────
+      if (intentData.schema_type === 'investment_capex_pmo') {
+        console.log(`📊 Investment cube detected — routing to /semantic-sql/investment-query for ${cubeName}`);
+        return await this.executeInvestmentQuery(PYTHON_BACKEND_URL, cubeId, cubeName, query, domain);
+      }
+
       const structuredQuery = intentData.structured_query;
       const queryNote: string | undefined = structuredQuery.query_note;
       const detectedViewType: string | undefined = intentData.view_type || undefined;
@@ -729,6 +735,58 @@ export class QueryOrchestrator {
         evidence: [],
         error: error.message,
       };
+    }
+  }
+
+  private async executeInvestmentQuery(
+    backendUrl: string,
+    cubeId: string,
+    cubeName: string,
+    query: string,
+    domain: string
+  ): Promise<SourceQueryResult> {
+    try {
+      const response = await fetch(`${backendUrl}/api/v2/semantic-sql/investment-query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, cube_id: cubeId, domain }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => 'no body');
+        console.error(`⚠️ Investment query failed (${response.status}): ${errorBody.substring(0, 500)}`);
+        return { source: `semantic_sql_${cubeId}`, success: true, evidence: [] };
+      }
+
+      const data = await response.json();
+
+      if (!data.success || !data.results || data.results.length === 0) {
+        console.log(`ℹ️ Investment query returned no results for ${cubeName}`);
+        return { source: `semantic_sql_${cubeId}`, success: true, evidence: [] };
+      }
+
+      console.log(`✅ Investment query returned ${data.row_count} rows from ${cubeName}`);
+
+      const evidence: SemanticSQLEvidence[] = [{
+        source: 'semantic_sql' as const,
+        sourceId: `semantic_sql_${cubeId}`,
+        cubeName,
+        cubeId,
+        naturalLanguageQuery: query,
+        sqlQuery: data.sql_query || '',
+        results: data.results,
+        columns: data.columns || [],
+        rowCount: data.row_count || 0,
+        relevanceScore: 0.95,
+        currency: 'usd',
+        calculationType: 'investment_capex_pmo',
+        timeAgg: 'YTD',
+      }];
+
+      return { source: `semantic_sql_${cubeId}`, success: true, evidence };
+    } catch (error: any) {
+      console.error(`Investment query error for cube ${cubeName}:`, error);
+      return { source: `semantic_sql_${cubeId}`, success: false, evidence: [], error: error.message };
     }
   }
 

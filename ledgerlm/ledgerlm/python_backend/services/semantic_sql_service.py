@@ -16510,6 +16510,165 @@ Return a JSON object with:
 
     # ==================== END INVESTMENT INGESTION ====================
 
+    # =====================================================================
+    # INVESTMENT / CAPEX / PMO NATURAL LANGUAGE QUERY EXECUTION
+    # =====================================================================
+
+    def execute_investment_query(self, query: str, cube_id: str) -> dict:
+        """
+        Execute a natural language query against cube_investment_data.
+        Uses keyword matching to detect metric intent, extracts fiscal year from query,
+        then runs parameterised SQL and returns results.
+        """
+        import re
+        from psycopg2.extras import RealDictCursor
+
+        logger.info(f"[INV-QUERY] query='{query}' cube_id={cube_id}")
+        q = query.lower()
+
+        # ── Year detection ──────────────────────────────────────────────
+        year_match = re.search(r'\b(20\d\d)\b', q)
+        fiscal_year = year_match.group(1) if year_match else None
+
+        # ── Pattern catalogue ───────────────────────────────────────────
+        # Each entry: (trigger keywords — ALL must match, sql_template, narrative_key)
+        # sql_template uses %(cube_id)s and %(fiscal_year)s for psycopg2 named params
+        patterns = [
+            # CAPEX
+            (
+                ['capex'],
+                """SELECT dept,
+  ROUND(MAX(yearly_approved_tusd)::numeric, 2)  AS approved_tusd,
+  ROUND(MAX(yearly_approved_minr)::numeric, 2)  AS approved_minr,
+  ROUND(SUM(actual_tusd)::numeric, 2)           AS actual_tusd,
+  ROUND(SUM(actual_minr)::numeric, 2)           AS actual_minr,
+  ROUND((MAX(yearly_approved_tusd)-SUM(actual_tusd))::numeric, 2) AS balance_tusd
+FROM cube_investment_data
+WHERE cube_id = %(cube_id)s AND type = 'CAPEX'
+  {year_clause}
+GROUP BY dept ORDER BY dept""",
+                'capex_by_dept',
+            ),
+            # PMO
+            (
+                ['pmo'],
+                """SELECT fiscal_year, month, dept, proj_display_id, project_name, category,
+  ROUND(MAX(yearly_approved_tusd)::numeric, 2) AS approved_pmo,
+  ROUND(SUM(actual_tusd)::numeric, 2)          AS actual_pmo,
+  ROUND((MAX(yearly_approved_tusd)-SUM(actual_tusd))::numeric, 2) AS balance_pmo
+FROM cube_investment_data
+WHERE cube_id = %(cube_id)s AND type = 'PMO'
+  {year_clause}
+GROUP BY fiscal_year, month, dept, proj_display_id, project_name, category
+ORDER BY month, dept, project_name""",
+                'pmo_monthly',
+            ),
+            # By category (CoE / Project)
+            (
+                ['category'],
+                """SELECT category,
+  ROUND(SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
+  ROUND(SUM(actual_tusd)::numeric, 1)   AS utilized_tusd,
+  ROUND((SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)-SUM(actual_tusd))::numeric, 1) AS balance_tusd
+FROM cube_investment_data
+WHERE cube_id = %(cube_id)s AND type = 'Cost'
+  {year_clause}
+GROUP BY category ORDER BY category""",
+                'by_category',
+            ),
+            # By department
+            (
+                ['dept', 'department'],
+                """SELECT dept,
+  ROUND(SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
+  ROUND(SUM(actual_tusd)::numeric, 1)   AS utilized_tusd,
+  ROUND((SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)-SUM(actual_tusd))::numeric, 1) AS balance_tusd
+FROM cube_investment_data
+WHERE cube_id = %(cube_id)s AND type = 'Cost'
+  {year_clause}
+GROUP BY dept ORDER BY dept""",
+                'by_dept',
+            ),
+            # By project
+            (
+                ['project'],
+                """SELECT dept, project_name, proj_display_id, category,
+  ROUND(SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
+  ROUND(SUM(actual_tusd)::numeric, 1)   AS utilized_tusd,
+  ROUND((SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)-SUM(actual_tusd))::numeric, 1) AS balance_tusd
+FROM cube_investment_data
+WHERE cube_id = %(cube_id)s AND type = 'Cost'
+  AND proj_display_id IS NOT NULL AND proj_display_id != ''
+  {year_clause}
+GROUP BY dept, project_name, proj_display_id, category
+ORDER BY dept, project_name""",
+                'by_project',
+            ),
+            # Default: total approved + utilized + balance summary
+            (
+                [],  # matches anything (default)
+                """SELECT
+  ROUND(SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)::numeric, 1) AS total_approved_tusd,
+  ROUND(SUM(actual_tusd)::numeric, 1)   AS total_utilized_tusd,
+  ROUND((SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)-SUM(actual_tusd))::numeric, 1) AS balance_tusd
+FROM cube_investment_data
+WHERE cube_id = %(cube_id)s AND type = 'Cost'
+  {year_clause}""",
+                'total_summary',
+            ),
+        ]
+
+        # ── Select matching pattern ─────────────────────────────────────
+        selected_sql_template = None
+        narrative_key = 'total_summary'
+        for triggers, sql_tmpl, nkey in patterns:
+            if not triggers or any(t in q for t in triggers):
+                selected_sql_template = sql_tmpl
+                narrative_key = nkey
+                break
+
+        # ── Build year clause ───────────────────────────────────────────
+        year_clause = "AND fiscal_year = %(fiscal_year)s" if fiscal_year else ""
+        sql = selected_sql_template.replace('{year_clause}', year_clause)
+
+        params = {'cube_id': cube_id}
+        if fiscal_year:
+            params['fiscal_year'] = fiscal_year
+
+        logger.info(f"[INV-QUERY] pattern={narrative_key}, year={fiscal_year}, sql={sql[:120]}...")
+
+        try:
+            conn = self.get_db_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(sql, params)
+            rows = [dict(r) for r in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+        except Exception as db_err:
+            logger.error(f"[INV-QUERY] DB error: {db_err}")
+            return {'success': False, 'error': str(db_err)}
+
+        # ── Build narrative ─────────────────────────────────────────────
+        narratives = {
+            'capex_by_dept':  f"CAPEX approved vs actual by department{' for ' + fiscal_year if fiscal_year else ''}. Values in thousands USD (tUSD) and millions INR (mINR).",
+            'pmo_monthly':    f"PMO approved vs actual by project month-wise{' for ' + fiscal_year if fiscal_year else ''}. Values in thousands USD.",
+            'by_category':    f"Investment split by category (CoE vs Project){' for ' + fiscal_year if fiscal_year else ''}. Values in thousands USD.",
+            'by_dept':        f"Investment approved vs utilized by department{' for ' + fiscal_year if fiscal_year else ''}. Values in thousands USD.",
+            'by_project':     f"Investment approved vs utilized by project{' for ' + fiscal_year if fiscal_year else ''}. Values in thousands USD.",
+            'total_summary':  f"Total approved: {rows[0].get('total_approved_tusd', 'N/A')} tUSD | Total utilized: {rows[0].get('total_utilized_tusd', 'N/A')} tUSD | Balance: {rows[0].get('balance_tusd', 'N/A')} tUSD{' (FY ' + fiscal_year + ')' if fiscal_year else ''}." if rows else "No investment data found for the requested period.",
+        }
+        narrative = narratives.get(narrative_key, f"Investment/CAPEX/PMO data: {len(rows)} records.")
+
+        logger.info(f"[INV-QUERY] returned {len(rows)} rows, narrative_key={narrative_key}")
+        return {
+            'success': True,
+            'results': rows,
+            'sql': sql,
+            'narrative': narrative,
+        }
+
+    # ==================== END INVESTMENT QUERY ====================
+
 
 # Singleton instance
 semantic_sql_service = SemanticSQLService()
