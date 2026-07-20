@@ -16570,12 +16570,23 @@ Return a JSON object with:
             cur0.close()
             conn0.close()
 
-            # Category filter — match exact value (case-insensitive)
+            # Category filter — prefer token immediately after the word "category" in the
+            # query to avoid false matches when a dept code happens to be a category name.
             cats = sorted({r['category'] for r in dim_rows if r.get('category')}, key=len, reverse=True)
-            for cat in cats:
-                if cat and cat.lower() in q:
-                    filters['category'] = cat
-                    break
+            cat_kw_match = re.search(r'\bcategor\w*\s+(\w[\w\-/]*)', q)
+            if cat_kw_match:
+                cat_hint = cat_kw_match.group(1).lower()
+                for cat in cats:
+                    if cat and (cat.lower() == cat_hint or cat_hint in cat.lower() or cat.lower() in cat_hint):
+                        filters['category'] = cat
+                        break
+            else:
+                # No "category" keyword — only match if value is not also a dept code
+                dept_set = {r['dept'].lower() for r in dim_rows if r.get('dept')}
+                for cat in cats:
+                    if cat and cat.lower() in q and cat.lower() not in dept_set:
+                        filters['category'] = cat
+                        break
 
             # Dept filter — longest-match first to avoid partial hits
             depts = sorted({r['dept'] for r in dim_rows if r.get('dept')}, key=len, reverse=True)
@@ -16748,7 +16759,8 @@ WHERE cube_id = %(cube_id)s AND type = 'Cost'
 
         extra_parts: list = []
         if month_num:
-            extra_parts.append("AND month = %(month_num)s")
+            # month column is character varying — cast DB side to integer for comparison
+            extra_parts.append("AND month::integer = %(month_num)s")
             params['month_num'] = month_num
         if 'category' in filters:
             extra_parts.append("AND category = %(filter_category)s")
