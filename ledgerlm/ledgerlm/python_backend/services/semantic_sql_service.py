@@ -16683,7 +16683,9 @@ Return a JSON object with:
 
         # ── Pattern selection ───────────────────────────────────────────
         if has_pmo:
-            if has_project:
+            if has_project or has_category:
+                # category-specific queries also go to pmo_project so the
+                # category column appears in the output (pmo_dept_month has no category column)
                 pattern_key = 'pmo_project'
             elif has_dept or has_month_kw:
                 pattern_key = 'pmo_dept_month'
@@ -16707,15 +16709,15 @@ Return a JSON object with:
             # PMO — dept × month matrix
             # Approved = yearly budget (MAX per project to avoid double-counting across months),
             # Actual = monthly actual spend, Balance = yearly_approved - actual_ytd
-            'pmo_dept_month': """SELECT month, dept,
+            'pmo_dept_month': """SELECT month, dept, category,
   ROUND(SUM(yearly_approved_tusd)::numeric, 2)                            AS approved_pmo,
   ROUND(SUM(actual_tusd)::numeric, 2)                                     AS actual_pmo,
   ROUND((SUM(yearly_approved_tusd) - SUM(actual_tusd))::numeric, 2)       AS balance_pmo
 FROM cube_investment_data
 WHERE cube_id = %(cube_id)s AND type = 'PMO'
   {year_clause} {extra_filters}
-GROUP BY month, dept
-ORDER BY month, dept""",
+GROUP BY month, dept, category
+ORDER BY month, dept, category""",
 
             # PMO — full project-level drill-down
             'pmo_project': """SELECT month, dept, proj_display_id, project_name, category,
