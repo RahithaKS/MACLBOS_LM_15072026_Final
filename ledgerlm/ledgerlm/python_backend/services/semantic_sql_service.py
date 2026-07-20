@@ -16460,10 +16460,10 @@ Return a JSON object with:
                 self.update_ingestion_job(job_id, status='running', processed_rows=0, total_rows=total_rows)
 
             # ADDITIVE ingestion — do NOT clear existing data
-            cols = [c for c in df_mapped.columns]
-            placeholders = ', '.join(['%s'] * len(cols))
-            col_names    = ', '.join(f'"{c}"' for c in cols)
-            insert_sql   = f'INSERT INTO cube_investment_data ({col_names}) VALUES ({placeholders})'
+            # execute_values expects exactly one %s in the template; it expands rows automatically
+            cols       = [c for c in df_mapped.columns]
+            col_names  = ', '.join(f'"{c}"' for c in cols)
+            insert_sql = f'INSERT INTO cube_investment_data ({col_names}) VALUES %s'
 
             inserted = 0
             errors   = []
