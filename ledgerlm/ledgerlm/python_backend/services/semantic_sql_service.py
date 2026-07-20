@@ -16517,8 +16517,12 @@ Return a JSON object with:
     def execute_investment_query(self, query: str, cube_id: str) -> dict:
         """
         Execute a natural language query against cube_investment_data.
-        Uses keyword matching to detect metric intent, extracts fiscal year from query,
-        then runs parameterised SQL and returns results.
+
+        Implements four capabilities:
+        1. Smart PMO pattern split — dept×month summary vs project-detail vs month-only
+        2. NL filter extraction — detects category, dept, project ID/name in query text
+        3. Month extraction — maps month names to numeric month for WHERE clause
+        4. Column rename — all DB snake_case columns → human-readable labels with units
         """
         import re
         from psycopg2.extras import RealDictCursor
@@ -16530,113 +16534,240 @@ Return a JSON object with:
         year_match = re.search(r'\b(20\d\d)\b', q)
         fiscal_year = year_match.group(1) if year_match else None
 
-        # ── Pattern catalogue ───────────────────────────────────────────
-        # Each entry: (trigger keywords — ALL must match, sql_template, narrative_key)
-        # sql_template uses %(cube_id)s and %(fiscal_year)s for psycopg2 named params
-        patterns = [
-            # CAPEX
-            (
-                ['capex'],
-                """SELECT dept,
-  ROUND(MAX(yearly_approved_tusd)::numeric, 2)  AS approved_tusd,
-  ROUND(MAX(yearly_approved_minr)::numeric, 2)  AS approved_minr,
-  ROUND(SUM(actual_tusd)::numeric, 2)           AS actual_tusd,
-  ROUND(SUM(actual_minr)::numeric, 2)           AS actual_minr,
-  ROUND((MAX(yearly_approved_tusd)-SUM(actual_tusd))::numeric, 2) AS balance_tusd
-FROM cube_investment_data
-WHERE cube_id = %(cube_id)s AND type = 'CAPEX'
-  {year_clause}
-GROUP BY dept ORDER BY dept""",
-                'capex_by_dept',
-            ),
-            # PMO
-            (
-                ['pmo'],
-                """SELECT fiscal_year, month, dept, proj_display_id, project_name, category,
-  ROUND(MAX(yearly_approved_tusd)::numeric, 2) AS approved_pmo,
-  ROUND(SUM(actual_tusd)::numeric, 2)          AS actual_pmo,
-  ROUND((MAX(yearly_approved_tusd)-SUM(actual_tusd))::numeric, 2) AS balance_pmo
+        # ── Month name → number ─────────────────────────────────────────
+        MONTH_MAP = {
+            'january': 1, 'jan': 1, 'february': 2, 'feb': 2,
+            'march': 3, 'mar': 3, 'april': 4, 'apr': 4,
+            'may': 5, 'june': 6, 'jun': 6, 'july': 7, 'jul': 7,
+            'august': 8, 'aug': 8, 'september': 9, 'sept': 9, 'sep': 9,
+            'october': 10, 'oct': 10, 'november': 11, 'nov': 11,
+            'december': 12, 'dec': 12,
+        }
+        month_num = None
+        for mname, mval in MONTH_MAP.items():
+            if re.search(r'\b' + mname + r'\b', q):
+                month_num = mval
+                break
+
+        # ── Load distinct dimension values for NL filter matching ───────
+        # One cheap query up-front; results drive all filter logic below.
+        filters: dict = {}
+        try:
+            conn0 = self.get_db_connection()
+            cur0 = conn0.cursor(cursor_factory=RealDictCursor)
+            cur0.execute(
+                "SELECT DISTINCT dept, category FROM cube_investment_data WHERE cube_id = %s",
+                (cube_id,),
+            )
+            dim_rows = cur0.fetchall()
+            cur0.execute(
+                """SELECT DISTINCT proj_display_id, project_name
+                   FROM cube_investment_data
+                   WHERE cube_id = %s AND proj_display_id IS NOT NULL AND proj_display_id != ''""",
+                (cube_id,),
+            )
+            proj_rows = cur0.fetchall()
+            cur0.close()
+            conn0.close()
+
+            # Category filter — match exact value (case-insensitive)
+            cats = sorted({r['category'] for r in dim_rows if r.get('category')}, key=len, reverse=True)
+            for cat in cats:
+                if cat and cat.lower() in q:
+                    filters['category'] = cat
+                    break
+
+            # Dept filter — longest-match first to avoid partial hits
+            depts = sorted({r['dept'] for r in dim_rows if r.get('dept')}, key=len, reverse=True)
+            for dept in depts:
+                if dept and dept.lower() in q:
+                    filters['dept'] = dept
+                    break
+
+            # Project ID / name filter
+            for proj in proj_rows:
+                pid = (proj.get('proj_display_id') or '').strip()
+                pname = (proj.get('project_name') or '').strip()
+                if pid and pid.lower() in q:
+                    filters['proj_display_id'] = pid
+                    break
+                if len(pname) >= 4 and pname.lower() in q:
+                    filters['proj_display_id'] = pid if pid else None
+                    filters['_project_name_hint'] = pname
+                    break
+
+        except Exception as dim_err:
+            logger.warning(f"[INV-QUERY] Dimension lookup failed (non-fatal): {dim_err}")
+
+        logger.info(f"[INV-QUERY] detected: year={fiscal_year}, month={month_num}, filters={filters}")
+
+        # ── Intent flags ────────────────────────────────────────────────
+        has_pmo      = 'pmo' in q
+        has_capex    = 'capex' in q
+        has_category = 'category' in q or 'coe' in q
+        has_dept     = any(w in q for w in ['dept', 'department'])
+        has_project  = any(w in q for w in ['project', 'proj']) or 'proj_display_id' in filters
+        has_month_kw = month_num is not None or any(
+            w in q for w in ['month', 'monthly', 'month wise', 'monthwise']
+        )
+
+        # ── Pattern selection ───────────────────────────────────────────
+        if has_pmo:
+            if has_project:
+                pattern_key = 'pmo_project'
+            elif has_dept or has_month_kw:
+                pattern_key = 'pmo_dept_month'
+            else:
+                pattern_key = 'pmo_month'
+        elif has_capex:
+            pattern_key = 'capex_by_dept'
+        elif has_category:
+            pattern_key = 'by_category'
+        elif has_dept and not has_project:
+            pattern_key = 'by_dept'
+        elif has_project:
+            pattern_key = 'by_project'
+        else:
+            pattern_key = 'total_summary'
+
+        # ── SQL templates ───────────────────────────────────────────────
+        # {year_clause} and {extra_filters} are replaced before execution.
+        SQL_TEMPLATES = {
+
+            # PMO — dept × month matrix (clean dims for pivot: dept + month only)
+            'pmo_dept_month': """SELECT month, dept,
+  ROUND(SUM(monthly_approved_tusd)::numeric, 2) AS approved_pmo,
+  ROUND(SUM(actual_tusd)::numeric, 2)           AS actual_pmo,
+  ROUND((SUM(monthly_approved_tusd) - SUM(actual_tusd))::numeric, 2) AS balance_pmo
 FROM cube_investment_data
 WHERE cube_id = %(cube_id)s AND type = 'PMO'
-  {year_clause}
-GROUP BY fiscal_year, month, dept, proj_display_id, project_name, category
+  {year_clause} {extra_filters}
+GROUP BY month, dept
+ORDER BY month, dept""",
+
+            # PMO — full project-level drill-down
+            'pmo_project': """SELECT month, dept, proj_display_id, project_name, category,
+  ROUND(SUM(monthly_approved_tusd)::numeric, 2) AS approved_pmo,
+  ROUND(SUM(actual_tusd)::numeric, 2)           AS actual_pmo,
+  ROUND((SUM(monthly_approved_tusd) - SUM(actual_tusd))::numeric, 2) AS balance_pmo
+FROM cube_investment_data
+WHERE cube_id = %(cube_id)s AND type = 'PMO'
+  {year_clause} {extra_filters}
+GROUP BY month, dept, proj_display_id, project_name, category
 ORDER BY month, dept, project_name""",
-                'pmo_monthly',
-            ),
-            # By category (CoE / Project)
-            (
-                ['category'],
-                """SELECT category,
-  ROUND(SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
-  ROUND(SUM(actual_tusd)::numeric, 1)   AS utilized_tusd,
-  ROUND((SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)-SUM(actual_tusd))::numeric, 1) AS balance_tusd
+
+            # PMO — month-only aggregate (no dept dimension)
+            'pmo_month': """SELECT month,
+  ROUND(SUM(monthly_approved_tusd)::numeric, 2) AS approved_pmo,
+  ROUND(SUM(actual_tusd)::numeric, 2)           AS actual_pmo,
+  ROUND((SUM(monthly_approved_tusd) - SUM(actual_tusd))::numeric, 2) AS balance_pmo
+FROM cube_investment_data
+WHERE cube_id = %(cube_id)s AND type = 'PMO'
+  {year_clause} {extra_filters}
+GROUP BY month
+ORDER BY month""",
+
+            # CAPEX — by dept with INR equivalent
+            'capex_by_dept': """SELECT dept,
+  ROUND(MAX(yearly_approved_tusd)::numeric, 2) AS approved_tusd,
+  ROUND(MAX(yearly_approved_minr)::numeric, 2) AS approved_minr,
+  ROUND(SUM(actual_tusd)::numeric, 2)          AS actual_tusd,
+  ROUND(SUM(actual_minr)::numeric, 2)          AS actual_minr,
+  ROUND((MAX(yearly_approved_tusd) - SUM(actual_tusd))::numeric, 2) AS balance_tusd
+FROM cube_investment_data
+WHERE cube_id = %(cube_id)s AND type = 'CAPEX'
+  {year_clause} {extra_filters}
+GROUP BY dept
+ORDER BY dept""",
+
+            # Cost — by category (CoE / Project / DNA …)
+            'by_category': """SELECT category,
+  ROUND(SUM(CASE WHEN yearly_approved_tusd = 0
+                 THEN monthly_approved_tusd
+                 ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
+  ROUND(SUM(actual_tusd)::numeric, 1) AS actual_tusd,
+  ROUND((SUM(CASE WHEN yearly_approved_tusd = 0
+                  THEN monthly_approved_tusd
+                  ELSE yearly_approved_tusd END) - SUM(actual_tusd))::numeric, 1) AS balance_tusd
 FROM cube_investment_data
 WHERE cube_id = %(cube_id)s AND type = 'Cost'
-  {year_clause}
-GROUP BY category ORDER BY category""",
-                'by_category',
-            ),
-            # By department
-            (
-                ['dept', 'department'],
-                """SELECT dept,
-  ROUND(SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
-  ROUND(SUM(actual_tusd)::numeric, 1)   AS utilized_tusd,
-  ROUND((SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)-SUM(actual_tusd))::numeric, 1) AS balance_tusd
+  {year_clause} {extra_filters}
+GROUP BY category
+ORDER BY category""",
+
+            # Cost — by dept
+            'by_dept': """SELECT dept,
+  ROUND(SUM(CASE WHEN yearly_approved_tusd = 0
+                 THEN monthly_approved_tusd
+                 ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
+  ROUND(SUM(actual_tusd)::numeric, 1) AS actual_tusd,
+  ROUND((SUM(CASE WHEN yearly_approved_tusd = 0
+                  THEN monthly_approved_tusd
+                  ELSE yearly_approved_tusd END) - SUM(actual_tusd))::numeric, 1) AS balance_tusd
 FROM cube_investment_data
 WHERE cube_id = %(cube_id)s AND type = 'Cost'
-  {year_clause}
-GROUP BY dept ORDER BY dept""",
-                'by_dept',
-            ),
-            # By project
-            (
-                ['project'],
-                """SELECT dept, project_name, proj_display_id, category,
-  ROUND(SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
-  ROUND(SUM(actual_tusd)::numeric, 1)   AS utilized_tusd,
-  ROUND((SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)-SUM(actual_tusd))::numeric, 1) AS balance_tusd
+  {year_clause} {extra_filters}
+GROUP BY dept
+ORDER BY dept""",
+
+            # Cost — by project
+            'by_project': """SELECT dept, project_name, proj_display_id, category,
+  ROUND(SUM(CASE WHEN yearly_approved_tusd = 0
+                 THEN monthly_approved_tusd
+                 ELSE yearly_approved_tusd END)::numeric, 1) AS approved_tusd,
+  ROUND(SUM(actual_tusd)::numeric, 1) AS actual_tusd,
+  ROUND((SUM(CASE WHEN yearly_approved_tusd = 0
+                  THEN monthly_approved_tusd
+                  ELSE yearly_approved_tusd END) - SUM(actual_tusd))::numeric, 1) AS balance_tusd
 FROM cube_investment_data
 WHERE cube_id = %(cube_id)s AND type = 'Cost'
   AND proj_display_id IS NOT NULL AND proj_display_id != ''
-  {year_clause}
+  {year_clause} {extra_filters}
 GROUP BY dept, project_name, proj_display_id, category
 ORDER BY dept, project_name""",
-                'by_project',
-            ),
-            # Default: total approved + utilized + balance summary
-            (
-                [],  # matches anything (default)
-                """SELECT
-  ROUND(SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)::numeric, 1) AS total_approved_tusd,
-  ROUND(SUM(actual_tusd)::numeric, 1)   AS total_utilized_tusd,
-  ROUND((SUM(CASE WHEN yearly_approved_tusd=0 THEN monthly_approved_tusd ELSE yearly_approved_tusd END)-SUM(actual_tusd))::numeric, 1) AS balance_tusd
+
+            # Default — grand-total summary (3 numbers)
+            'total_summary': """SELECT
+  ROUND(SUM(CASE WHEN yearly_approved_tusd = 0
+                 THEN monthly_approved_tusd
+                 ELSE yearly_approved_tusd END)::numeric, 1) AS total_approved_tusd,
+  ROUND(SUM(actual_tusd)::numeric, 1) AS total_actual_tusd,
+  ROUND((SUM(CASE WHEN yearly_approved_tusd = 0
+                  THEN monthly_approved_tusd
+                  ELSE yearly_approved_tusd END) - SUM(actual_tusd))::numeric, 1) AS balance_tusd
 FROM cube_investment_data
 WHERE cube_id = %(cube_id)s AND type = 'Cost'
-  {year_clause}""",
-                'total_summary',
-            ),
-        ]
+  {year_clause} {extra_filters}""",
+        }
 
-        # ── Select matching pattern ─────────────────────────────────────
-        selected_sql_template = None
-        narrative_key = 'total_summary'
-        for triggers, sql_tmpl, nkey in patterns:
-            if not triggers or any(t in q for t in triggers):
-                selected_sql_template = sql_tmpl
-                narrative_key = nkey
-                break
-
-        # ── Build year clause ───────────────────────────────────────────
+        # ── Assemble WHERE extras ───────────────────────────────────────
+        params: dict = {'cube_id': cube_id}
         year_clause = "AND fiscal_year = %(fiscal_year)s" if fiscal_year else ""
-        sql = selected_sql_template.replace('{year_clause}', year_clause)
-
-        params = {'cube_id': cube_id}
         if fiscal_year:
             params['fiscal_year'] = fiscal_year
 
-        logger.info(f"[INV-QUERY] pattern={narrative_key}, year={fiscal_year}, sql={sql[:120]}...")
+        extra_parts: list = []
+        if month_num:
+            extra_parts.append("AND month = %(month_num)s")
+            params['month_num'] = month_num
+        if 'category' in filters:
+            extra_parts.append("AND category = %(filter_category)s")
+            params['filter_category'] = filters['category']
+        if 'dept' in filters:
+            extra_parts.append("AND dept = %(filter_dept)s")
+            params['filter_dept'] = filters['dept']
+        if filters.get('proj_display_id'):
+            extra_parts.append("AND proj_display_id ILIKE %(filter_proj_id)s")
+            params['filter_proj_id'] = f"%{filters['proj_display_id']}%"
 
+        extra_filters = ' '.join(extra_parts)
+        sql = SQL_TEMPLATES[pattern_key]\
+            .replace('{year_clause}', year_clause)\
+            .replace('{extra_filters}', extra_filters)
+
+        logger.info(f"[INV-QUERY] pattern={pattern_key}, sql_head={sql[:140]}...")
+
+        # ── Execute ─────────────────────────────────────────────────────
         try:
             conn = self.get_db_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -16648,23 +16779,69 @@ WHERE cube_id = %(cube_id)s AND type = 'Cost'
             logger.error(f"[INV-QUERY] DB error: {db_err}")
             return {'success': False, 'error': str(db_err)}
 
-        # ── Build narrative ─────────────────────────────────────────────
-        narratives = {
-            'capex_by_dept':  f"CAPEX approved vs actual by department{' for ' + fiscal_year if fiscal_year else ''}. Values in thousands USD (tUSD) and millions INR (mINR).",
-            'pmo_monthly':    f"PMO approved vs actual by project month-wise{' for ' + fiscal_year if fiscal_year else ''}. Values in thousands USD.",
-            'by_category':    f"Investment split by category (CoE vs Project){' for ' + fiscal_year if fiscal_year else ''}. Values in thousands USD.",
-            'by_dept':        f"Investment approved vs utilized by department{' for ' + fiscal_year if fiscal_year else ''}. Values in thousands USD.",
-            'by_project':     f"Investment approved vs utilized by project{' for ' + fiscal_year if fiscal_year else ''}. Values in thousands USD.",
-            'total_summary':  f"Total approved: {rows[0].get('total_approved_tusd', 'N/A')} tUSD | Total utilized: {rows[0].get('total_utilized_tusd', 'N/A')} tUSD | Balance: {rows[0].get('balance_tusd', 'N/A')} tUSD{' (FY ' + fiscal_year + ')' if fiscal_year else ''}." if rows else "No investment data found for the requested period.",
+        # ── Column rename — DB snake_case → human-readable with units ──
+        RENAME = {
+            'dept':               'Department',
+            'proj_display_id':    'Proj ID',
+            'project_name':       'Project Name',
+            'category':           'Category',
+            'fiscal_year':        'FY',
+            'month':              'month',              # kept numeric — pivot uses it
+            'type':               'Type',
+            'approved_pmo':       'Approved PMO (tUSD)',
+            'actual_pmo':         'Actual PMO (tUSD)',
+            'balance_pmo':        'Balance PMO (tUSD)',
+            'approved_tusd':      'Approved (tUSD)',
+            'actual_tusd':        'Actual (tUSD)',
+            'balance_tusd':       'Balance (tUSD)',
+            'approved_minr':      'Approved (mINR)',
+            'actual_minr':        'Actual (mINR)',
+            'utilized_tusd':      'Utilized (tUSD)',
+            'total_approved_tusd':'Total Approved (tUSD)',
+            'total_actual_tusd':  'Total Actual (tUSD)',
         }
-        narrative = narratives.get(narrative_key, f"Investment/CAPEX/PMO data: {len(rows)} records.")
+        renamed_rows = [
+            {RENAME.get(k, k): v for k, v in row.items()}
+            for row in rows
+        ]
+        columns = list(renamed_rows[0].keys()) if renamed_rows else []
 
-        logger.info(f"[INV-QUERY] returned {len(rows)} rows, narrative_key={narrative_key}")
+        # ── Build narrative ─────────────────────────────────────────────
+        fy_label = f' for FY{fiscal_year}' if fiscal_year else ''
+        filter_label = ''.join([
+            f' [Category: {filters["category"]}]'        if 'category'        in filters else '',
+            f' [Dept: {filters["dept"]}]'                if 'dept'            in filters else '',
+            f' [Project: {filters["proj_display_id"]}]'  if filters.get('proj_display_id') else '',
+        ])
+
+        def _first(key: str) -> str:
+            return str(renamed_rows[0].get(key, 'N/A')) if renamed_rows else 'N/A'
+
+        narratives = {
+            'pmo_dept_month': f'PMO Approved vs Actual by Department × Month{fy_label}{filter_label}. Values in tUSD.',
+            'pmo_project':    f'PMO Approved vs Actual by Project{fy_label}{filter_label}. Values in tUSD.',
+            'pmo_month':      f'PMO Approved vs Actual month-wise{fy_label}{filter_label}. Values in tUSD.',
+            'capex_by_dept':  f'CAPEX Approved vs Actual by Department{fy_label}{filter_label}. Values in tUSD and mINR.',
+            'by_category':    f'Investment by Category (CoE / Project / DNA){fy_label}{filter_label}. Values in tUSD.',
+            'by_dept':        f'Investment Approved vs Actual by Department{fy_label}{filter_label}. Values in tUSD.',
+            'by_project':     f'Investment Approved vs Actual by Project{fy_label}{filter_label}. Values in tUSD.',
+            'total_summary':  (
+                f"Total Approved: {_first('Total Approved (tUSD)')} tUSD | "
+                f"Total Actual: {_first('Total Actual (tUSD)')} tUSD | "
+                f"Balance: {_first('Balance (tUSD)')} tUSD{fy_label}{filter_label}."
+            ) if renamed_rows else f'No investment data found{fy_label}{filter_label}.',
+        }
+        narrative = narratives.get(pattern_key, f'Investment/CAPEX/PMO: {len(renamed_rows)} records{fy_label}{filter_label}.')
+
+        logger.info(f"[INV-QUERY] {len(renamed_rows)} rows, columns={columns}")
         return {
-            'success': True,
-            'results': rows,
-            'sql': sql,
-            'narrative': narrative,
+            'success':         True,
+            'results':         renamed_rows,
+            'columns':         columns,
+            'sql':             sql,
+            'narrative':       narrative,
+            'pattern':         pattern_key,
+            'filters_applied': {k: v for k, v in filters.items() if not k.startswith('_')},
         }
 
     # ==================== END INVESTMENT QUERY ====================

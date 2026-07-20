@@ -2696,9 +2696,47 @@ export class EvidenceBroker {
     context: EvidenceContext,
     queryType?: QueryType,
   ): string {
-    const formattingHint = queryType
+    let formattingHint = queryType
       ? queryEnhancer.getFormattingHint(queryType)
       : "";
+
+    // ── Investment / CAPEX / PMO — override formattingHint ──────────────
+    // Inject column-aware chart and table guidance so the LLM knows exactly
+    // which column names to use for xKey/yKey in chart blocks.
+    if (context.calculationType === "investment_capex_pmo") {
+      // Column names come from tableSections headers (already renamed to human labels)
+      const cols: string[] = context.tableSections?.[0]?.headers ?? [];
+      const hasDept   = cols.includes("Department");
+      const hasProj   = cols.includes("Project Name") || cols.includes("Proj ID");
+      const hasCat    = cols.includes("Category");
+      const hasMonth  = cols.includes("month");
+      const approvedCol = cols.find(c => c.startsWith("Approved")) ?? "Approved (tUSD)";
+      const actualCol   = cols.find(c => c.startsWith("Actual"))   ?? "Actual (tUSD)";
+      const balanceCol  = cols.find(c => c.startsWith("Balance"))  ?? "Balance (tUSD)";
+
+      const xAxisHint = hasDept
+        ? `"Department"`
+        : hasCat
+        ? `"Category"`
+        : hasProj
+        ? `"Project Name"`
+        : hasMonth
+        ? `"month" (numeric 1–12; use Jan/Feb/… as tick labels)`
+        : `the first text column in the data`;
+
+      formattingHint = [
+        `This is Investment / CAPEX / PMO financial data.`,
+        cols.length > 0
+          ? `Exact column names in this result: ${cols.map(c => `"${c}"`).join(", ")}.`
+          : "",
+        `All monetary values are in thousands USD (tUSD) unless the column name says mINR.`,
+        `For a bar chart use xKey=${xAxisHint} and yKey="${approvedCol}".`,
+        `To compare Approved vs Actual, produce a grouped bar chart with keys "${approvedCol}" and "${actualCol}".`,
+        `NEVER invent column names — use only the exact names listed above.`,
+        `Always include xLabel (e.g. "Department") and yLabel (e.g. "Amount (tUSD)") in every chart config.`,
+      ].filter(Boolean).join(" ");
+    }
+
     const hasRealData = context.text && context.text.trim().length > 0;
     const hasPreBuilt =
       context.preBuiltSections && context.preBuiltSections.trim().length > 0;
@@ -2740,6 +2778,8 @@ export class EvidenceBroker {
         "Entity P&L EBIT — columns: Revenue, Total Cost, EBIT (Revenue − Total Cost), EBIT% (EBIT / Revenue × 100)",
       entity_pl_ebit_pct:
         "Entity P&L EBIT% — columns: Revenue, Total Cost, EBIT (Revenue − Total Cost), EBIT% (EBIT / Revenue × 100)",
+      investment_capex_pmo:
+        "Investment / CAPEX / PMO — Approved vs Actual budgets (tUSD / mINR) by Department, Project, Category, and Month",
     };
     const metricLabel = context.calculationType
       ? calcTypeLabels[context.calculationType] ||
