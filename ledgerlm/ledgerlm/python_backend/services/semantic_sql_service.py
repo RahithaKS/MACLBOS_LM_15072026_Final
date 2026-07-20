@@ -16595,17 +16595,76 @@ Return a JSON object with:
                     filters['dept'] = dept
                     break
 
-            # Project ID / name filter
+            # ── Project ID / name filter ───────────────────────────────────
+            # Pass 1: exact substring match (case-insensitive)
             for proj in proj_rows:
-                pid = (proj.get('proj_display_id') or '').strip()
-                pname = (proj.get('project_name') or '').strip()
+                pid   = (proj.get('proj_display_id') or '').strip()
+                pname = (proj.get('project_name')    or '').strip()
                 if pid and pid.lower() in q:
                     filters['proj_display_id'] = pid
                     break
-                if len(pname) >= 4 and pname.lower() in q:
+                # allow short names (≥ 2 chars) for exact match
+                if len(pname) >= 2 and pname.lower() in q:
                     filters['proj_display_id'] = pid if pid else None
                     filters['_project_name_hint'] = pname
                     break
+
+            # Pass 2: fuzzy match — if no exact hit, try transposition / edit-distance
+            if 'proj_display_id' not in filters:
+                def _edit_distance(a: str, b: str) -> int:
+                    """Basic DP Levenshtein."""
+                    a, b = a.lower(), b.lower()
+                    if a == b:
+                        return 0
+                    if len(a) > len(b):
+                        a, b = b, a
+                    prev = list(range(len(a) + 1))
+                    for j, cb in enumerate(b):
+                        curr = [j + 1]
+                        for i, ca in enumerate(a):
+                            curr.append(min(prev[i + 1] + 1, curr[i] + 1,
+                                           prev[i] + (0 if ca == cb else 1)))
+                        prev = curr
+                    return prev[-1]
+
+                # Extract candidate tokens from query that look like project IDs or short names
+                # (uppercase words, hyphenated codes, any word ≥ 3 chars after keywords)
+                import re as _re
+                proj_kw_match = _re.search(r'\bproject\s+(\S+)', q)
+                candidate_tokens = set()
+                if proj_kw_match:
+                    candidate_tokens.add(proj_kw_match.group(1).upper())
+                # Also add all uppercase-ish tokens ≥ 3 chars from the query
+                for tok in q.upper().split():
+                    tok = tok.strip('.,;:!?')
+                    if len(tok) >= 3:
+                        candidate_tokens.add(tok)
+
+                best_proj = None
+                best_dist = 3  # max allowed edit distance
+                for proj in proj_rows:
+                    pid   = (proj.get('proj_display_id') or '').strip()
+                    pname = (proj.get('project_name')    or '').strip()
+                    for token in candidate_tokens:
+                        for target in filter(None, [pname, pid]):
+                            if abs(len(token) - len(target)) > best_dist:
+                                continue  # length diff already exceeds threshold
+                            d = _edit_distance(token, target)
+                            if d < best_dist:
+                                best_dist = d
+                                best_proj = proj
+
+                if best_proj:
+                    pid_f   = (best_proj.get('proj_display_id') or '').strip()
+                    pname_f = (best_proj.get('project_name')    or '').strip()
+                    filters['proj_display_id']      = pid_f
+                    filters['_project_name_hint']   = pname_f
+                    filters['_fuzzy_match']         = True
+                    filters['_fuzzy_match_note']    = (
+                        f"No exact project match found — showing closest match: "
+                        f"'{pname_f}' ({pid_f})."
+                    )
+                    logger.info(f"[INV-QUERY] Fuzzy project match: '{pname_f}' (edit_dist={best_dist})")
 
         except Exception as dim_err:
             logger.warning(f"[INV-QUERY] Dimension lookup failed (non-fatal): {dim_err}")
@@ -16820,11 +16879,13 @@ WHERE cube_id = %(cube_id)s AND type = 'Cost'
 
         # ── Build narrative ─────────────────────────────────────────────
         fy_label = f' for FY{fiscal_year}' if fiscal_year else ''
+        fuzzy_note = f' ⚠️ {filters["_fuzzy_match_note"]}' if filters.get('_fuzzy_match') else ''
         filter_label = ''.join([
             f' [Category: {filters["category"]}]'        if 'category'        in filters else '',
             f' [Dept: {filters["dept"]}]'                if 'dept'            in filters else '',
-            f' [Project: {filters["proj_display_id"]}]'  if filters.get('proj_display_id') else '',
-        ])
+            f' [Project: {filters["_project_name_hint"] or filters["proj_display_id"]}]'
+                                                          if filters.get('proj_display_id') else '',
+        ]) + fuzzy_note
 
         def _first(key: str) -> str:
             return str(renamed_rows[0].get(key, 'N/A')) if renamed_rows else 'N/A'
