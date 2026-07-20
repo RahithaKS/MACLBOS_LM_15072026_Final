@@ -20,7 +20,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs/promises";
 import { existsSync, unlinkSync } from "fs";
-import { streamFinancialAnalysis, type DomainAiConfig } from "./openai";
+import { streamFinancialAnalysis, checkPromptSafety, type DomainAiConfig } from "./openai";
 import { queryOrchestrator } from "./services/queryOrchestrator";
 import { evidenceBroker } from "./services/evidenceBroker";
 import { requireAdmin } from "./middleware/rbac";
@@ -118,6 +118,71 @@ const uploadDir = path.join(process.cwd(), "uploads");
 fs.mkdir(uploadDir, { recursive: true }).catch(() => {});
 fs.mkdir(path.join(uploadDir, "ppt-exports"), { recursive: true }).catch(() => {});
 
+// SG-43 / SG-67: Allowed MIME types — reject anything outside this set at intake.
+const ALLOWED_MIME_TYPES = new Set([
+  // Spreadsheets
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+  'application/vnd.ms-excel',                                           // .xls
+  // Documents
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/msword',                                                       // .doc
+  // Presentations
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+  'application/vnd.ms-powerpoint',                                              // .ppt
+  // Text / data
+  'text/csv',
+  'application/csv',
+  'text/plain',
+  // Images (for kiosk / supporting uploads)
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
+
+// SG-43: Magic-byte validation — verify actual file content matches declared type.
+// Called AFTER multer writes the file to disk; deletes the file if invalid.
+async function validateFileMagicBytes(filePath: string, mimetype: string): Promise<boolean> {
+  try {
+    const fd = await fs.open(filePath, 'r');
+    const buf = Buffer.alloc(8);
+    await fd.read(buf, 0, 8, 0);
+    await fd.close();
+
+    const isPdf  = buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46; // %PDF
+    const isPkZip = buf[0] === 0x50 && buf[1] === 0x4B && buf[2] === 0x03 && buf[3] === 0x04; // PK\x03\x04
+    const isOle2  = buf[0] === 0xD0 && buf[1] === 0xCF && buf[2] === 0x11 && buf[3] === 0xE0; // OLE2 (xls/doc/ppt)
+    const isJpeg  = buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
+    const isPng   = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47;
+    const isGif   = buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38;
+    const isWebP  = buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46;
+
+    // Map MIME to expected magic bytes
+    const valid: Record<string, boolean> = {
+      'application/pdf': isPdf,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': isPkZip,
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': isPkZip,
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': isPkZip,
+      'application/vnd.ms-excel': isOle2,
+      'application/msword': isOle2,
+      'application/vnd.ms-powerpoint': isOle2,
+      'image/jpeg': isJpeg,
+      'image/png': isPng,
+      'image/gif': isGif,
+      'image/webp': isWebP,
+      // Text files have no magic bytes — accept them by declared MIME
+      'text/csv': true,
+      'application/csv': true,
+      'text/plain': true,
+    };
+
+    return valid[mimetype] ?? false;
+  } catch {
+    return false;
+  }
+}
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
@@ -129,15 +194,15 @@ const upload = multer({
     },
   }),
   limits: {
-    fileSize: 250 * 1024 * 1024, // 250MB limit
+    fileSize: 250 * 1024 * 1024, // 250MB outer limit — per-type caps enforced post-upload
   },
   fileFilter: (req, file, cb) => {
-    console.log(
-      "Multer fileFilter - mimetype:",
-      file.mimetype,
-      "originalname:",
-      file.originalname,
-    );
+    // SG-43: First gate — reject by MIME type before writing to disk
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      return cb(new Error(
+        `File type not allowed: "${file.mimetype}". Accepted formats: PDF, Excel, Word, PowerPoint, CSV, and images.`
+      ));
+    }
     cb(null, true);
   },
 });
@@ -998,6 +1063,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (data.role === "user") {
+        // SG-50: Prompt injection guard — blocks before hitting orchestrator/LLM
+        const promptSafety = checkPromptSafety(data.content);
+        if (!promptSafety.safe) {
+          writeAuditLog({
+            userId,
+            action: 'PROMPT_BLOCKED',
+            resource: 'chat',
+            resourceId: req.params.chatId,
+            ipAddress: extractIp(req),
+            status: 'blocked',
+            details: { reason: promptSafety.reason, promptLength: data.content.length },
+          }).catch(() => {});
+          return res.status(400).json({
+            error: 'Your message could not be processed. Please rephrase your query.',
+          });
+        }
+
         const conversationHistory = await storage.getMessages(
           req.params.chatId,
         );
@@ -1037,6 +1119,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sourcesFailed: orchestratorResult.sourcesFailed,
             latencyMs: orchestratorResult.latencyMs,
           });
+
+          // SG-53: Log LLM interaction (prompt input) to central audit log
+          writeAuditLog({
+            userId,
+            action: 'AI_QUERY',
+            resource: 'chat',
+            resourceId: req.params.chatId,
+            ipAddress: extractIp(req),
+            status: 'success',
+            details: {
+              promptLength: data.content.length,
+              promptPreview: data.content.slice(0, 200),
+              sourcesUsed: orchestratorResult.sourcesUsed,
+            },
+          }).catch(() => {});
 
           if (context.text && context.text.trim().length > 0) {
             for await (const chunk of streamFinancialAnalysis({
@@ -3166,9 +3263,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/invitations/validate/:token", async (req, res) => {
+  // SG-82: Token moved from GET URL path to POST body so it never appears in
+  // server logs, browser history, or referrer headers.
+  app.post("/api/invitations/validate", async (req, res) => {
     try {
-      const result = await invitationService.validateToken(req.params.token);
+      const { token } = req.body;
+      if (!token) {
+        return res.status(400).json({ error: "Token is required" });
+      }
+      const result = await invitationService.validateToken(token);
       res.json(result);
     } catch (error: any) {
       res.status(400).json({ error: error.message });

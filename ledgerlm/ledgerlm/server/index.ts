@@ -171,7 +171,7 @@ app.use(session({
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     sameSite: 'strict',
-    maxAge: 8 * 60 * 60 * 1000,  // 8 hours — enterprise security standard
+    maxAge: 15 * 60 * 1000,  // 15 minutes — Bosch SG-39 / SG-84 requirement
   },
 }));
 
@@ -204,6 +204,25 @@ const uploadApiLimiter = rateLimit({
 app.use('/api/', globalApiLimiter);
 app.use('/api/chats', chatApiLimiter);
 app.use('/api/documents', uploadApiLimiter);
+
+// ── SG-35: Geo-fencing (India only) ──────────────────────────────────────────
+// Azure Application Gateway / WAF sets X-Country-Code on each request once the
+// geo-filter WAF rule is configured (see SG-35 Azure setup guide).
+// Until that header arrives this middleware is a no-op — it does NOT block anyone.
+// When WAF is live and starts sending the header, non-IN requests get 403 here as
+// a defence-in-depth layer behind the gateway-level block.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (process.env.NODE_ENV !== 'production') return next(); // Skip in dev
+  // Static assets and health checks are always allowed
+  if (!req.path.startsWith('/api')) return next();
+  const countryCode = (req.headers['x-country-code'] as string | undefined)?.toUpperCase();
+  if (countryCode && countryCode !== 'IN') {
+    logger.warn({ ip: req.ip, country: countryCode, path: req.path }, 'SG-35 geo-fence: access denied outside IN');
+    return res.status(403).json({ error: 'Access restricted to authorized regions.' });
+  }
+  // Header absent → WAF not yet configured; pass through
+  next();
+});
 
 (async () => {
   // Ensure scheduler_config table exists (required for scheduler service)

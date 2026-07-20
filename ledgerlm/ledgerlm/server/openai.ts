@@ -1,6 +1,44 @@
 // Use Ollama directly via your custom Nginx proxy
 const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "https://ollama.ledgerlm.ai").replace(/\/v1\/?$/, "").replace(/\/api\/?$/, "");
 
+// ── SG-50 / SG-44: Prompt Injection Filter ───────────────────────────────────
+// Blocks known injection and jailbreak patterns before any prompt reaches the LLM.
+// Patterns are conservative — focused on explicit instruction-override attempts.
+const INJECTION_PATTERNS: RegExp[] = [
+  /ignore\s+(all\s+)?(previous|prior|above|system)\s+instructions/i,
+  /forget\s+(all\s+)?(previous|prior|above)\s+instructions/i,
+  /disregard\s+(all\s+)?(previous|prior|system)\s+instructions/i,
+  /override\s+(all\s+)?(previous|prior|system)\s+instructions/i,
+  /you\s+are\s+now\s+(DAN|a\s+new\s+AI|an?\s+unrestricted)/i,
+  /act\s+as\s+(DAN|an?\s+AI\s+without\s+restrictions)/i,
+  /pretend\s+(you\s+have\s+no\s+restrictions|you\s+are\s+a\s+different)/i,
+  /jailbreak/i,
+  /\bDAN\b.*no\s+longer\s+bound/i,
+  // Prompt delimiter injection
+  /\[\s*SYSTEM\s*\]/i,
+  /<\|im_start\|>/i,
+  /<<SYS>>/i,
+];
+
+const MAX_PROMPT_LENGTH = 50_000; // chars — guards against token-flooding attacks
+
+export interface PromptSafetyResult {
+  safe: boolean;
+  reason?: string;
+}
+
+export function checkPromptSafety(text: string): PromptSafetyResult {
+  if (text.length > MAX_PROMPT_LENGTH) {
+    return { safe: false, reason: 'prompt_too_long' };
+  }
+  for (const pattern of INJECTION_PATTERNS) {
+    if (pattern.test(text)) {
+      return { safe: false, reason: `injection_pattern:${pattern.source}` };
+    }
+  }
+  return { safe: true };
+}
+
 export interface DomainAiConfig {
   provider: 'ollama' | 'azure_openai';
   endpoint?: string;     // Azure: base URL e.g. https://xxx.cognitiveservices.azure.com
@@ -230,7 +268,9 @@ Question: ${request.query}`;
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': process.env.OLLAMA_API_KEY || "ledgerlm-secret-key"
+          // SG-14: Never hardcode secrets. Header omitted when OLLAMA_API_KEY is not set
+          // (most self-hosted Ollama installs require no key).
+          ...(process.env.OLLAMA_API_KEY ? { 'x-api-key': process.env.OLLAMA_API_KEY } : {}),
         },
         body: JSON.stringify({
           model: process.env.OLLAMA_CHAT_MODEL || "qwen2.5:32b",

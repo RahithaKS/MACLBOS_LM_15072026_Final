@@ -21,7 +21,12 @@ export default function AcceptInvitation() {
     queryKey: ['/api/invitations/validate', token],
     queryFn: async () => {
       if (!token) throw new Error('No token provided');
-      const res = await fetch(`/api/invitations/validate/${token}`);
+      // SG-82: Token sent in POST body — never in URL path or query string
+      const res = await fetch('/api/invitations/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
       if (!res.ok) throw new Error('Invalid token');
       return res.json();
     },
