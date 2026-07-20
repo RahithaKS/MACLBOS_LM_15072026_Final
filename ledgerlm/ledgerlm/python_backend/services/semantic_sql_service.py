@@ -16704,11 +16704,13 @@ Return a JSON object with:
         # {year_clause} and {extra_filters} are replaced before execution.
         SQL_TEMPLATES = {
 
-            # PMO — dept × month matrix (clean dims for pivot: dept + month only)
+            # PMO — dept × month matrix
+            # Approved = yearly budget (MAX per project to avoid double-counting across months),
+            # Actual = monthly actual spend, Balance = yearly_approved - actual_ytd
             'pmo_dept_month': """SELECT month, dept,
-  ROUND(SUM(monthly_approved_tusd)::numeric, 2) AS approved_pmo,
-  ROUND(SUM(actual_tusd)::numeric, 2)           AS actual_pmo,
-  ROUND((SUM(monthly_approved_tusd) - SUM(actual_tusd))::numeric, 2) AS balance_pmo
+  ROUND(SUM(yearly_approved_tusd)::numeric, 2)                            AS approved_pmo,
+  ROUND(SUM(actual_tusd)::numeric, 2)                                     AS actual_pmo,
+  ROUND((SUM(yearly_approved_tusd) - SUM(actual_tusd))::numeric, 2)       AS balance_pmo
 FROM cube_investment_data
 WHERE cube_id = %(cube_id)s AND type = 'PMO'
   {year_clause} {extra_filters}
@@ -16717,9 +16719,9 @@ ORDER BY month, dept""",
 
             # PMO — full project-level drill-down
             'pmo_project': """SELECT month, dept, proj_display_id, project_name, category,
-  ROUND(SUM(monthly_approved_tusd)::numeric, 2) AS approved_pmo,
-  ROUND(SUM(actual_tusd)::numeric, 2)           AS actual_pmo,
-  ROUND((SUM(monthly_approved_tusd) - SUM(actual_tusd))::numeric, 2) AS balance_pmo
+  ROUND(SUM(yearly_approved_tusd)::numeric, 2)                            AS approved_pmo,
+  ROUND(SUM(actual_tusd)::numeric, 2)                                     AS actual_pmo,
+  ROUND((SUM(yearly_approved_tusd) - SUM(actual_tusd))::numeric, 2)       AS balance_pmo
 FROM cube_investment_data
 WHERE cube_id = %(cube_id)s AND type = 'PMO'
   {year_clause} {extra_filters}
@@ -16728,9 +16730,9 @@ ORDER BY month, dept, project_name""",
 
             # PMO — month-only aggregate (no dept dimension)
             'pmo_month': """SELECT month,
-  ROUND(SUM(monthly_approved_tusd)::numeric, 2) AS approved_pmo,
-  ROUND(SUM(actual_tusd)::numeric, 2)           AS actual_pmo,
-  ROUND((SUM(monthly_approved_tusd) - SUM(actual_tusd))::numeric, 2) AS balance_pmo
+  ROUND(SUM(yearly_approved_tusd)::numeric, 2)                            AS approved_pmo,
+  ROUND(SUM(actual_tusd)::numeric, 2)                                     AS actual_pmo,
+  ROUND((SUM(yearly_approved_tusd) - SUM(actual_tusd))::numeric, 2)       AS balance_pmo
 FROM cube_investment_data
 WHERE cube_id = %(cube_id)s AND type = 'PMO'
   {year_clause} {extra_filters}
