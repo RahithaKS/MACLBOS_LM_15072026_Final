@@ -14751,6 +14751,35 @@ Return a JSON object with:
                             f"compile_sql P2: ranking={_p2_rmode}, "
                             f"limit={_p2_rlimit}, dir={_p2_rdir}")
 
+                    # ── Group A: Customer revenue routing override ─────────────
+                    # "top 5 customer revenue for BGSW" must route to
+                    # _build_customer_revenue_sql (groups by bill_to_party),
+                    # NOT the generic Revenue Summary builder (groups by entity).
+                    # Override use_calculation here — before the _pre_use_calc
+                    # dispatch — so the correct builder is always reached.
+                    _is_customer_q = re.search(
+                        r'\bcustomer(?:s|[\s\-]wise)?\b'
+                        r'|\bbill.to.part(?:y|ies)\b'
+                        r'|\bclient(?:s)?\b',
+                        _p2_q_lower)
+                    _has_revenue_q = re.search(
+                        r'\brevenue\b|\bsales\b', _p2_q_lower)
+                    if _is_customer_q and _has_revenue_q:
+                        intent['use_calculation'] = 'customer revenue'
+                        # Wire ranking params → customer builder params
+                        _cr_limit = _p2_rlimit if _p2_rmode else 10
+                        _cr_dir   = _p2_rdir   if _p2_rmode else 'DESC'
+                        intent['_customer_top_n']          = _cr_limit
+                        intent['_customer_order_dir']      = _cr_dir
+                        # Show entity column alongside customer name:
+                        # "BGSW | CustomerName | $X"
+                        intent['_customer_include_entity'] = True
+                        logger.info(
+                            f"compile_sql P2: customer revenue override → "
+                            f"use_calculation='customer revenue', "
+                            f"top_n={_cr_limit}, dir={_cr_dir}, "
+                            f"include_entity=True")
+
                     # ── Group D: "which month" → group_by month only ──────────
                     # "Which month has highest OS cost?" should return one row
                     # per month, not per entity — swap the group_by accordingly.
