@@ -16457,7 +16457,7 @@ Return a JSON object with:
 
             # Mark job running
             if job_id:
-                self.update_ingestion_job(job_id, status='running', progress_rows=0, total_rows=total_rows)
+                self.update_ingestion_job(job_id, status='running', processed_rows=0, total_rows=total_rows)
 
             # ADDITIVE ingestion — do NOT clear existing data
             cols = [c for c in df_mapped.columns]
@@ -16475,7 +16475,7 @@ Return a JSON object with:
                     conn.commit()
                     inserted += len(rows)
                     if job_id:
-                        self.update_ingestion_job(job_id, status='running', progress_rows=inserted, total_rows=total_rows)
+                        self.update_ingestion_job(job_id, status='running', processed_rows=inserted, total_rows=total_rows)
                     logger.info(f"[INVESTMENT] Inserted {inserted}/{total_rows} rows")
                 except Exception as batch_err:
                     conn.rollback()
@@ -16487,7 +16487,7 @@ Return a JSON object with:
 
             elapsed = (datetime.now() - start_time).total_seconds()
             if job_id:
-                self.update_ingestion_job(job_id, status='completed', progress_rows=inserted, total_rows=total_rows, rows_inserted=inserted, elapsed_seconds=elapsed)
+                self.update_ingestion_job(job_id, status='succeeded', processed_rows=inserted, total_rows=total_rows)
 
             logger.info(f"[INVESTMENT] Done: {inserted} rows in {elapsed:.1f}s")
             return {
