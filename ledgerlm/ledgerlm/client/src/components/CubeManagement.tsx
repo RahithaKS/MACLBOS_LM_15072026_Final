@@ -24,6 +24,7 @@ interface Cube {
   name: string;
   description: string | null;
   sourceType: string;
+  schemaType: 'kpi' | 'investment_capex_pmo';
   connectorId: string | null;
   ingestionConfig: string | null;
   createdAt: string;
@@ -121,6 +122,7 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
   // Form state for create
   const [newCubeName, setNewCubeName] = useState('');
   const [newCubeDescription, setNewCubeDescription] = useState('');
+  const [newCubeSchemaType, setNewCubeSchemaType] = useState<'kpi' | 'investment_capex_pmo'>('kpi');
   const [newCubeSourceType, setNewCubeSourceType] = useState('manual');
   const [newCubeConnectorId, setNewCubeConnectorId] = useState<string | null>(null);
   const [newCubeScheduleEnabled, setNewCubeScheduleEnabled] = useState(false);
@@ -283,6 +285,7 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
         name: newCubeName,
         description: newCubeDescription || null,
         sourceType: newCubeSourceType,
+        schemaType: newCubeSchemaType,
         ingestionConfig: Object.keys(ingestionConfig).length > 0 ? ingestionConfig : null,
         domainId: isSuperAdmin ? domainId : undefined,
       });
@@ -354,6 +357,23 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
     },
     onError: (error: any) => {
       toast({ title: 'Failed to seed business logic', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const seedInvestmentLogicMutation = useMutation({
+    mutationFn: async (cubeId: string) => {
+      return apiRequest('POST', `/api/domain-admin/cubes/${cubeId}/seed-investment-logic`);
+    },
+    onSuccess: (data: any) => {
+      const total = (data.termsCreated || 0) + (data.calculationsCreated || 0) +
+                   (data.filtersCreated || 0) + (data.patternsCreated || 0) + (data.columnValuesCreated || 0);
+      toast({
+        title: 'Investment/CAPEX/PMO logic seeded',
+        description: `Added ${total} rules: ${data.termsCreated} terms, ${data.calculationsCreated} calculations, ${data.filtersCreated} filters, ${data.patternsCreated} patterns, ${data.columnValuesCreated} column values`,
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Failed to seed Investment logic', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -476,6 +496,7 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
   const resetCreateForm = () => {
     setNewCubeName('');
     setNewCubeDescription('');
+    setNewCubeSchemaType('kpi');
     setNewCubeSourceType('manual');
     setNewCubeConnectorId(null);
     setNewCubeScheduleEnabled(false);
@@ -781,20 +802,38 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                           <Network className="h-4 w-4 mr-1" />
                           Intelligence
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            if (confirm(`Seed Bosch business logic for "${cube.name}"? This adds finance terminology, calculation formulas, and query patterns.`)) {
-                              seedBoschLogicMutation.mutate(cube.id);
-                            }
-                          }}
-                          disabled={seedBoschLogicMutation.isPending}
-                          data-testid={`button-seed-bosch-${cube.id}`}
-                        >
-                          <Database className="h-4 w-4 mr-1" />
-                          {seedBoschLogicMutation.isPending ? 'Seeding...' : 'Seed Bosch'}
-                        </Button>
+                        {/* Show the correct seed button based on cube schema type */}
+                        {(!cube.schemaType || cube.schemaType === 'kpi') ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              if (confirm(`Seed Bosch business logic for "${cube.name}"? This adds finance terminology, calculation formulas, and query patterns.`)) {
+                                seedBoschLogicMutation.mutate(cube.id);
+                              }
+                            }}
+                            disabled={seedBoschLogicMutation.isPending}
+                            data-testid={`button-seed-bosch-${cube.id}`}
+                          >
+                            <Database className="h-4 w-4 mr-1" />
+                            {seedBoschLogicMutation.isPending ? 'Seeding...' : 'Seed Bosch'}
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              if (confirm(`Seed Investment/CAPEX/PMO business logic for "${cube.name}"? This adds terminology, calculation formulas, and query patterns for Investment, CAPEX and PMO data.`)) {
+                                seedInvestmentLogicMutation.mutate(cube.id);
+                              }
+                            }}
+                            disabled={seedInvestmentLogicMutation.isPending}
+                            data-testid={`button-seed-investment-${cube.id}`}
+                          >
+                            <Database className="h-4 w-4 mr-1" />
+                            {seedInvestmentLogicMutation.isPending ? 'Seeding...' : 'Seed Investment'}
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="outline"
@@ -908,6 +947,36 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                   onChange={(e) => setNewCubeDescription(e.target.value)}
                   data-testid="input-cube-description"
                 />
+              </div>
+              <div>
+                <Label className="mb-2 block">Schema Type *</Label>
+                <RadioGroup
+                  value={newCubeSchemaType}
+                  onValueChange={(v) => setNewCubeSchemaType(v as 'kpi' | 'investment_capex_pmo')}
+                  className="space-y-2"
+                  data-testid="radio-schema-type"
+                >
+                  <div
+                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${newCubeSchemaType === 'kpi' ? 'border-primary bg-primary/5' : 'hover:bg-muted/30'}`}
+                    onClick={() => setNewCubeSchemaType('kpi')}
+                  >
+                    <RadioGroupItem value="kpi" id="schema-kpi" className="mt-0.5" />
+                    <div className="flex-1">
+                      <Label htmlFor="schema-kpi" className="cursor-pointer font-medium">KPI — Capacity &amp; Revenue</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Workforce, billing utilisation, headcount and revenue data (MV_GB_INSIGHTS format)</p>
+                    </div>
+                  </div>
+                  <div
+                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${newCubeSchemaType === 'investment_capex_pmo' ? 'border-primary bg-primary/5' : 'hover:bg-muted/30'}`}
+                    onClick={() => setNewCubeSchemaType('investment_capex_pmo')}
+                  >
+                    <RadioGroupItem value="investment_capex_pmo" id="schema-investment" className="mt-0.5" />
+                    <div className="flex-1">
+                      <Label htmlFor="schema-investment" className="cursor-pointer font-medium">Investment / CAPEX / PMO</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Project budgets, capital expenditure tracking and PMO approved vs actual (Investment Tracker format)</p>
+                    </div>
+                  </div>
+                </RadioGroup>
               </div>
             </div>
           )}

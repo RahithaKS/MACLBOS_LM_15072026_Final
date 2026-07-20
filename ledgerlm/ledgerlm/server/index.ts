@@ -36,6 +36,7 @@ import { fixAzureBlobConnectorSchedules } from "./migrations/fix-azure-blob-conn
 import { addCustomerColumns } from "./migrations/add-customer-columns";
 import { createAuditLogTable } from "./migrations/create-audit-log";
 import { createRetentionPoliciesTable } from "./migrations/create-retention-policies";
+import { runInvestmentTablesMigration } from "./migrations/create-investment-tables";
 import { runRetentionEngine } from "./services/retentionEngine";
 import { runBackup } from "./services/backupService";
 import rateLimit from "express-rate-limit";
@@ -291,6 +292,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   await addCustomerColumns();
   await createAuditLogTable();
   await createRetentionPoliciesTable();
+
+  // Create Investment/CAPEX/PMO fact table and add schema_type to cubes
+  await runInvestmentTablesMigration();
 
   await seedDatabase();
   await fixAzureBlobConnectorSchedules();

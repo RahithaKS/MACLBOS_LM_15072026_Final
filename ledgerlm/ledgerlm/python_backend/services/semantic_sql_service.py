@@ -16368,6 +16368,148 @@ Return a JSON object with:
 
     # ==================== END PLAN DATA QUERY NAVIGATION ====================
 
+    # =====================================================================
+    # INVESTMENT / CAPEX / PMO INGESTION
+    # =====================================================================
+
+    # Fixed column mapping for the Investment/CAPEX/PMO Excel (20 columns)
+    INVESTMENT_COLUMN_MAPPING = {
+        'FiscalYear':               'fiscal_year',
+        'Month':                    'month',
+        'Dept':                     'dept',
+        'ProjDisplayId':            'proj_display_id',
+        'Project Name':             'project_name',
+        'Category':                 'category',
+        'Grouping':                 'grouping',
+        'Type':                     'type',
+        'Yearly Approved_tUSD':     'yearly_approved_tusd',
+        'Monthly Approved_tUSD':    'monthly_approved_tusd',
+        'Actual_tUSD':              'actual_tusd',
+        'Balance tUSD':             'balance_tusd',
+        'Yearly Approved_mINR':     'yearly_approved_minr',
+        'Monthly Approved_mINR':    'monthly_approved_minr',
+        'Actual_mINR':              'actual_minr',
+        'Expenses_mINR':            'expenses_minr',
+        'Expenses_tUSD':            'expenses_tusd',
+        'Travel_mINR':              'travel_minr',
+        'Travel_tUSD':              'travel_tusd',
+        'Balance mINR':             'balance_minr',
+    }
+
+    def ingest_investment_data(self,
+                               file_path: str,
+                               cube_id: str,
+                               batch_size: int = 10000,
+                               job_id: str = None) -> dict:
+        """
+        Ingest Investment/CAPEX/PMO Excel file into cube_investment_data table.
+        Fixed 20-column schema — maps headers directly, no fuzzy matching needed.
+        """
+        import pandas as pd
+        import json as _json
+
+        logger.info(f"[INVESTMENT] Starting ingestion: {file_path} for cube {cube_id}")
+        start_time = datetime.now()
+
+        try:
+            if not self.validate_cube_exists(cube_id):
+                return {'success': False, 'error': f"Cube ID '{cube_id}' does not exist"}
+
+            # Support both .xls (xlrd) and .xlsx (openpyxl)
+            engine = 'xlrd' if file_path.lower().endswith('.xls') else 'openpyxl'
+            try:
+                xl = pd.ExcelFile(file_path, engine=engine)
+            except Exception:
+                xl = pd.ExcelFile(file_path)
+
+            frames = []
+            for sheet in xl.sheet_names:
+                frames.append(pd.read_excel(xl, sheet_name=sheet))
+                logger.info(f"[INVESTMENT] Sheet '{sheet}': {len(frames[-1])} rows")
+            df = pd.concat(frames, ignore_index=True)
+            total_rows = len(df)
+            logger.info(f"[INVESTMENT] Total rows: {total_rows}")
+
+            # Map Excel headers → DB columns (case-insensitive)
+            excel_cols_lower = {str(c).lower().strip(): c for c in df.columns}
+            df_mapped = pd.DataFrame()
+            for excel_col, db_col in self.INVESTMENT_COLUMN_MAPPING.items():
+                actual = excel_cols_lower.get(excel_col.lower())
+                if actual is not None:
+                    df_mapped[db_col] = df[actual]
+
+            if df_mapped.empty:
+                return {'success': False, 'error': 'No Investment columns matched. Ensure the file has the expected 20-column Investment/CAPEX/PMO format.'}
+
+            # Clean NaN → None
+            df_mapped = df_mapped.astype(object).where(pd.notna(df_mapped), None)
+            df_mapped['cube_id'] = cube_id
+            df_mapped['source_row_number'] = range(1, total_rows + 1)
+
+            # Collect dimension metadata
+            types      = df_mapped['type'].dropna().unique().tolist() if 'type' in df_mapped.columns else []
+            categories = df_mapped['category'].dropna().unique().tolist() if 'category' in df_mapped.columns else []
+            depts      = df_mapped['dept'].dropna().unique().tolist() if 'dept' in df_mapped.columns else []
+            years      = df_mapped['fiscal_year'].dropna().unique().tolist() if 'fiscal_year' in df_mapped.columns else []
+
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+
+            # Mark job running
+            if job_id:
+                self.update_ingestion_job(job_id, status='running', progress_rows=0, total_rows=total_rows)
+
+            # ADDITIVE ingestion — do NOT clear existing data
+            cols = [c for c in df_mapped.columns]
+            placeholders = ', '.join(['%s'] * len(cols))
+            col_names    = ', '.join(f'"{c}"' for c in cols)
+            insert_sql   = f'INSERT INTO cube_investment_data ({col_names}) VALUES ({placeholders})'
+
+            inserted = 0
+            errors   = []
+            for start in range(0, total_rows, batch_size):
+                batch = df_mapped.iloc[start:start + batch_size]
+                rows  = [tuple(r[c] for c in cols) for _, r in batch.iterrows()]
+                try:
+                    execute_values(cursor, insert_sql, rows, page_size=batch_size)
+                    conn.commit()
+                    inserted += len(rows)
+                    if job_id:
+                        self.update_ingestion_job(job_id, status='running', progress_rows=inserted, total_rows=total_rows)
+                    logger.info(f"[INVESTMENT] Inserted {inserted}/{total_rows} rows")
+                except Exception as batch_err:
+                    conn.rollback()
+                    errors.append(str(batch_err))
+                    logger.error(f"[INVESTMENT] Batch error: {batch_err}")
+
+            cursor.close()
+            conn.close()
+
+            elapsed = (datetime.now() - start_time).total_seconds()
+            if job_id:
+                self.update_ingestion_job(job_id, status='completed', progress_rows=inserted, total_rows=total_rows, rows_inserted=inserted, elapsed_seconds=elapsed)
+
+            logger.info(f"[INVESTMENT] Done: {inserted} rows in {elapsed:.1f}s")
+            return {
+                'success': True,
+                'rows_processed': total_rows,
+                'rows_inserted': inserted,
+                'elapsed_seconds': elapsed,
+                'dimensions': {'types': types, 'categories': categories, 'depts': depts, 'fiscal_years': years},
+                'errors': errors,
+            }
+
+        except Exception as e:
+            logger.error(f"[INVESTMENT] Ingestion failed: {e}")
+            if job_id:
+                try:
+                    self.update_ingestion_job(job_id, status='failed', error_message=str(e))
+                except Exception:
+                    pass
+            return {'success': False, 'error': str(e)}
+
+    # ==================== END INVESTMENT INGESTION ====================
+
 
 # Singleton instance
 semantic_sql_service = SemanticSQLService()

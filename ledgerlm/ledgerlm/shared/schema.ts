@@ -479,6 +479,7 @@ export const cubes = pgTable("cubes", {
   name: text("name").notNull(), // e.g., 'KPI Metrics', 'P&L', 'Budget'
   description: text("description"),
   sourceType: varchar("source_type", { length: 20 }).notNull().default('manual'), // 'anaplan', 'azure_blob', 'manual', 'all'
+  schemaType: varchar("schema_type", { length: 50 }).notNull().default('kpi'), // 'kpi' | 'investment_capex_pmo'
   connectorId: varchar("connector_id"), // Link to domain_api_connectors.id (FK enforced at DB level)
   ingestionConfig: text("ingestion_config"), // JSON config for source-specific settings (schedule, filters, etc.)
   createdBy: varchar("created_by").notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -1265,6 +1266,50 @@ export const insertCubePlanDataSchema = createInsertSchema(cubePlanData).omit({
 export const insertCubeFactDataSchema = createInsertSchema(cubeFactData).omit({
   ingestedAt: true,
 });
+
+// ── Investment / CAPEX / PMO fact table ──────────────────────────────────────
+export const cubeInvestmentData = pgTable("cube_investment_data", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  cubeId: varchar("cube_id", { length: 255 }).notNull().references(() => cubes.id, { onDelete: 'cascade' }),
+  // Dimension columns
+  fiscalYear:       varchar("fiscal_year", { length: 10 }),
+  month:            varchar("month", { length: 5 }),
+  dept:             varchar("dept", { length: 255 }),
+  projDisplayId:    varchar("proj_display_id", { length: 255 }),
+  projectName:      varchar("project_name", { length: 500 }),
+  category:         varchar("category", { length: 255 }),
+  grouping:         varchar("grouping", { length: 255 }),
+  type:             varchar("type", { length: 100 }),  // 'Cost' | 'CAPEX' | 'PMO' | 'Bosch Actuals' | 'Total Funds'
+  // Metric columns – thousands USD
+  yearlyApprovedTusd:   numeric("yearly_approved_tusd"),
+  monthlyApprovedTusd:  numeric("monthly_approved_tusd"),
+  actualTusd:           numeric("actual_tusd"),
+  balanceTusd:          numeric("balance_tusd"),
+  expensesTusd:         numeric("expenses_tusd"),
+  travelTusd:           numeric("travel_tusd"),
+  // Metric columns – millions INR
+  yearlyApprovedMinr:   numeric("yearly_approved_minr"),
+  monthlyApprovedMinr:  numeric("monthly_approved_minr"),
+  actualMinr:           numeric("actual_minr"),
+  expensesMinr:         numeric("expenses_minr"),
+  travelMinr:           numeric("travel_minr"),
+  balanceMinr:          numeric("balance_minr"),
+  ingestedAt:       timestamp("ingested_at").defaultNow(),
+  sourceRowNumber:  integer("source_row_number"),
+}, (table) => ({
+  cubeIdIdx:    index("cube_inv_cube_id_idx").on(table.cubeId),
+  typeIdx:      index("cube_inv_type_idx").on(table.cubeId, table.type),
+  periodIdx:    index("cube_inv_period_idx").on(table.cubeId, table.fiscalYear, table.month),
+  deptIdx:      index("cube_inv_dept_idx").on(table.cubeId, table.dept),
+  projIdx:      index("cube_inv_proj_idx").on(table.cubeId, table.projDisplayId),
+  categoryIdx:  index("cube_inv_cat_idx").on(table.cubeId, table.category),
+}));
+
+export const insertCubeInvestmentDataSchema = createInsertSchema(cubeInvestmentData).omit({
+  ingestedAt: true,
+});
+export type InsertCubeInvestmentData = z.infer<typeof insertCubeInvestmentDataSchema>;
+export type CubeInvestmentData = typeof cubeInvestmentData.$inferSelect;
 
 export const insertCubeColumnMappingSchema = createInsertSchema(cubeColumnMappings).omit({
   id: true,

@@ -110,6 +110,7 @@ const createCubeSchema = z.object({
   description:     z.string().max(1000).optional().nullable(),
   domainId:        z.string().optional(),
   sourceType:      z.string().max(50).optional(),
+  schemaType:      z.enum(['kpi', 'investment_capex_pmo']).optional().default('kpi'),
   connectorId:     z.string().optional(),
   ingestionConfig: z.record(z.unknown()).optional().nullable(),
 });
@@ -4522,11 +4523,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           deletedCount++;
         }
 
-        // Also clear the cube_fact_data (SQL queryable data)
+        // Clear KPI fact data
         const factDataDeleted = await storage.clearCubeFactData(cubeId);
         console.log(`[AUDIT] Cleared ${factDataDeleted} rows from cube_fact_data for cube ${cubeId}`);
 
-        res.json({ success: true, deletedCount, factDataDeleted });
+        // Clear Investment/CAPEX/PMO data for this cube
+        const invDataResult = await db.execute(
+          sql`DELETE FROM cube_investment_data WHERE cube_id = ${cubeId}`
+        );
+        const invDataDeleted = (invDataResult as any).rowCount ?? 0;
+        if (invDataDeleted > 0) {
+          console.log(`[AUDIT] Cleared ${invDataDeleted} rows from cube_investment_data for cube ${cubeId}`);
+        }
+
+        res.json({ success: true, deletedCount, factDataDeleted, invDataDeleted });
       } catch (error: any) {
         console.error("Error deleting cube documents:", error);
         res.status(500).json({ error: 'Internal server error' });
@@ -6952,6 +6962,7 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
         name: name.trim(),
         description: description?.trim() || null,
         sourceType: sourceType || "manual",
+        schemaType: (cubeParsed.data.schemaType as 'kpi' | 'investment_capex_pmo') || 'kpi',
         connectorId: connectorId || null,
         ingestionConfig: processedConfig
           ? JSON.stringify(processedConfig)
@@ -8413,6 +8424,72 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
         });
       } catch (error: any) {
         console.error("Error seeding Bosch business logic:", error);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    },
+  );
+
+  // Seed Investment/CAPEX/PMO business logic for a cube
+  app.post(
+    "/api/domain-admin/cubes/:cubeId/seed-investment-logic",
+    requireDomainAdmin,
+    async (req, res) => {
+      try {
+        const { cubeId } = req.params;
+        const domain = (req as any).domain;
+        const isSuperAdmin = (req as any).isSuperAdmin;
+
+        const cube = await storage.getCube(cubeId);
+        if (!cube) return res.status(404).json({ error: "Cube not found" });
+        if (!isSuperAdmin && cube.domainId !== domain?.id) {
+          return res.status(403).json({ error: "Access denied: cube does not belong to your domain" });
+        }
+
+        const {
+          INVESTMENT_BUSINESS_TERMS,
+          INVESTMENT_CALCULATION_RULES,
+          INVESTMENT_FILTER_RULES,
+          INVESTMENT_QUERY_PATTERNS,
+          INVESTMENT_COLUMN_VALUES,
+        } = await import("./seed/investment-business-logic");
+
+        const results = { termsCreated: 0, calculationsCreated: 0, filtersCreated: 0, patternsCreated: 0, columnValuesCreated: 0 };
+
+        for (const term of INVESTMENT_BUSINESS_TERMS) {
+          try {
+            await db.insert(cubeBusinessTerms).values({ cubeId, termName: term.termName, termAliases: term.termAliases, definition: term.definition, sqlFilter: term.sqlFilter, requiredColumns: term.requiredColumns, category: term.category, priority: term.priority, isSeeded: 1 });
+            results.termsCreated++;
+          } catch (e) { /* skip duplicates */ }
+        }
+        for (const calc of INVESTMENT_CALCULATION_RULES) {
+          try {
+            await db.insert(cubeCalculationRules).values({ cubeId, calculationName: calc.calculationName, calculationAliases: calc.calculationAliases, description: calc.description, formula: calc.formula, formulaType: calc.formulaType, resultType: calc.resultType, requiredColumns: calc.requiredColumns, defaultFilters: calc.defaultFilters, roundingPrecision: calc.roundingPrecision, isSeeded: 1 });
+            results.calculationsCreated++;
+          } catch (e) { /* skip duplicates */ }
+        }
+        for (const filter of INVESTMENT_FILTER_RULES) {
+          try {
+            await db.insert(cubeFilterRules).values({ cubeId, filterName: filter.filterName, filterAliases: filter.filterAliases, description: filter.description, sqlPredicate: filter.sqlPredicate, targetColumn: filter.targetColumn, isDefault: filter.isDefault ? 1 : 0, isSeeded: 1 });
+            results.filtersCreated++;
+          } catch (e) { /* skip duplicates */ }
+        }
+        for (const pattern of INVESTMENT_QUERY_PATTERNS) {
+          try {
+            await db.insert(cubeQueryPatterns).values({ cubeId, patternName: pattern.patternName, patternDescription: pattern.patternDescription, triggerPhrases: pattern.triggerPhrases, sqlTemplate: pattern.sqlTemplate, templateVariables: pattern.templateVariables, exampleQuestion: pattern.exampleQuestion, exampleSql: pattern.exampleSql, category: pattern.category, isSeeded: 1 });
+            results.patternsCreated++;
+          } catch (e) { /* skip duplicates */ }
+        }
+        for (const cv of INVESTMENT_COLUMN_VALUES) {
+          try {
+            await db.insert(cubeColumnValues).values({ cubeId, columnName: cv.columnName, valueName: cv.valueName, valueDescription: cv.valueDescription, valueAliases: cv.valueAliases, usageContext: cv.usageContext, relatedValues: cv.relatedValues });
+            results.columnValuesCreated++;
+          } catch (e) { /* skip duplicates */ }
+        }
+
+        console.log(`[AUDIT] Seeded Investment/CAPEX/PMO business logic for cube ${cube.name}:`, results);
+        res.json({ success: true, message: `Seeded Investment/CAPEX/PMO logic for cube "${cube.name}"`, ...results });
+      } catch (error: any) {
+        console.error("Error seeding Investment business logic:", error);
         res.status(500).json({ error: 'Internal server error' });
       }
     },

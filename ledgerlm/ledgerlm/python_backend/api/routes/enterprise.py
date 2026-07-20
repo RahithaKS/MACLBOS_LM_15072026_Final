@@ -141,7 +141,17 @@ async def process_enterprise_document_background(document_id: str, company_id: s
                                    'particulars' in columns_lower or
                                    any('particulars' in c for c in columns_lower))
                     
-                    if is_plan_data:
+                    # Investment/CAPEX/PMO format: has 'fiscalyear' + 'projdisplayid' columns
+                    is_investment_data = (
+                        'fiscalyear' in columns_lower and
+                        'projdisplayid' in columns_lower and
+                        'type' in columns_lower
+                    )
+
+                    if is_investment_data:
+                        logger.info(f"Detected Investment/CAPEX/PMO format - loading into cube_investment_data")
+                        result = sql_service.ingest_investment_data(absolute_path, cube_id, job_id=job_id)
+                    elif is_plan_data:
                         logger.info(f"Detected Plan data format (Manual inputs MBR Master) - loading into cube_plan_data")
                         result = sql_service.ingest_plan_data(absolute_path, cube_id, source_file=os.path.basename(absolute_path))
                     else:
@@ -150,11 +160,12 @@ async def process_enterprise_document_background(document_id: str, company_id: s
                 except Exception as detect_err:
                     logger.warning(f"Format detection failed ({detect_err}), defaulting to fact data ingestion")
                     is_plan_data = False
+                    is_investment_data = False
                     result = sql_service.ingest_excel_to_facts(absolute_path, cube_id, job_id=job_id)
                 
                 if result.get('success'):
                     rows_inserted = result.get('rows_inserted', 0)
-                    target_table = 'cube_plan_data' if is_plan_data else 'cube_fact_data'
+                    target_table = 'cube_investment_data' if is_investment_data else ('cube_plan_data' if is_plan_data else 'cube_fact_data')
                     logger.info(f"SQL ingestion complete: {rows_inserted} rows loaded into {target_table}")
                     
                     # Update status to completed (synchronous call for reliability)
