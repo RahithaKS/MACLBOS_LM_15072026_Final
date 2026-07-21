@@ -536,7 +536,8 @@ export class EvidenceBroker {
       columns.includes("resource_cost") || // _build_resource_cost_sql
       columns.includes("travel_cost") || // _build_travel_cost_sql
       columns.includes("other_direct_cost") || // _build_other_direct_cost_sql
-      columns.some((c) => c.endsWith("_usd_sum") || c.endsWith("_inr_sum")); // generic compile_sql path: SUM(amount_usd) → amount_usd_sum
+      columns.some((c) => c.endsWith("_usd_sum") || c.endsWith("_inr_sum")) || // generic compile_sql path: SUM(amount_usd) → amount_usd_sum
+      columns.includes("avg_monthly_value"); // avg_monthly builders return raw USD — must ÷1M
 
     // Investment data is pre-scaled in its display unit (tUSD / mINR).
     // Column headers already carry the unit — format as plain numbers, no $ or M suffix.
@@ -1488,7 +1489,8 @@ export class EvidenceBroker {
       c === "ytd_attrition" ||
       c === "month_attrition" ||
       c === "billed_capacity" ||
-      c === "available_capacity"
+      c === "available_capacity" ||
+      c === "months_counted"   // avg_monthly: plain integer, not a financial value
     );
   }
 
@@ -1550,6 +1552,10 @@ export class EvidenceBroker {
       avg_outsourcing_cap: { label: "Avg Outsourcing", type: "count" },
       avg_total_capacity: { label: "Avg Capacity", type: "count" },
       months_used: { label: "Months", type: "dimension" },
+      avg_monthly_value: { label: "Avg Monthly Value", type: "monetary" },
+      months_counted: { label: "Months in Cube", type: "dimension" },
+      first_month: { label: "From", type: "dimension" },
+      last_month: { label: "To", type: "dimension" },
       budget_per_capacity: { label: "Budget / Capacity", type: "monetary" },
       budget_per_avg_capacity: { label: "Budget / Avg Cap", type: "monetary" },
       amount_usd: { label: "Amount", type: "monetary" },
@@ -2617,6 +2623,32 @@ export class EvidenceBroker {
     const allMonths: Set<number> = new Set();
     const allYears: Set<number> = new Set();
 
+    // ── avg_monthly coverage notice ───────────────────────────────────────────
+    // When the result contains months_counted (avg_monthly_mode), the cube may
+    // not have a full year of data.  Build an explicit coverage notice so the
+    // LLM always discloses the limitation.
+    const avgResult = sqlResults.find(
+      (sql) => sql.columns && sql.columns.includes("months_counted"),
+    );
+    if (avgResult && avgResult.results && avgResult.results.length > 0) {
+      const row = avgResult.results[0];
+      const mc = Number(row.months_counted) || 0;
+      const yr = avgResult.year ? ` ${avgResult.year}` : "";
+      const firstM: string = row.first_month ?? "";
+      const lastM: string = row.last_month ?? "";
+      const rangeLabel =
+        firstM && lastM && firstM !== lastM
+          ? `${firstM}${yr} – ${lastM}${yr}`
+          : `${firstM}${yr}`.trim() || `${mc} month${mc !== 1 ? "s" : ""}`;
+      const isFullYear = mc >= 12;
+      notices.push(
+        isFullYear
+          ? `- AVERAGE DATA COVERAGE: This average is computed over all 12 months of${yr} data (${rangeLabel}). Full-year data is available — no coverage caveat needed.`
+          : `- AVERAGE DATA COVERAGE (CRITICAL): This average is computed over only **${mc} month${mc !== 1 ? "s" : ""}** of data currently loaded in this cube (${rangeLabel}). The cube does NOT contain a full year of data. If the user asked for a yearly or annual average, this figure reflects ONLY ${mc} of 12 months. The narrative MUST prominently state: "Note: Based on ${mc} month${mc !== 1 ? "s" : ""} of available cube data (${rangeLabel}) — not a full-year average."`,
+      );
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     sqlResults.forEach((sql) => {
       if (sql.results && sql.results.length > 0) {
         sql.results.forEach((row) => {
@@ -2812,6 +2844,13 @@ ${userQuery}
 ════════════════════════════════════════════════════════════
   STRICT RULES
 ════════════════════════════════════════════════════════════
+
+RULE 0 — AVERAGE MONTHLY DATA COVERAGE (MANDATORY — apply whenever "Avg Monthly Value" / "Months in Cube" columns are present):
+The AUTHORIZED DATA above contains an AVERAGE DATA COVERAGE notice. You MUST:
+a) Open the Summary section with the exact coverage statement — e.g. "This average is based on 1 month of available cube data (Jan 2026) — not a full-year average."
+b) Never present the average as if it represents a full-year figure unless the coverage notice says all 12 months are available.
+c) If the user asked for an annual or yearly average and the cube has fewer than 12 months, explicitly flag the limitation and clarify what the figure actually represents.
+Omitting this coverage statement is a critical error.
 
 RULE 1 — DATA LOCK:
 Only use entity names, values, and figures from the AUTHORIZED DATA above. Never invent numbers.

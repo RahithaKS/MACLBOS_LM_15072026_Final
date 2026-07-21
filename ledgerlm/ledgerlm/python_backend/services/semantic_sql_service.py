@@ -6845,7 +6845,9 @@ Return a JSON object with:
                         / NULLIF(COUNT(DISTINCT month), 0),
                         {rounding}
                     ) AS avg_monthly_value,
-                    COUNT(DISTINCT month) AS months_counted
+                    COUNT(DISTINCT month) AS months_counted,
+                    TO_CHAR(TO_DATE(MIN(month)::text, 'MM'), 'Mon') AS first_month,
+                    TO_CHAR(TO_DATE(MAX(month)::text, 'MM'), 'Mon') AS last_month
                 FROM monthly_ebit
             """
             avg_ebit_params = list(time_params) + list(entity_params)
@@ -8778,7 +8780,9 @@ Return a JSON object with:
             '        SUM(' + value_alias + ')::numeric / NULLIF(COUNT(DISTINCT month), 0),\n'
             '        2\n'
             '    ) AS avg_monthly_value,\n'
-            '    COUNT(DISTINCT month) AS months_counted'
+            '    COUNT(DISTINCT month) AS months_counted,\n'
+            "    TO_CHAR(TO_DATE(MIN(month)::text, 'MM'), 'Mon') AS first_month,\n"
+            "    TO_CHAR(TO_DATE(MAX(month)::text, 'MM'), 'Mon') AS last_month"
         )
         parts.append('FROM _monthly_base')
         if group_clause:
