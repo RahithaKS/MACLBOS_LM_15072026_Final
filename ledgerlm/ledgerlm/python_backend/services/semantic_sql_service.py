@@ -5171,6 +5171,12 @@ Return a JSON object with:
                         'use_calculation': _ebit_calc,
                         'currency': _ebit_currency,
                     }
+                    # Enhancement #4 extension: avg_monthly for GB P&L EBIT
+                    if detect_avg_monthly_intent(query):
+                        intent['avg_monthly_mode'] = True
+                        if 'month' not in intent['group_by']:
+                            intent['group_by'] = ['month'] + intent['group_by']
+                        logger.info("GB P&L EBIT fast path: avg_monthly_mode=True")
                     intent = self.apply_default_time_filters(intent, cube_id, time_scope)
                     intent = self._inject_time_from_query(intent, query)
                     intent['original_query'] = query
@@ -5234,6 +5240,11 @@ Return a JSON object with:
                     'use_calculation': 'gb p&l total direct cost',
                     'currency': _tdc_currency,
                 }
+                if detect_avg_monthly_intent(query):
+                    intent['avg_monthly_mode'] = True
+                    if 'month' not in intent['group_by']:
+                        intent['group_by'] = ['month'] + intent['group_by']
+                    logger.info("GB P&L Total Direct Cost fast path: avg_monthly_mode=True")
                 intent = self.apply_default_time_filters(intent, cube_id, time_scope)
                 intent = self._inject_time_from_query(intent, query)
                 intent['original_query'] = query
@@ -5269,6 +5280,11 @@ Return a JSON object with:
                     'use_calculation': 'gb p&l corporate cost',
                     'currency': _corp_currency,
                 }
+                if detect_avg_monthly_intent(query):
+                    intent['avg_monthly_mode'] = True
+                    if 'month' not in intent['group_by']:
+                        intent['group_by'] = ['month'] + intent['group_by']
+                    logger.info("GB P&L Indirect Cost fast path: avg_monthly_mode=True")
                 intent = self.apply_default_time_filters(intent, cube_id, time_scope)
                 intent = self._inject_time_from_query(intent, query)
                 intent['original_query'] = query
@@ -5306,6 +5322,11 @@ Return a JSON object with:
                     'use_calculation': 'gb p&l gross margin',
                     'currency': _gm_currency,
                 }
+                if detect_avg_monthly_intent(query):
+                    intent['avg_monthly_mode'] = True
+                    if 'month' not in intent['group_by']:
+                        intent['group_by'] = ['month'] + intent['group_by']
+                    logger.info("GB P&L Gross Margin fast path: avg_monthly_mode=True")
                 intent = self.apply_default_time_filters(intent, cube_id, time_scope)
                 intent = self._inject_time_from_query(intent, query)
                 intent['original_query'] = query
@@ -5390,6 +5411,11 @@ Return a JSON object with:
                     'limit': 100,
                     'use_calculation': _pl_rev_calc,
                 }
+                if detect_avg_monthly_intent(query):
+                    intent['avg_monthly_mode'] = True
+                    if 'month' not in intent['group_by']:
+                        intent['group_by'] = ['month']
+                    logger.info(f"P&L Revenue fast path: avg_monthly_mode=True ({_pl_rev_calc})")
                 intent = self.apply_default_time_filters(intent, cube_id,
                                                         time_scope)
                 intent = self._inject_time_from_query(intent, query)
@@ -6623,6 +6649,18 @@ Return a JSON object with:
             'limit': 100,
             'currency': _currency
         }
+
+        # Enhancement #4 extension: avg_monthly_mode for GB P&L cost breakdown.
+        # When detected, add 'month' to group_by so the base SQL groups per month
+        # (enabling _apply_avg_monthly_sql_wrapper in the generic compile_sql path).
+        _gbpl_avg_monthly = detect_avg_monthly_intent(query)
+        if _gbpl_avg_monthly:
+            intent['avg_monthly_mode'] = True
+            if 'month' not in intent['group_by']:
+                intent['group_by'] = ['month'] + intent['group_by']
+            logger.info(
+                f"_build_gb_pl_cost_breakdown_intent: avg_monthly_mode=True"
+            )
 
         logger.info(
             f"Built GB P&L cost breakdown intent: group_by={_group_by}, "
@@ -8732,7 +8770,21 @@ Return a JSON object with:
             logger.warning(
                 "_apply_avg_monthly_sql_wrapper: could not detect value alias, skipping")
             return result
-        value_alias = _aliases[-1]  # last alias in SELECT = the metric
+        # Priority: prefer a known metric alias over trailing percentage/ratio columns.
+        # Multi-column builders (EBIT, Gross Margin) end with a % alias — averaging the
+        # percentage rather than the raw value would be wrong.
+        _PRIORITY_ALIASES = [
+            'gross_margin',      # EBIT = Gross Margin in Bosch P&L; also Gross Margin queries
+            'ebit',              # fallback for pure ebit alias
+            'indirect_cost',     # _build_indirect_cost_sql
+            'total_direct_cost', # _build_direct_cost_sql (with breakdown)
+            'pl_revenue_inr', 'pl_revenue',  # revenue builders (inr checked first)
+            'revenue',           # generic revenue alias
+        ]
+        value_alias = next(
+            (a for a in _PRIORITY_ALIASES if a in _aliases),
+            _aliases[-1],        # fallback: last alias in SELECT
+        )
 
         # Extract the GROUP BY clause to figure out the outer (non-month) dimensions.
         gb_match = re.search(
