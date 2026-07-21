@@ -1897,6 +1897,57 @@ def get_column_for_cost_category(db_col: str, cost_category: str) -> str:
     return db_col
 
 
+# ── GB lookup patterns ─────────────────────────────────────────────────────
+# Actual distinct values from cube_fact_data.planning_gb / project_gb.
+# Sorted longest-first so longer matches (e.g. "Corp-BGSV") win over shorter
+# sub-strings (e.g. "C").  The trigger phrase allows an optional dash/en-dash
+# separator so "planning GB - 2WP" and "planning GB 2WP" both match.
+_PLANNING_GB_VALUES: List[str] = sorted([
+    '2WP', 'BA-Digital Enterprise', 'BA-Engineering for Digital', 'BA-Healthcare',
+    'BD', 'BEG', 'BHCS', 'BMG', 'BSH', 'BT', 'C', 'CR', 'CVS',
+    'Corp-BGSV', 'Corp-BGSW', 'Corp-Investment', 'Corp-MS', 'Corp-RB-MX',
+    'Corp-SDS', 'Corp-SX', 'Corporate', 'Cyber', 'DC', 'DeemedNotAllocated',
+    'EB', 'EIGROW', 'EM', 'ETAS', 'GROW', 'GS', 'HC', 'HIS', 'HMI',
+    'House of Talent/EHT - MS', 'House of Talent/EHT - SX',
+    'ITRAMS', 'Internal Investment', 'Investment',
+    'M-Others', 'MA', 'ME', 'MPS', 'MS-ETT', 'MS_Delivery',
+    'New Business Ventures', 'No GB Found',
+    'PS', 'PS-CV', 'PS-Others', 'PS-SC', 'PT',
+    'Product Engineering', 'Product Method & Tools', 'Product Method and Tools',
+    'SDS', 'SDS-Investment', 'SDS_CORPORATE', 'SO', 'SX_Delivery',
+    'VM', 'VM-BS', 'VM-OS', 'VM-ST', 'VM-VS',
+    'X', 'XC', 'XC-AC', 'XC-AS', 'XC-CE', 'XC-CP', 'XC-OT',
+], key=lambda v: -len(v))
+
+_PROJECT_GB_VALUES: List[str] = sorted([
+    '2WP', 'BD', 'BEG', 'BHCS', 'BMG', 'BSH', 'BT', 'C', 'CORPORATE', 'CR',
+    'Corp-BGSV', 'Corp-BGSW', 'Corp-BSGW NE-MX', 'Corp-Investment',
+    'Corp-MS', 'Corp-SDS', 'Corp-SX', 'Corporate', 'DC', 'DeemedNotAllocated',
+    'EB', 'EIGROW', 'EM', 'ETAS', 'GROW', 'GS', 'HC', 'Horizontals',
+    'House of Talent/EHT', 'ITRAMS', 'Internal Investment', 'Investment',
+    'M-Others', 'MA', 'ME', 'MPS', 'MS-ETT', 'MS_Delivery',
+    'Mobility Solutions External', 'No GB Found',
+    'PS', 'PT', 'SDS', 'SDS-Investment', 'SDS_CORPORATE', 'SO', 'SX_Delivery',
+    'TE-Corporate', 'VM', 'X', 'XC',
+], key=lambda v: -len(v))
+
+# Compiled once at module load — reused in every intent builder.
+# Pattern: "planning gb" (optional dash/en-dash separator) then the GB value.
+_PLANNING_GB_RE = re.compile(
+    r'\bplanning\s+gb\s*[-–]?\s*(?:for\s+)?(' +
+    '|'.join(re.escape(v) for v in _PLANNING_GB_VALUES) +
+    r')',
+    re.IGNORECASE,
+)
+_PROJECT_GB_RE = re.compile(
+    r'\bproject\s+gb\s*[-–]?\s*(?:for\s+)?(' +
+    '|'.join(re.escape(v) for v in _PROJECT_GB_VALUES) +
+    r')',
+    re.IGNORECASE,
+)
+# ── end GB lookup patterns ──────────────────────────────────────────────────
+
+
 class SemanticSQLService:
     """Service for semantic SQL queries on financial data"""
 
@@ -6021,25 +6072,21 @@ Return a JSON object with:
             intent['group_by'] = []  # No grouping for worldwide
 
         # ── Revenue dimension filters (Task #5 additions) ─────────────────────
-        # ProjectGB filter: "project GB MA", "project gb for VM"
-        _pgb_m = re.search(
-            r'\bproject\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
-            query, re.IGNORECASE
-        )
+        # ProjectGB filter — matches all known project_gb values from the DB,
+        # handles dash separators like "project GB - Corp-BGSV".
+        _pgb_m = _PROJECT_GB_RE.search(query)
         if _pgb_m:
-            _pgb_val = _pgb_m.group(1).upper()
+            _pgb_val = _pgb_m.group(1)
             intent['filters'].append({
                 'column': 'project_gb', 'operator': '=', 'value': _pgb_val
             })
             logger.info(f"_build_kpi_intent_fast: ProjectGB filter = {_pgb_val}")
 
-        # PlanningGB filter: "planning GB MA", "planning gb for VM"
-        _plgb_m = re.search(
-            r'\bplanning\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
-            query, re.IGNORECASE
-        )
+        # PlanningGB filter — matches all known planning_gb values from the DB,
+        # handles dash separators like "planning GB - 2WP".
+        _plgb_m = _PLANNING_GB_RE.search(query)
         if _plgb_m:
-            _plgb_val = _plgb_m.group(1).upper()
+            _plgb_val = _plgb_m.group(1)
             intent['filters'].append({
                 'column': 'planning_gb', 'operator': '=', 'value': _plgb_val
             })
@@ -6699,23 +6746,19 @@ Return a JSON object with:
             if 'month' not in _group_by:
                 _group_by = ['month'] + _group_by
 
-        # ProjectGB filter: "project GB MA", "project gb for VM"
-        _pgb_m = re.search(
-            r'\bproject\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
-            query, re.IGNORECASE
-        )
+        # ProjectGB filter — matches all known project_gb values from the DB,
+        # handles dash separators like "project GB - Corp-BGSV".
+        _pgb_m = _PROJECT_GB_RE.search(query)
         if _pgb_m:
-            _pgb_val = _pgb_m.group(1).upper()
+            _pgb_val = _pgb_m.group(1)
             filters.append({'column': 'project_gb', 'operator': '=', 'value': _pgb_val})
             logger.info(f"_build_gb_pl_cost_breakdown_intent: ProjectGB filter = {_pgb_val}")
 
-        # PlanningGB filter: "planning GB MA", "planning gb for VM"
-        _plgb_m = re.search(
-            r'\bplanning\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
-            query, re.IGNORECASE
-        )
+        # PlanningGB filter — matches all known planning_gb values from the DB,
+        # handles dash separators like "planning GB - 2WP".
+        _plgb_m = _PLANNING_GB_RE.search(query)
         if _plgb_m:
-            _plgb_val = _plgb_m.group(1).upper()
+            _plgb_val = _plgb_m.group(1)
             filters.append({'column': 'planning_gb', 'operator': '=', 'value': _plgb_val})
             logger.info(f"_build_gb_pl_cost_breakdown_intent: PlanningGB filter = {_plgb_val}")
 
@@ -15485,25 +15528,21 @@ Return a JSON object with:
                     if 'group_by' not in intent:
                         intent['group_by'] = ['region_entity']
 
-                    # 1. ProjectGB filter: "project GB MA"
-                    _rev_pgb = re.search(
-                        r'\bproject\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
-                        original_query, re.IGNORECASE
-                    )
+                    # 1. ProjectGB filter — matches all known project_gb values,
+                    #    handles dash separators like "project GB - Corp-BGSV".
+                    _rev_pgb = _PROJECT_GB_RE.search(original_query)
                     if _rev_pgb:
-                        _rev_pgb_val = _rev_pgb.group(1).upper()
+                        _rev_pgb_val = _rev_pgb.group(1)
                         intent['filters'].append({
                             'column': 'project_gb', 'operator': '=',
                             'value': _rev_pgb_val
                         })
 
-                    # 2. PlanningGB filter: "planning GB MA"
-                    _rev_plgb = re.search(
-                        r'\bplanning\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
-                        original_query, re.IGNORECASE
-                    )
+                    # 2. PlanningGB filter — matches all known planning_gb values,
+                    #    handles dash separators like "planning GB - 2WP".
+                    _rev_plgb = _PLANNING_GB_RE.search(original_query)
                     if _rev_plgb:
-                        _rev_plgb_val = _rev_plgb.group(1).upper()
+                        _rev_plgb_val = _rev_plgb.group(1)
                         intent['filters'].append({
                             'column': 'planning_gb', 'operator': '=',
                             'value': _rev_plgb_val
