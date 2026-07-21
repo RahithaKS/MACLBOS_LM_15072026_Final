@@ -6142,6 +6142,14 @@ Return a JSON object with:
                     'value': ef['value']
                 })
 
+        # Avg monthly mode: SUM / n_months wrapper applied by compile_sql.
+        # Mutually exclusive with MoM (which uses LAG window instead).
+        if detect_avg_monthly_intent(query):
+            intent['avg_monthly_mode'] = True
+            if 'month' not in intent.get('group_by', []):
+                intent['group_by'] = ['month'] + intent.get('group_by', [])
+            logger.info('_build_kpi_intent_fast: avg_monthly_mode=True')
+
         logger.info(
             f"Built fast KPI intent: year={[f['value'] for f in intent['filters'] if f['column']=='year']}, month={[f['value'] for f in intent['filters'] if f['column']=='month']}, group_by={intent['group_by']}"
         )
@@ -6517,6 +6525,31 @@ Return a JSON object with:
                 'value': int(year_match.group(1))
             })
 
+        # ── Quarter detection: Q1→[1,2,3], Q2→[4,5,6], Q3→[7,8,9], Q4→[10,11,12] ──
+        _epl_quarter_map = {
+            'q1': [1, 2, 3], 'q2': [4, 5, 6],
+            'q3': [7, 8, 9], 'q4': [10, 11, 12]
+        }
+        _epl_text_quarter_patterns = [
+            (r'\b(?:first|1st)\s+quarter\b', [1, 2, 3]),
+            (r'\b(?:second|2nd)\s+quarter\b', [4, 5, 6]),
+            (r'\b(?:third|3rd)\s+quarter\b', [7, 8, 9]),
+            (r'\b(?:fourth|4th)\s+quarter\b', [10, 11, 12]),
+        ]
+        _epl_quarter_detected = False
+        _epl_quarter_months: List[int] = []
+        for _q_key, _q_months in _epl_quarter_map.items():
+            if re.search(r'\b' + _q_key + r'\b', query_lower):
+                _epl_quarter_months.extend(_q_months)
+        if not _epl_quarter_months:
+            for _tpat, _tqm in _epl_text_quarter_patterns:
+                if re.search(_tpat, query_lower):
+                    _epl_quarter_months.extend(_tqm)
+        if _epl_quarter_months:
+            _epl_quarter_months = sorted(set(_epl_quarter_months))
+            _epl_quarter_detected = True
+            logger.info(f"_build_entity_pl_intent: quarter detected → months {_epl_quarter_months}")
+
         month_names = {
             'jan': 1,
             'january': 1,
@@ -6542,28 +6575,32 @@ Return a JSON object with:
             'dec': 12,
             'december': 12
         }
-        # ── Month detection: range-aware (MoM fix) ───────────────────────────
-        # Priority 1: explicit range "jan to mar" → [1,2,3]
-        # Priority 2: MoM mode + single max-month → expand to 1..max
-        # Priority 3: individual month mentions (fallback)
+        # ── Month detection: quarter-aware, range-aware ──────────────────────
+        # Priority 1: quarter keywords (Q1→[1,2,3], etc.)
+        # Priority 2: explicit range "jan to mar" → [1,2,3]
+        # Priority 3: MoM mode + single max-month → expand to 1..max
+        # Priority 4: individual month mentions (fallback)
         _epl_detected_months: List[int] = []
-        _epl_range = extract_month_range_from_text(query)
-        if _epl_range:
-            _epl_detected_months = _epl_range
-            logger.info(f"_build_entity_pl_intent: month range detected → {_epl_detected_months}")
+        if _epl_quarter_detected:
+            _epl_detected_months = _epl_quarter_months
         else:
-            _ebit_seen_months: set = set()
-            for month_name, month_num in sorted(month_names.items(),
-                                                key=lambda x: len(x[0]),
-                                                reverse=True):
-                if re.search(r'\b' + month_name + r'\b', query_lower) and month_num not in _ebit_seen_months:
-                    _ebit_seen_months.add(month_num)
-            _epl_detected_months = sorted(_ebit_seen_months)
-            # MoM mode: single max-month → expand to full 1..max range
-            if detect_mom_intent(query) and len(_epl_detected_months) == 1:
-                _epl_detected_months = list(range(1, _epl_detected_months[0] + 1))
-                logger.info(
-                    f"_build_entity_pl_intent: MoM mode — expanded month to {_epl_detected_months}")
+            _epl_range = extract_month_range_from_text(query)
+            if _epl_range:
+                _epl_detected_months = _epl_range
+                logger.info(f"_build_entity_pl_intent: month range detected → {_epl_detected_months}")
+            else:
+                _ebit_seen_months: set = set()
+                for month_name, month_num in sorted(month_names.items(),
+                                                    key=lambda x: len(x[0]),
+                                                    reverse=True):
+                    if re.search(r'\b' + month_name + r'\b', query_lower) and month_num not in _ebit_seen_months:
+                        _ebit_seen_months.add(month_num)
+                _epl_detected_months = sorted(_ebit_seen_months)
+                # MoM mode: single max-month → expand to full 1..max range
+                if detect_mom_intent(query) and len(_epl_detected_months) == 1:
+                    _epl_detected_months = list(range(1, _epl_detected_months[0] + 1))
+                    logger.info(
+                        f"_build_entity_pl_intent: MoM mode — expanded month to {_epl_detected_months}")
 
         # Average monthly mode: preserve any explicit month constraints so the wrapper
         # divides only over the requested period (e.g. Jan-Mar avg = sum/3, not sum/12).
@@ -6734,11 +6771,20 @@ Return a JSON object with:
             'oct': 10, 'october': 10, 'nov': 11, 'november': 11,
             'dec': 12, 'december': 12
         }
-        _seen_months: set = set()
-        for mn, mv in sorted(month_names.items(), key=lambda x: len(x[0]), reverse=True):
-            if re.search(r'\b' + mn + r'\b', query_lower) and mv not in _seen_months:
-                _seen_months.add(mv)
-        _detected_months = sorted(_seen_months)
+        # ── Month detection: range-aware ─────────────────────────────────────
+        # Priority 1: explicit range "jan to mar" / "jan-mar" → [1,2,3]
+        # Priority 2: individual month mentions (fallback)
+        _detected_months: List[int] = []
+        _gbpl_range = extract_month_range_from_text(query)
+        if _gbpl_range:
+            _detected_months = _gbpl_range
+            logger.info(f"_build_gb_pl_cost_breakdown_intent: month range detected → {_detected_months}")
+        else:
+            _seen_months: set = set()
+            for mn, mv in sorted(month_names.items(), key=lambda x: len(x[0]), reverse=True):
+                if re.search(r'\b' + mn + r'\b', query_lower) and mv not in _seen_months:
+                    _seen_months.add(mv)
+            _detected_months = sorted(_seen_months)
         if len(_detected_months) == 1:
             filters.append({'column': 'month', 'operator': '=', 'value': _detected_months[0]})
         elif len(_detected_months) > 1:
