@@ -6727,6 +6727,18 @@ Return a JSON object with:
             if 'month' not in intent['group_by']:
                 intent['group_by'] = ['month'] + intent['group_by']
 
+        # Enhancement #4: avg_monthly_mode — must be detected HERE so compile_sql
+        # takes the avg_monthly branch inside _build_entity_pl_ebit_sql.
+        # Mirrors the same detection in _build_cost_class_intent and _build_entity_pl_intent.
+        if detect_avg_monthly_intent(query):
+            intent['avg_monthly_mode'] = True
+            # month must be in group_by so the EBIT SQL groups per month before averaging
+            if 'month' not in intent['group_by']:
+                intent['group_by'] = ['month'] + intent['group_by']
+            logger.info(
+                f"_build_entity_pl_ebit_intent: avg_monthly_mode=True, currency={currency}"
+            )
+
         logger.info(
             f"Built entity P&L EBIT intent: calc_type='{calc_type}', entity={detected_entities_eeit}, currency={currency}"
         )
