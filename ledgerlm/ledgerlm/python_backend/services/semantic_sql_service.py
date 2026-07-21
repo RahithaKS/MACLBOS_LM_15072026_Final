@@ -6699,6 +6699,26 @@ Return a JSON object with:
             if 'month' not in _group_by:
                 _group_by = ['month'] + _group_by
 
+        # ProjectGB filter: "project GB MA", "project gb for VM"
+        _pgb_m = re.search(
+            r'\bproject\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
+            query, re.IGNORECASE
+        )
+        if _pgb_m:
+            _pgb_val = _pgb_m.group(1).upper()
+            filters.append({'column': 'project_gb', 'operator': '=', 'value': _pgb_val})
+            logger.info(f"_build_gb_pl_cost_breakdown_intent: ProjectGB filter = {_pgb_val}")
+
+        # PlanningGB filter: "planning GB MA", "planning gb for VM"
+        _plgb_m = re.search(
+            r'\bplanning\s+gb\s+(?:for\s+)?([A-Z]{2,4})\b',
+            query, re.IGNORECASE
+        )
+        if _plgb_m:
+            _plgb_val = _plgb_m.group(1).upper()
+            filters.append({'column': 'planning_gb', 'operator': '=', 'value': _plgb_val})
+            logger.info(f"_build_gb_pl_cost_breakdown_intent: PlanningGB filter = {_plgb_val}")
+
         intent: Dict[str, Any] = {
             'query_type': 'aggregation',
             'metrics': [{'name': _amt_col, 'aggregation': 'SUM'}],
