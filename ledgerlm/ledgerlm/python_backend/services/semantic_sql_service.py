@@ -6784,6 +6784,18 @@ Return a JSON object with:
                 f"_build_gb_pl_cost_breakdown_intent: avg_monthly_mode=True"
             )
 
+        # MoM mode: adds LAG() window for month-over-month growth %.
+        # Mirrors the same block in _build_entity_pl_intent.
+        # Mutually exclusive with avg_monthly_mode.
+        if detect_mom_intent(query) and not _gbpl_avg_monthly:
+            intent['mom_mode'] = True
+            if 'month' not in intent['group_by']:
+                intent['group_by'] = ['month'] + intent['group_by']
+            logger.info(
+                "_build_gb_pl_cost_breakdown_intent: mom_mode=True — "
+                "MoM LAG wrapper will be applied by compile_sql"
+            )
+
         logger.info(
             f"Built GB P&L cost breakdown intent: group_by={_group_by}, "
             f"entities={detected_entities}, months={_detected_months}"
