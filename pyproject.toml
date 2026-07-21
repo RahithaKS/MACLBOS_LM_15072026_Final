@@ -2,7 +2,7 @@
 name = "repl-nix-workspace"
 version = "0.1.0"
 description = "Add your description here"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "aiofiles>=25.1.0",
     "beautifulsoup4>=4.15.0",
@@ -29,5 +29,5 @@ dependencies = [
     "scipy>=1.18.0",
     "sqlalchemy>=2.0.51",
     "tiktoken>=0.13.0",
-    "uvicorn>=0.51.0",
+    "uvicorn[standard]>=0.51.0",
 ]
