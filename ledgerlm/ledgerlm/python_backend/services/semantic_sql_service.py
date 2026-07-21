@@ -1552,6 +1552,34 @@ def detect_avg_monthly_intent(query: str) -> bool:
     return False
 
 
+def detect_comparison_query(query: str) -> bool:
+    """Return True when the query compares the same metric across two different years.
+
+    Examples:
+      "Mar'25 vs Mar'26", "resource cost Jan 2025 vs Jan 2026",
+      "compare March 2025 with March 2026", "outsourcing Jan'25 and Jan'26"
+
+    Two conditions must both be met:
+      1. Two distinct 4-digit years are present in the query.
+      2. Either an explicit comparison keyword (vs / versus / compare / against)
+         OR an explicit month name appears (same month across years = comparison).
+    """
+    q = query.lower()
+    years = re.findall(r'\b20\d\d\b', q)
+    if len(set(years)) < 2:
+        return False
+    # Explicit comparison keyword
+    if re.search(r'\bvs\.?\b|\bversus\b|\bcompare[sd]?\b|\bcomparison\b|\bagainst\b', q):
+        return True
+    # Two different years + a month name → implicit month comparison
+    _month_re = (r'\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|'
+                 r'jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|'
+                 r'oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b')
+    if re.search(_month_re, q):
+        return True
+    return False
+
+
 def extract_month_range_from_text(query: str) -> Optional[List[int]]:
     """Detect a contiguous month range from 'jan to mar', 'jan-mar', etc.
 
@@ -5448,6 +5476,11 @@ Return a JSON object with:
             time_scope = detect_time_scope_from_query(query)
             intent = self.apply_default_time_filters(intent, cube_id,
                                                      time_scope)
+            # Enhancement #6: "last N months" — inject real DB periods into the
+            # entity P&L and GB P&L fast paths (P2 generic path already does this).
+            if re.search(r'\blast\s+\d+\s+months?\b', query.lower()):
+                intent = self._detect_last_n_months_and_inject(
+                    intent, cube_id, query)
             intent['original_query'] = query
             return {
                 'success': True,
@@ -6253,6 +6286,20 @@ Return a JSON object with:
             if len(_ccl_detected_months) > 1 and 'month' not in intent['group_by']:
                 intent['group_by'] = ['month'] + intent['group_by']
 
+        # Enhancement #3: Comparative strict months guard.
+        # "Mar'25 vs Mar'26" → must NOT expand month=3 to YTD (1-3).
+        # Adding 'month' + 'year' to group_by triggers the existing
+        # is_comparison_month guard inside all SQL builders (resource cost,
+        # offshore, etc.) which skips _expand_month_filter_for_ytd.
+        if detect_comparison_query(query) and not _ccl_avg_monthly and not intent.get('mom_mode'):
+            intent['comparison_mode'] = True
+            if 'month' not in intent['group_by']:
+                intent['group_by'] = ['month'] + intent['group_by']
+            if 'year' not in intent['group_by']:
+                intent['group_by'] = intent['group_by'] + ['year']
+            logger.info(
+                "_build_cost_class_intent: comparison_mode=True — month+year added to group_by, YTD expansion blocked")
+
         # Quarter detection: Q1→[1,2,3], Q2→[4,5,6], Q3→[7,8,9], Q4→[10,11,12]
         # Collect ALL quarters mentioned (ranges, individual Q1/Q2/Q3/Q4, text-based)
         _quarter_map = {'q1': [1,2,3], 'q2': [4,5,6], 'q3': [7,8,9], 'q4': [10,11,12]}
@@ -6512,6 +6559,18 @@ Return a JSON object with:
         # Propagate MoM flag
         if detect_mom_intent(query) and not _epl_avg_monthly:
             intent['mom_mode'] = True
+
+        # Enhancement #3: Comparative strict months guard (entity P&L).
+        # Same logic as _build_cost_class_intent — triggers is_comparison_month
+        # guard in SQL builders so March-only queries stay as month=3, not YTD.
+        if detect_comparison_query(query) and not _epl_avg_monthly and not intent.get('mom_mode'):
+            intent['comparison_mode'] = True
+            if 'month' not in intent['group_by']:
+                intent['group_by'] = ['month'] + intent['group_by']
+            if 'year' not in intent['group_by']:
+                intent['group_by'] = intent['group_by'] + ['year']
+            logger.info(
+                "_build_entity_pl_intent: comparison_mode=True — month+year added to group_by, YTD expansion blocked")
 
         if len(detected_entities_epl) == 1:
             intent['filters'].append({
@@ -8847,6 +8906,102 @@ Return a JSON object with:
         updated['avg_monthly_mode'] = True
         logger.info(
             '_apply_avg_monthly_sql_wrapper: wrapped %r -> avg_monthly_value' % value_alias
+        )
+        return updated
+
+    def _apply_mom_lag_sql_wrapper(
+            self, result: Dict[str, Any], intent: Dict[str, Any]) -> Dict[str, Any]:
+        """Wrap a monthly-grouped SQL to add MoM growth % via LAG() window function.
+
+        Takes the base SQL (which already groups by month so each month is one row),
+        wraps it in a two-CTE pattern:
+          _mom_base → original aggregation
+          _mom_lag  → adds LAG(value) OVER (PARTITION BY dims ORDER BY year,month)
+        The outer SELECT adds mom_growth_pct = (value − prev) / |prev| × 100.
+
+        Safe: returns result unchanged on any parse failure.
+        """
+        original_sql = result.get('sql', '').strip()
+        if not original_sql:
+            return result
+
+        # Find the primary numeric value alias (same priority list as avg_monthly wrapper)
+        _from_idx = original_sql.upper().find('\nFROM ')
+        if _from_idx == -1:
+            _from_idx = original_sql.upper().find(' FROM ')
+        select_part = original_sql[:_from_idx] if _from_idx != -1 else original_sql
+        _aliases = re.findall(r'(?i)\bas\s+(\w+)', select_part)
+        if not _aliases:
+            logger.warning("_apply_mom_lag_sql_wrapper: no aliases found, skipping")
+            return result
+
+        _PRIORITY_ALIASES = [
+            'gross_margin', 'ebit', 'indirect_cost', 'total_direct_cost',
+            'pl_revenue_inr', 'pl_revenue', 'revenue',
+        ]
+        _DIM_ALIASES = {
+            'year', 'month', 'region_entity', 'project_gb',
+            'entity_sub_category', 'sub_cost_category', 'entity_category',
+            'salary_level', 'salary_band', 'onsite_offshore',
+        }
+        metric_aliases = [a for a in _aliases if a.lower() not in _DIM_ALIASES]
+        value_alias = next(
+            (a for a in _PRIORITY_ALIASES if a in metric_aliases),
+            metric_aliases[-1] if metric_aliases else None,
+        )
+        if not value_alias:
+            logger.warning("_apply_mom_lag_sql_wrapper: no metric alias, skipping")
+            return result
+
+        # Dimension cols from group_by (all non-time dims)
+        gb = intent.get('group_by', [])
+        dim_cols = [c for c in gb if c not in ('month', 'year')]
+        has_year = 'year' in gb or re.search(r'\byear\b', original_sql, re.IGNORECASE)
+
+        # Build SELECT / PARTITION / ORDER fragments
+        dim_select   = (', '.join(dim_cols) + ', ') if dim_cols else ''
+        year_select  = 'year, ' if has_year else ''
+        part_clause  = ('PARTITION BY ' + ', '.join(dim_cols)) if dim_cols else ''
+        ord_clause   = ('ORDER BY year, month::int'
+                        if has_year else 'ORDER BY month::int')
+        outer_order  = ((', '.join(dim_cols) + ', ') if dim_cols else '') + \
+                       (year_select) + 'month::int'
+
+        # Strip ORDER BY / LIMIT from inner SQL
+        clean = re.sub(
+            r'\s*ORDER\s+BY\s+.*?(?=\s*LIMIT\s|\s*;?\s*$)',
+            '', original_sql, flags=re.IGNORECASE | re.DOTALL
+        ).strip()
+        clean = re.sub(r'\s*LIMIT\s+\d+', '', clean, flags=re.IGNORECASE).strip()
+
+        wrapped_sql = (
+            'WITH _mom_base AS (\n' + clean + '\n),\n'
+            '_mom_lag AS (\n'
+            '    SELECT\n'
+            f'        {dim_select}{year_select}month,\n'
+            f'        {value_alias},\n'
+            f'        LAG({value_alias}) OVER ({part_clause} {ord_clause}) AS prev_month_value\n'
+            '    FROM _mom_base\n'
+            ')\n'
+            'SELECT\n'
+            '    *,\n'
+            '    CASE\n'
+            '        WHEN prev_month_value IS NULL THEN NULL\n'
+            '        ELSE ROUND(\n'
+            f'            100.0 * ({value_alias} - prev_month_value)\n'
+            '            / NULLIF(ABS(prev_month_value), 0),\n'
+            '            1\n'
+            '        )\n'
+            '    END AS mom_growth_pct\n'
+            'FROM _mom_lag\n'
+            f'ORDER BY {outer_order}'
+        )
+
+        updated = dict(result)
+        updated['sql'] = wrapped_sql
+        updated['mom_lag_mode'] = True
+        logger.info(
+            f'_apply_mom_lag_sql_wrapper: wrapped → mom_growth_pct on {value_alias}'
         )
         return updated
 
@@ -15146,6 +15301,9 @@ Return a JSON object with:
                 # Apply avg_monthly wrapper for cost queries when avg_monthly_mode set
                 if _pre_result.get('success') and intent.get('avg_monthly_mode'):
                     _pre_result = self._apply_avg_monthly_sql_wrapper(_pre_result, intent)
+                # Enhancement #1: MoM LAG wrapper — adds prev_month_value + mom_growth_pct
+                if _pre_result.get('success') and intent.get('mom_mode'):
+                    _pre_result = self._apply_mom_lag_sql_wrapper(_pre_result, intent)
                 return _pre_result
 
             # ================================================================
@@ -15918,6 +16076,9 @@ Return a JSON object with:
             # Apply avg_monthly wrapper when intent flag is set (entity P&L avg queries)
             if intent.get('avg_monthly_mode'):
                 generic_result = self._apply_avg_monthly_sql_wrapper(generic_result, intent)
+            # Enhancement #1: MoM LAG wrapper — adds prev_month_value + mom_growth_pct
+            if intent.get('mom_mode'):
+                generic_result = self._apply_mom_lag_sql_wrapper(generic_result, intent)
             return generic_result
 
         except Exception as e:

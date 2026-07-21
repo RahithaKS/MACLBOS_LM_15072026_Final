@@ -1556,6 +1556,8 @@ export class EvidenceBroker {
       months_counted: { label: "Months in Cube", type: "dimension" },
       first_month: { label: "From", type: "dimension" },
       last_month: { label: "To", type: "dimension" },
+      prev_month_value: { label: "Prev Month", type: "monetary" },
+      mom_growth_pct: { label: "MoM Growth %", type: "percentage" },
       budget_per_capacity: { label: "Budget / Capacity", type: "monetary" },
       budget_per_avg_capacity: { label: "Budget / Avg Cap", type: "monetary" },
       amount_usd: { label: "Amount", type: "monetary" },
@@ -1801,6 +1803,7 @@ export class EvidenceBroker {
       "total",
       "revenue",
       "cost",
+      "mom_growth_pct",   // Enhancement #1: MoM LAG wrapper — prefer the % column for trend charts
     ];
 
     let valueCol = preferredValueCols.find((c) => columns.includes(c));
@@ -1822,6 +1825,7 @@ export class EvidenceBroker {
 
     // Determine if the value column holds raw USD/INR (needs ÷1M scaling).
     // Covers: exact names + generic _sum suffix variants from compile_sql path.
+    // mom_growth_pct is a plain percentage — never scale it.
     const isRawUsdCol =
       valueCol === "amount_usd" ||
       valueCol === "amount_inr" ||
