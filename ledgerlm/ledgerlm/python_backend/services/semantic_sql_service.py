@@ -6802,6 +6802,53 @@ Return a JSON object with:
 
         time_filter = ' AND '.join(time_parts)
 
+        # ── Enhancement #4: avg_monthly_mode for EBIT ─────────────────────────
+        # When the user asks "average monthly EBIT by entity P&L", build the
+        # averaging SQL directly here (a CASE WHEN single-scan with GROUP BY month
+        # → averaged in the outer SELECT).  Returns avg_monthly_value +
+        # months_counted so the narrative generator handles it identically to
+        # other avg-monthly metrics.  params only used once (not ×2 like rev/cost).
+        if intent.get('avg_monthly_mode'):
+            ebit_avg_sql = f"""
+                WITH monthly_ebit AS (
+                    SELECT
+                        month,
+                        SUM(CASE
+                            WHEN cost_category = 'Revenue Summary'
+                            AND COALESCE(TRIM(order_reason), 'x') NOT IN ('YEH','YEI','YEJ','YEK','YN2')
+                            AND COALESCE(TRIM(gl_account), 'x') NOT LIKE '139%%'
+                            THEN {amt_col} ELSE 0 END)
+                        - SUM(CASE
+                            WHEN cost_category = 'Cost Summary'
+                            AND TRIM(COALESCE(entity_category, '')) != ''
+                            AND TRIM(COALESCE(entity_sub_category, '')) != ''
+                            THEN {amt_col} ELSE 0 END) AS monthly_ebit_val
+                    FROM cube_fact_data
+                    WHERE {time_filter}{entity_filter_clause}
+                    GROUP BY month
+                )
+                SELECT
+                    ROUND(
+                        SUM(monthly_ebit_val)::numeric
+                        / NULLIF(COUNT(DISTINCT month), 0),
+                        {rounding}
+                    ) AS avg_monthly_value,
+                    COUNT(DISTINCT month) AS months_counted
+                FROM monthly_ebit
+            """
+            avg_ebit_params = list(time_params) + list(entity_params)
+            logger.info(
+                f"Entity P&L EBIT avg_monthly SQL built: currency={currency}, "
+                f"entity={region_entity_val or 'All'}"
+            )
+            return {
+                'success': True,
+                'sql': ebit_avg_sql,
+                'params': avg_ebit_params,
+                'avg_monthly_mode': True,
+                'calculation_type': intent.get('calculation_type', 'entity_pl_ebit'),
+            }
+
         # Revenue WHERE: cost_category='Revenue', excluding specific order reasons + GL accounts
         # NOTE: '139%%' uses %% so psycopg2 treats it as a literal '%' (not a param placeholder)
         rev_where = (
@@ -14932,6 +14979,9 @@ Return a JSON object with:
                 logger.info(
                     f"compile_sql: Entity P&L EBIT fast path, calc_type='{_epl_ebit_type}'"
                 )
+                # avg_monthly_mode is handled inside _build_entity_pl_ebit_sql:
+                # when the flag is True the builder returns avg_monthly_value +
+                # months_counted directly, so no wrapper needed here.
                 return self._build_entity_pl_ebit_sql(intent, cube_id)
 
             # ================================================================
