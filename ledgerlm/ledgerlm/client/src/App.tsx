@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { getAuthUser, setAuthUser } from "@/lib/auth";
+import { TermsAndConditionsModal } from "@/components/TermsAndConditionsModal";
 import Welcome from "@/pages/Welcome";
 import VerifyOTP from "@/pages/VerifyOTP";
 import Dashboard from "@/pages/Dashboard";
@@ -62,6 +63,7 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <ProtectedRoute>
+      <TermsAndConditionsModal />
       <SidebarProvider style={style as React.CSSProperties}>
         <div className="flex h-screen w-full bg-background">
           <AppSidebar />
