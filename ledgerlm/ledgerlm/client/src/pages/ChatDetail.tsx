@@ -992,7 +992,7 @@ export default function ChatDetail() {
                 </h1>
               </div>
               <div className="flex items-center gap-2">
-                <Button
+                {/* <Button
                   variant="outline"
                   size="sm"
                   className="gap-2 bg-white"
@@ -1002,7 +1002,7 @@ export default function ChatDetail() {
                 >
                   <FileDown className="w-4 h-4" />
                   PDF
-                </Button>
+                </Button> */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -1014,7 +1014,7 @@ export default function ChatDetail() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuItem
+                    {/* <DropdownMenuItem
                       onClick={() =>
                         toast({
                           title: "Coming soon",
@@ -1032,7 +1032,7 @@ export default function ChatDetail() {
                     >
                       <Link2 className="w-4 h-4 mr-2" />
                       Copy Link
-                    </DropdownMenuItem>
+                    </DropdownMenuItem> */}
                     <DropdownMenuItem
                       onClick={handleExportPDF}
                       disabled={messages.length === 0}
@@ -1043,9 +1043,9 @@ export default function ChatDetail() {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button variant="ghost" size="icon" data-testid="button-info">
+                {/* <Button variant="ghost" size="icon" data-testid="button-info">
                   <Info className="w-5 h-5 text-primary" />
-                </Button>
+                </Button> */}
 
                 {/* <Button
                   variant="outline"
@@ -1066,9 +1066,9 @@ export default function ChatDetail() {
                   data-testid="button-data-sources"
                 >
                   Data Sources
-                  <Badge variant="secondary" className="ml-1">
+                  {/* <Badge variant="secondary" className="ml-1">
                     {chatDocuments.length}
-                  </Badge>
+                  </Badge> */}
                 </Button>
               </div>
             </div>

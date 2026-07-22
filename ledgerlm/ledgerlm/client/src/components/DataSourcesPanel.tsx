@@ -335,7 +335,7 @@ export function DataSourcesPanel({
   if (!isOpen) return null;
 
   return (
-    <div className="w-80 border-l bg-accent flex flex-col h-full">
+    <div className="w-80 border-l bg-accent flex flex-col h-full bg-white">
       <div className="p-4 border-b flex items-center justify-between">
         <h2 className="font-semibold" data-testid="text-data-sources-title">
           Data Sources
@@ -456,7 +456,7 @@ export function DataSourcesPanel({
             </div>
           ))}
 
-          {connectorDataSources.length > 0 && (
+          {/* {connectorDataSources.length > 0 && (
             <>
               <div className="text-xs font-medium text-muted-foreground mt-6 mb-2">
                 Connected Data Sources
@@ -508,55 +508,17 @@ export function DataSourcesPanel({
                 </div>
               ))}
             </>
-          )}
+          )} */}
 
           {accessibleCubes.length > 0 && (
             <>
-              <div className="text-xs font-medium text-muted-foreground mt-6 mb-2">
+              {/* <div className="text-xs font-medium text-muted-foreground mt-6 mb-2">
                 Data Cubes
               </div>
               <p className="text-xs text-muted-foreground mb-3">
                 Filter enterprise data by cubes you have access to.
-              </p>
+              </p> */}
 
-              {accessibleCubes.map((cube) => (
-                <div
-                  key={cube.id}
-                  className="border rounded-lg p-3 space-y-1"
-                  data-testid={`data-cube-${cube.id}`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 flex-1">
-                      <div className="w-7 h-7 rounded-full bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                        <Box className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">{cube.name}</span>
-                          {enabledCubes[cube.id] && (
-                            <div className="w-2 h-2 rounded-full bg-green-500" />
-                          )}
-                        </div>
-                        {cube.description && (
-                          <p className="text-xs text-muted-foreground line-clamp-1">
-                            {cube.description}
-                          </p>
-                        )}
-                        {cube.documentCount !== undefined && (
-                          <span className="text-xs text-muted-foreground">
-                            {cube.documentCount} document(s)
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <Switch
-                      checked={enabledCubes[cube.id] ?? true}
-                      onCheckedChange={() => toggleCube(cube.id)}
-                      data-testid={`switch-cube-${cube.id}`}
-                    />
-                  </div>
-                </div>
-              ))}
             </>
           )}
         </div>
@@ -613,45 +575,6 @@ export function DataSourcesPanel({
                           checked={enabledCubes[cube.id] ?? true}
                           onCheckedChange={() => toggleCube(cube.id)}
                           data-testid={`switch-dialog-cube-${cube.id}`}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {connectorDataSources.length > 0 && (
-              <>
-                {accessibleCubes.length > 0 && <hr className="my-4" />}
-                <div>
-                  <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
-                    <Plug className="w-4 h-4" />
-                    Connectors
-                  </h4>
-                  <p className="text-xs text-muted-foreground mb-3">
-                    Toggle connectors ON/OFF to include their data in AI analysis.
-                  </p>
-                  <div className="space-y-2">
-                    {connectorDataSources.map((source) => (
-                      <div
-                        key={source.id}
-                        className="flex items-center justify-between p-3 border rounded-lg"
-                        data-testid={`connector-toggle-${source.connectorType}`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center">
-                            {source.icon}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium">{source.name}</p>
-                            <p className="text-xs text-muted-foreground">{source.description}</p>
-                          </div>
-                        </div>
-                        <Switch
-                          checked={source.enabled}
-                          onCheckedChange={() => toggleDataSource(source.id, true)}
-                          data-testid={`switch-dialog-connector-${source.connectorType}`}
                         />
                       </div>
                     ))}
