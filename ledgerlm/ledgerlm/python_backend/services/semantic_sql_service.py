@@ -3139,7 +3139,11 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
             ],
             'offshore': [
                 'offshore capacity', 'offshore avg', 'offshore end',
-                'offshore average', 'offshore budget', 'onsite offshore'
+                'offshore average', 'offshore budget', 'onsite offshore',
+                # "and" / "&" variants for split queries — must suppress false
+                # Onsite/Offshore ILIKE filter so GROUP BY split works correctly
+                'onsite and offshore', 'offshore and onsite',
+                'onsite & offshore', 'offshore & onsite',
             ],
         }
 
