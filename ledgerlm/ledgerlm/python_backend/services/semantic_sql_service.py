@@ -5598,10 +5598,30 @@ Return a JSON object with:
                 if len(all_unique_names) > 1:
                     logger.info(
                         f"MULTI-METRIC: {len(all_unique_names)} calcs detected "
-                        f"{all_unique_names} — skipping fast path, routing to LLM"
+                        f"{all_unique_names} — using fast path for multi-metric"
                     )
                     _multi_metric_calcs = all_unique_names
-                    # Fall through to LLM routing (do NOT return here)
+                    # Build a minimal intent using the first calc for time/entity
+                    # extraction, then stamp multi_metric_calcs so compile_sql
+                    # dispatches to _compile_multi_metric_sql.  This avoids the
+                    # LLM entirely for known multi-metric combos.
+                    _mm_intent = self._build_kpi_intent_fast(
+                        query, all_unique_names[0],
+                        entity_filters, group_by_hint=_gb_group_by_hint)
+                    _mm_time_scope = detect_time_scope_from_query(query)
+                    _mm_intent = self.apply_default_time_filters(
+                        _mm_intent, cube_id, _mm_time_scope)
+                    _mm_intent['multi_metric_calcs'] = all_unique_names
+                    _mm_intent['original_query'] = query
+                    return {
+                        'success': True,
+                        'intent': _mm_intent,
+                        'raw_query': query,
+                        'matched_calculation': matching_calc,
+                        'business_logic': business_logic,
+                        'time_scope': _mm_time_scope,
+                        'view_type': detected_view_type
+                    }
                 else:
                     logger.info(
                         f"FAST PATH: Skipping OpenAI for KPI calculation: {calc_name}"
@@ -7739,8 +7759,19 @@ Return a JSON object with:
                 operator = f.get('operator', 'ILIKE')
 
                 # Extract the actual category name from ILIKE pattern like '%Revenue%'
-                clean_value = value.strip('%') if isinstance(value,
-                                                             str) else value
+                # Guard: LLM occasionally returns a list for the filter value
+                # (e.g. multi-metric queries).  Join to string so keyword
+                # matching below doesn't crash with AttributeError.
+                if isinstance(value, list):
+                    clean_value = ' '.join(str(v) for v in value)
+                elif isinstance(value, str):
+                    clean_value = value.strip('%')
+                else:
+                    clean_value = str(value)
+
+                # If clean_value is still a non-string somehow, skip this filter
+                if not isinstance(clean_value, str):
+                    continue
 
                 # CRITICAL: For cost categories, use EXACT matching to prevent overlap
                 # Revenue vs Revenue Summary, Billing Utilization vs Billing Utilization Summary
@@ -15444,8 +15475,8 @@ Return a JSON object with:
                     if not _multi_calcs and _orig_q:
                         _oq_l = _orig_q.lower()
                         _cap_avg_end = bool(re.search(
-                            r'\b(?:avg|average)\b.{1,20}\bend\b'
-                            r'|\bend\b.{1,20}\b(?:avg|average)\b',
+                            r'\b(?:avg|average)\b.{1,60}\bend\b'
+                            r'|\bend\b.{1,60}\b(?:avg|average)\b',
                             _oq_l
                         ))
                         if _cap_avg_end and 'capacity' in _oq_l:
