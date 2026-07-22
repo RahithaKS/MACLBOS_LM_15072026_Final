@@ -37,8 +37,10 @@ import { addCustomerColumns } from "./migrations/add-customer-columns";
 import { createAuditLogTable } from "./migrations/create-audit-log";
 import { createRetentionPoliciesTable } from "./migrations/create-retention-policies";
 import { runInvestmentTablesMigration } from "./migrations/create-investment-tables";
+import { addSsoGroupMappings } from "./migrations/add-sso-group-mappings";
 import { runRetentionEngine } from "./services/retentionEngine";
 import { runBackup } from "./services/backupService";
+import { startSsoSyncJob } from "./services/ssoSyncJob";
 import rateLimit from "express-rate-limit";
 
 const app = express();
@@ -296,6 +298,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   // Create Investment/CAPEX/PMO fact table and add schema_type to cubes
   await runInvestmentTablesMigration();
 
+  // Add sso_group_mappings JSONB column to domains + status column to domain_users
+  await addSsoGroupMappings();
+
   await seedDatabase();
   await fixAzureBlobConnectorSchedules();
   
@@ -405,5 +410,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     
     // Start multi-tenant domain schedulers for per-domain Anaplan automation
     multiTenantScheduler.startAllDomainSchedulers();
+
+    // Start SSO group membership sync job (every 15 min — deactivates removed users, syncs roles)
+    startSsoSyncJob();
   });
 })();

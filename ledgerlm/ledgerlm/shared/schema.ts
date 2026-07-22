@@ -432,8 +432,11 @@ export const domains = pgTable("domains", {
   ssoTenantId: text("sso_tenant_id"),      // Azure AD Tenant ID
   ssoClientId: text("sso_client_id"),      // Azure App Registration Client ID
   ssoClientSecret: text("sso_client_secret"), // Azure Client Secret (stored encrypted)
-  ssoGroupId: text("sso_group_id"),        // Azure AD Group ID — only members of this group can access
-  ssoDefaultRole: varchar("sso_default_role", { length: 20 }).notNull().default('standard'), // Role assigned to auto-provisioned users
+  ssoGroupId: text("sso_group_id"),        // [LEGACY] Single Azure AD Group ID — kept for backward compat; prefer ssoGroupMappings
+  ssoDefaultRole: varchar("sso_default_role", { length: 20 }).notNull().default('standard'), // [LEGACY] Single default role — kept for backward compat
+  // New: N-group → role mapping array. Each entry: { groupId: string, role: string }
+  // admin role always takes priority over standard if a user matches multiple groups.
+  ssoGroupMappings: jsonb("sso_group_mappings"),
   // Email provider: 'default' (global GoDaddy), 'microsoft' (Office 365 SMTP), 'godaddy' (per-domain GoDaddy)
   emailProvider: varchar("email_provider", { length: 20 }).default('default'),
   emailSmtpUser: text("email_smtp_user"),     // Mailbox address / SMTP username
@@ -463,6 +466,7 @@ export const domainUsers = pgTable("domain_users", {
   email: text("email").notNull(), // Full email address (removed unique constraint to allow same user in multiple domains in future)
   role: varchar("role", { length: 20 }).notNull().default('standard'), // 'admin' or 'standard' - multiple admins allowed per domain
   hardcodedOtp: varchar("hardcoded_otp", { length: 10 }), // Optional hardcoded OTP for this user
+  status: varchar("status", { length: 20 }).notNull().default('active'), // 'active' | 'inactive' — inactive = deactivated by SSO sync
   invitedBy: varchar("invited_by").notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => ({

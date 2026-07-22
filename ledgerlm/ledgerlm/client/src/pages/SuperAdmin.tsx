@@ -18,6 +18,11 @@ import AuditLogTab from '@/components/admin/AuditLogTab';
 import BackupTab from '@/components/admin/BackupTab';
 import RetentionTab from '@/components/admin/RetentionTab';
 
+interface SsoGroupMapping {
+  groupId: string;
+  role: string;
+}
+
 interface Domain {
   id: string;
   name: string;
@@ -29,6 +34,7 @@ interface Domain {
   ssoClientSecret: string | null;
   ssoGroupId: string | null;
   ssoDefaultRole: string;
+  ssoGroupMappings: SsoGroupMapping[] | null;
   emailProvider: string | null;
   emailSmtpUser: string | null;
   emailSmtpPass: string | null;
@@ -55,7 +61,7 @@ interface DomainUser {
   createdAt: string;
 }
 
-const defaultSsoFields = { ssoTenantId: '', ssoClientId: '', ssoClientSecret: '', ssoGroupId: '', ssoDefaultRole: 'standard' };
+const defaultSsoFields = { ssoTenantId: '', ssoClientId: '', ssoClientSecret: '', ssoGroupId: '', ssoDefaultRole: 'standard', ssoGroupMappings: [] as SsoGroupMapping[] };
 const defaultEmailFields = { emailProvider: 'default', emailSmtpUser: '', emailSmtpPass: '', emailFromAddress: '', emailFromName: '' };
 const defaultAiFields = {
   aiProvider: 'ollama',
@@ -128,7 +134,9 @@ export default function SuperAdmin() {
           ssoTenantId: data.ssoTenantId || null,
           ssoClientId: data.ssoClientId || null,
           ssoClientSecret: data.ssoClientSecret || null,
-          ssoGroupId: data.ssoGroupId || null,
+          ssoGroupMappings: data.ssoGroupMappings && data.ssoGroupMappings.length > 0 ? data.ssoGroupMappings : null,
+          // Legacy fields kept for backward compat when no mappings configured
+          ssoGroupId: (!data.ssoGroupMappings || data.ssoGroupMappings.length === 0) ? (data.ssoGroupId || null) : null,
           ssoDefaultRole: data.ssoDefaultRole || 'standard',
         } : {}),
         emailProvider: data.emailProvider || 'default',
@@ -175,7 +183,8 @@ export default function SuperAdmin() {
           ssoTenantId: data.ssoTenantId || null,
           ssoClientId: data.ssoClientId || null,
           ssoClientSecret: data.ssoClientSecret || null,
-          ssoGroupId: data.ssoGroupId || null,
+          ssoGroupMappings: data.ssoGroupMappings && data.ssoGroupMappings.length > 0 ? data.ssoGroupMappings : null,
+          ssoGroupId: (!data.ssoGroupMappings || data.ssoGroupMappings.length === 0) ? (data.ssoGroupId || null) : null,
           ssoDefaultRole: data.ssoDefaultRole || 'standard',
         } : {}),
         emailProvider: data.emailProvider || 'default',
@@ -254,6 +263,7 @@ export default function SuperAdmin() {
       ssoClientSecret: domain.ssoClientSecret === '********' ? '********' : '',
       ssoGroupId: domain.ssoGroupId || '',
       ssoDefaultRole: domain.ssoDefaultRole || 'standard',
+      ssoGroupMappings: domain.ssoGroupMappings || [],
       emailProvider: domain.emailProvider || 'default',
       emailSmtpUser: domain.emailSmtpUser || '',
       emailSmtpPass: domain.emailSmtpPass === '********' ? '********' : '',
@@ -421,41 +431,77 @@ export default function SuperAdmin() {
 
                   {newDomain.authMethod === 'microsoft_sso' && (
                     <div className="space-y-3 rounded-md border p-3">
-                      <p className="text-sm font-medium flex items-center gap-2">
-                        <Users className="h-4 w-4" />
-                        User Access Control
-                      </p>
-                      <div className="space-y-2">
-                        <Label htmlFor="sso-group-id">Azure AD Group ID</Label>
-                        <Input
-                          id="sso-group-id"
-                          placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                          value={newDomain.ssoGroupId}
-                          onChange={(e) => setNewDomain({ ...newDomain, ssoGroupId: e.target.value })}
-                          data-testid="input-sso-group-id"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Only members of this Azure AD group can access the platform. Leave blank to use invite-only access.
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium flex items-center gap-2">
+                          <Users className="h-4 w-4" />
+                          SSO Group Mappings
                         </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="sso-default-role">Default Role for New Users</Label>
-                        <Select
-                          value={newDomain.ssoDefaultRole}
-                          onValueChange={(val) => setNewDomain({ ...newDomain, ssoDefaultRole: val })}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setNewDomain({
+                            ...newDomain,
+                            ssoGroupMappings: [...(newDomain.ssoGroupMappings || []), { groupId: '', role: 'standard' }],
+                          })}
                         >
-                          <SelectTrigger id="sso-default-role" data-testid="select-sso-default-role">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="standard">Standard (Viewer)</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground">
-                          Role assigned automatically when a group member logs in for the first time.
-                        </p>
+                          <Plus className="h-3 w-3 mr-1" />
+                          Add Group
+                        </Button>
                       </div>
+                      {(newDomain.ssoGroupMappings || []).length === 0 ? (
+                        <p className="text-xs text-muted-foreground py-1">
+                          No group mappings — only manually invited users can sign in. Add a group to enable automatic access by Azure AD group membership.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {(newDomain.ssoGroupMappings || []).map((mapping, idx) => (
+                            <div key={idx} className="flex gap-2 items-center">
+                              <Input
+                                placeholder="Azure AD Group ID (xxxxxxxx-xxxx-...)"
+                                value={mapping.groupId}
+                                onChange={(e) => {
+                                  const updated = [...(newDomain.ssoGroupMappings || [])];
+                                  updated[idx] = { ...updated[idx], groupId: e.target.value };
+                                  setNewDomain({ ...newDomain, ssoGroupMappings: updated });
+                                }}
+                                className="flex-1 font-mono text-xs"
+                              />
+                              <Select
+                                value={mapping.role}
+                                onValueChange={(val) => {
+                                  const updated = [...(newDomain.ssoGroupMappings || [])];
+                                  updated[idx] = { ...updated[idx], role: val };
+                                  setNewDomain({ ...newDomain, ssoGroupMappings: updated });
+                                }}
+                              >
+                                <SelectTrigger className="w-36">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="standard">Standard</SelectItem>
+                                  <SelectItem value="admin">Admin</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                onClick={() => {
+                                  const updated = (newDomain.ssoGroupMappings || []).filter((_, i) => i !== idx);
+                                  setNewDomain({ ...newDomain, ssoGroupMappings: updated });
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          ))}
+                          <p className="text-xs text-muted-foreground">
+                            Admin takes priority if a user is in multiple groups. Role syncs on every login.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -875,41 +921,78 @@ export default function SuperAdmin() {
 
             {editDomain.authMethod === 'microsoft_sso' && (
               <div className="space-y-3 rounded-md border p-3">
-                <p className="text-sm font-medium flex items-center gap-2">
-                  <Users className="h-4 w-4" />
-                  User Access Control
-                </p>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-sso-group-id">Azure AD Group ID</Label>
-                  <Input
-                    id="edit-sso-group-id"
-                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                    value={editDomain.ssoGroupId}
-                    onChange={(e) => setEditDomain({ ...editDomain, ssoGroupId: e.target.value })}
-                    data-testid="input-edit-sso-group-id"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Only members of this Azure AD group can access the platform. Leave blank to use invite-only access.
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    SSO Group Mappings
                   </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-sso-default-role">Default Role for New Users</Label>
-                  <Select
-                    value={editDomain.ssoDefaultRole}
-                    onValueChange={(val) => setEditDomain({ ...editDomain, ssoDefaultRole: val })}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditDomain({
+                      ...editDomain,
+                      ssoGroupMappings: [...(editDomain.ssoGroupMappings || []), { groupId: '', role: 'standard' }],
+                    })}
                   >
-                    <SelectTrigger id="edit-sso-default-role" data-testid="select-edit-sso-default-role">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="standard">Standard (Viewer)</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Role assigned automatically when a group member logs in for the first time.
-                  </p>
+                    <Plus className="h-3 w-3 mr-1" />
+                    Add Group
+                  </Button>
                 </div>
+                {(editDomain.ssoGroupMappings || []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-1">
+                    No group mappings — only manually invited users can sign in. Add a group to enable automatic access by Azure AD group membership.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {(editDomain.ssoGroupMappings || []).map((mapping, idx) => (
+                      <div key={idx} className="flex gap-2 items-center">
+                        <Input
+                          placeholder="Azure AD Group ID (xxxxxxxx-xxxx-...)"
+                          value={mapping.groupId}
+                          onChange={(e) => {
+                            const updated = [...(editDomain.ssoGroupMappings || [])];
+                            updated[idx] = { ...updated[idx], groupId: e.target.value };
+                            setEditDomain({ ...editDomain, ssoGroupMappings: updated });
+                          }}
+                          className="flex-1 font-mono text-xs"
+                          data-testid={`input-edit-sso-group-id-${idx}`}
+                        />
+                        <Select
+                          value={mapping.role}
+                          onValueChange={(val) => {
+                            const updated = [...(editDomain.ssoGroupMappings || [])];
+                            updated[idx] = { ...updated[idx], role: val };
+                            setEditDomain({ ...editDomain, ssoGroupMappings: updated });
+                          }}
+                        >
+                          <SelectTrigger className="w-36" data-testid={`select-edit-sso-role-${idx}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="standard">Standard</SelectItem>
+                            <SelectItem value="admin">Admin</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            const updated = (editDomain.ssoGroupMappings || []).filter((_, i) => i !== idx);
+                            setEditDomain({ ...editDomain, ssoGroupMappings: updated });
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                    <p className="text-xs text-muted-foreground">
+                      Admin takes priority if a user is in multiple groups. Role syncs on every login and within 15 minutes via background sync.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

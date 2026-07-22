@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { db } from "./db";
-import { generateAuthUrl, exchangeCodeForUser, validateEmailDomain, buildRedirectUri, checkGroupMembership } from "./services/ssoService";
+import { generateAuthUrl, exchangeCodeForUser, validateEmailDomain, buildRedirectUri, resolveGroupRole, hasSsoGroupMappings } from "./services/ssoService";
 import { encryptValue, decryptValue } from "./utils/encryption";
 import {
   insertChatSchema,
@@ -90,6 +90,10 @@ const createDomainSchema = z.object({
   ssoClientSecret:    z.string().max(500).optional().nullable(),
   ssoGroupId:         z.string().max(200).optional().nullable(),
   ssoDefaultRole:     z.enum(["admin", "standard"]).optional(),
+  ssoGroupMappings:   z.array(z.object({
+    groupId: z.string().min(1).max(200),
+    role:    z.enum(["admin", "standard"]),
+  })).optional().nullable(),
   emailProvider:      z.string().max(50).optional(),
   emailSmtpUser:      z.string().max(200).optional().nullable(),
   emailSmtpPass:      z.string().max(500).optional().nullable(),
@@ -477,34 +481,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check existing domain user record
       let domainUser = await storage.getDomainUserByEmail(email);
 
+      // Check if this domain uses group-based access control
+      const groupsConfigured = hasSsoGroupMappings(domain);
+
       if (!domainUser || domainUser.domainId !== domain.id) {
         // User not manually invited — check if group-based access is configured
-        if (domain.ssoGroupId) {
-          // Verify user is a member of the configured Azure AD group
-          const inGroup = await checkGroupMembership(domain, email);
-          if (!inGroup) {
-            console.warn(`SSO callback: ${email} is not a member of required group ${domain.ssoGroupId}`);
+        if (groupsConfigured) {
+          // One Graph API call checks ALL configured groups at once
+          const resolvedRole = await resolveGroupRole(domain, email);
+          if (!resolvedRole) {
+            console.warn(`SSO callback: ${email} is not a member of any configured group for domain ${domainName}`);
             return res.redirect(`/?sso_error=not_in_group`);
           }
-          // Auto-provision this user with the domain's default role
-          console.log(`SSO callback: auto-provisioning ${email} with role ${domain.ssoDefaultRole}`);
+          // Auto-provision this user with the role resolved from their AD group
+          console.log(`SSO callback: auto-provisioning ${email} with role=${resolvedRole}`);
           domainUser = await storage.createDomainUser({
             domainId: domain.id,
             email: email,
-            role: domain.ssoDefaultRole || 'standard',
+            role: resolvedRole,
             hardcodedOtp: null,
           });
         } else {
-          // No group configured — fall back to invite-only
+          // No groups configured — fall back to invite-only
           console.warn(`SSO callback: ${email} not registered in domain ${domainName}`);
           return res.redirect(`/?sso_error=not_registered`);
         }
-      } else if (domain.ssoGroupId) {
-        // User was manually invited — still verify group membership if a group is configured
-        const inGroup = await checkGroupMembership(domain, email);
-        if (!inGroup) {
-          console.warn(`SSO callback: ${email} was invited but is no longer in group ${domain.ssoGroupId}`);
-          return res.redirect(`/?sso_error=not_in_group`);
+      } else {
+        // Existing domain user — block if deactivated by SSO sync
+        if ((domainUser as any).status === 'inactive') {
+          console.warn(`SSO callback: ${email} account is inactive (deactivated by SSO sync)`);
+          return res.redirect(`/?sso_error=account_inactive`);
+        }
+
+        if (groupsConfigured) {
+          // Re-check group membership on every login — AD is source of truth
+          const resolvedRole = await resolveGroupRole(domain, email);
+          if (!resolvedRole) {
+            console.warn(`SSO callback: ${email} is no longer in any configured group`);
+            return res.redirect(`/?sso_error=not_in_group`);
+          }
+          // Sync role if it changed (promotion or demotion in AD)
+          if (domainUser.role !== resolvedRole) {
+            console.log(`SSO callback: syncing role for ${email}: ${domainUser.role} → ${resolvedRole}`);
+            await storage.updateDomainUser(domainUser.id, { role: resolvedRole });
+            domainUser = { ...domainUser, role: resolvedRole };
+          }
         }
       }
 
@@ -3644,8 +3665,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         createPayload.ssoTenantId = ssoTenantId || null;
         createPayload.ssoClientId = ssoClientId || null;
         createPayload.ssoClientSecret = ssoClientSecret ? encryptValue(ssoClientSecret) : null;
-        createPayload.ssoGroupId = ssoGroupId || null;
-        createPayload.ssoDefaultRole = ssoDefaultRole || 'standard';
+        // New: group-to-role mappings (preferred); keep legacy fields for backward compat
+        const { ssoGroupMappings } = parsed.data as any;
+        if (ssoGroupMappings && Array.isArray(ssoGroupMappings) && ssoGroupMappings.length > 0) {
+          createPayload.ssoGroupMappings = ssoGroupMappings;
+          // Clear legacy fields when using new mappings
+          createPayload.ssoGroupId = null;
+          createPayload.ssoDefaultRole = 'standard';
+        } else {
+          createPayload.ssoGroupMappings = null;
+          createPayload.ssoGroupId = ssoGroupId || null;
+          createPayload.ssoDefaultRole = ssoDefaultRole || 'standard';
+        }
       }
 
       const resolvedEmailProvider = emailProvider || 'default';
@@ -3746,8 +3777,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (ssoClientSecret && ssoClientSecret !== '********') {
             updatePayload.ssoClientSecret = encryptValue(ssoClientSecret);
           }
-          if (ssoGroupId !== undefined) updatePayload.ssoGroupId = ssoGroupId || null;
-          if (ssoDefaultRole !== undefined) updatePayload.ssoDefaultRole = ssoDefaultRole || 'standard';
+          // New: group-to-role mappings (preferred); keep legacy fields for backward compat
+          const { ssoGroupMappings } = req.body as any;
+          if (ssoGroupMappings && Array.isArray(ssoGroupMappings) && ssoGroupMappings.length > 0) {
+            updatePayload.ssoGroupMappings = ssoGroupMappings;
+            updatePayload.ssoGroupId = null;
+            updatePayload.ssoDefaultRole = 'standard';
+          } else {
+            updatePayload.ssoGroupMappings = null;
+            if (ssoGroupId !== undefined) updatePayload.ssoGroupId = ssoGroupId || null;
+            if (ssoDefaultRole !== undefined) updatePayload.ssoDefaultRole = ssoDefaultRole || 'standard';
+          }
         } else {
           // Clearing SSO when switching back to OTP
           updatePayload.ssoTenantId = null;
@@ -3755,6 +3795,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updatePayload.ssoClientSecret = null;
           updatePayload.ssoGroupId = null;
           updatePayload.ssoDefaultRole = 'standard';
+          updatePayload.ssoGroupMappings = null;
         }
 
         const resolvedEmailProvider = emailProvider || 'default';

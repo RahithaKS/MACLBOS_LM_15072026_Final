@@ -10,6 +10,18 @@ import type { Domain } from '@shared/schema';
 const SCOPES = ['openid', 'profile', 'email'];
 const GRAPH_SCOPES = ['https://graph.microsoft.com/.default'];
 
+// Shape of each entry in ssoGroupMappings JSONB column
+export interface SsoGroupMapping {
+  groupId: string;
+  role: string; // 'admin' | 'standard' | any future role
+}
+
+// Role priority for conflict resolution — higher number wins
+const ROLE_PRIORITY: Record<string, number> = {
+  admin: 10,
+  standard: 1,
+};
+
 function getMsalClient(domain: Domain): ConfidentialClientApplication {
   const secret = domain.ssoClientSecret ? decryptValue(domain.ssoClientSecret) : '';
   const config: Configuration = {
@@ -70,26 +82,47 @@ export function validateEmailDomain(email: string, domainName: string): boolean 
 }
 
 /**
- * Check whether a user (by email/UPN) is a member of the configured Azure AD group.
- * Uses client credentials flow to call Microsoft Graph API.
- * Returns true if the user is in the group, false otherwise.
- * If no groupId is configured, returns true (no group restriction).
+ * Returns the parsed ssoGroupMappings array from a domain, handling both
+ * the new JSONB array format and the legacy single-group fields.
  */
-export async function checkGroupMembership(domain: Domain, email: string): Promise<boolean> {
-  if (!domain.ssoGroupId) {
-    return true;
+export function getSsoGroupMappings(domain: Domain): SsoGroupMapping[] {
+  // New format: explicit JSONB array
+  if (domain.ssoGroupMappings && Array.isArray(domain.ssoGroupMappings)) {
+    return (domain.ssoGroupMappings as SsoGroupMapping[]).filter(
+      (m) => m && typeof m.groupId === 'string' && m.groupId.trim() && typeof m.role === 'string',
+    );
   }
+  // Legacy format: single ssoGroupId + ssoDefaultRole
+  if (domain.ssoGroupId) {
+    return [{ groupId: domain.ssoGroupId, role: domain.ssoDefaultRole || 'standard' }];
+  }
+  return [];
+}
+
+/**
+ * Returns true if this domain has any SSO group mappings configured.
+ * False means invite-only access (no group restriction).
+ */
+export function hasSsoGroupMappings(domain: Domain): boolean {
+  return getSsoGroupMappings(domain).length > 0;
+}
+
+/**
+ * Calls Microsoft Graph API checkMemberObjects for a user against a list of group IDs.
+ * Returns the subset of group IDs the user is actually a member of.
+ */
+async function checkMemberObjects(domain: Domain, email: string, groupIds: string[]): Promise<string[]> {
+  if (groupIds.length === 0) return [];
 
   try {
     const msalClient = getMsalClient(domain);
-
     const tokenResponse = await msalClient.acquireTokenByClientCredential({
       scopes: GRAPH_SCOPES,
     });
 
     if (!tokenResponse?.accessToken) {
       console.error('[SSO Group Check] Failed to acquire Graph API token');
-      return false;
+      return [];
     }
 
     const graphResponse = await fetch(
@@ -100,22 +133,63 @@ export async function checkGroupMembership(domain: Domain, email: string): Promi
           Authorization: `Bearer ${tokenResponse.accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ ids: [domain.ssoGroupId] }),
+        body: JSON.stringify({ ids: groupIds }),
       },
     );
 
     if (!graphResponse.ok) {
       const errText = await graphResponse.text();
       console.error(`[SSO Group Check] Graph API error ${graphResponse.status}: ${errText}`);
-      return false;
+      return [];
     }
 
     const data = await graphResponse.json() as { value: string[] };
-    const isMember = Array.isArray(data.value) && data.value.includes(domain.ssoGroupId);
-    console.log(`[SSO Group Check] ${email} membership in group ${domain.ssoGroupId}: ${isMember}`);
-    return isMember;
+    return Array.isArray(data.value) ? data.value : [];
   } catch (error: any) {
-    console.error('[SSO Group Check] Error checking group membership:', error.message);
-    return false;
+    console.error('[SSO Group Check] Error calling checkMemberObjects:', error.message);
+    return [];
   }
+}
+
+/**
+ * Resolves the role a user should have based on Azure AD group membership.
+ *
+ * Uses a single Graph API call for ALL configured group IDs, then finds the
+ * highest-priority role among matched groups (admin beats standard).
+ *
+ * Returns:
+ *   - A role string ('admin' | 'standard' | ...) if the user is in at least one group
+ *   - null if the user is NOT in any configured group (= deny access)
+ *
+ * Only call this when hasSsoGroupMappings(domain) is true.
+ */
+export async function resolveGroupRole(domain: Domain, email: string): Promise<string | null> {
+  const mappings = getSsoGroupMappings(domain);
+  if (mappings.length === 0) return null;
+
+  const allGroupIds = mappings.map((m) => m.groupId);
+  const matchedIds = await checkMemberObjects(domain, email, allGroupIds);
+
+  if (matchedIds.length === 0) {
+    console.log(`[SSO Group Check] ${email}: not a member of any configured group`);
+    return null;
+  }
+
+  // Find the highest-priority role among matched groups
+  const matchedMappings = mappings.filter((m) => matchedIds.includes(m.groupId));
+  matchedMappings.sort((a, b) => (ROLE_PRIORITY[b.role] ?? 0) - (ROLE_PRIORITY[a.role] ?? 0));
+
+  const resolvedRole = matchedMappings[0].role;
+  console.log(`[SSO Group Check] ${email}: resolved role=${resolvedRole} (matched groups: ${matchedMappings.map(m => m.groupId).join(', ')})`);
+  return resolvedRole;
+}
+
+/**
+ * @deprecated Use resolveGroupRole() and hasSsoGroupMappings() instead.
+ * Kept for backward compatibility with any direct callers.
+ */
+export async function checkGroupMembership(domain: Domain, email: string): Promise<boolean> {
+  if (!hasSsoGroupMappings(domain)) return true;
+  const role = await resolveGroupRole(domain, email);
+  return role !== null;
 }
