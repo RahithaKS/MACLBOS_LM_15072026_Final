@@ -6,3 +6,9 @@ id = "ur-t1Vxxxbluoh2tB2uko"
 uri = "file://ledgerlm_test_questions.txt"
 type = "text"
 title = "LedgerLM – 100 Test Questions for Bosch"
+
+[[outputs]]
+id = "T17ZCXDBDFciqONDjDgA7"
+uri = "file://ledgerlm_bosch_all_scenarios.md"
+type = "text"
+title = "LedgerLM – All Scenarios Test Questions (338 queries)"
