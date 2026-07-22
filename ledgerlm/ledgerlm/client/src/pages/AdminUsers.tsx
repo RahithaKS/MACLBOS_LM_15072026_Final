@@ -5,12 +5,14 @@ import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useAuthUser } from '@/lib/auth';
-import { Trash2, UserPlus, Key, Edit, Globe, Shield, CheckCircle } from 'lucide-react';
+import { Trash2, UserPlus, Key, Edit, Globe, Shield, CheckCircle, Users, ShieldCheck } from 'lucide-react';
+import SsoAuditDomainAdmin from '@/components/admin/SsoAuditDomainAdmin';
 
 interface DomainInfo {
   isSuperAdmin: boolean;
@@ -277,191 +279,225 @@ export default function AdminUsers() {
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto px-6 lg:px-8 py-6 space-y-6">
-            {isSuperAdmin && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Globe className="h-5 w-5" />
-                    Select Domain
-                  </CardTitle>
-                  <CardDescription>Choose a domain to manage its users</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Select value={selectedDomainId} onValueChange={setSelectedDomainId}>
-                    <SelectTrigger className="w-full" data-testid="select-domain">
-                      <SelectValue placeholder="Select a domain to manage" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {domainInfo?.domains?.map((d) => (
-                        <SelectItem key={d.id} value={d.id}>
-                          {d.name} - {d.adminEmail}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {domainInfo?.domains?.length === 0 && (
-                    <p className="text-sm text-muted-foreground mt-2">
-                      No domains created yet. Go to Domain Management to create one.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+          {/* ── Tabs: Users | SSO Audit ─────────────────────────────────── */}
+          <Tabs defaultValue="users" className="flex-1 flex flex-col overflow-hidden min-h-0">
+            <div className="px-6 lg:px-8 pt-3 border-b flex-shrink-0">
+              <TabsList className="h-9 mb-0">
+                <TabsTrigger value="users" className="text-xs gap-1.5">
+                  <Users className="h-3.5 w-3.5" /> Users
+                </TabsTrigger>
+                <TabsTrigger value="sso-audit" className="text-xs gap-1.5">
+                  <ShieldCheck className="h-3.5 w-3.5" /> SSO Audit
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-            {!isSuperAdmin && domainInfo?.domain && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Globe className="h-5 w-5" />
-                    Domain Information
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Domain:</span>
-                      <span className="ml-2 font-medium" data-testid="text-domain-name">{domainInfo.domain.name}</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Admin:</span>
-                      <span className="ml-2 font-medium">{domainInfo.domain.adminEmail}</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Default OTP:</span>
-                      <span className="ml-2 font-medium">
-                        {domainInfo.domain.defaultOtp || 'Email OTP'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Users:</span>
-                      <span className="ml-2 font-medium" data-testid="text-user-count">
-                        {domainInfo.domain.userCount}
-                        {domainInfo.domain.userQuota && (
-                          <span className="text-muted-foreground"> / {domainInfo.domain.userQuota}</span>
-                        )}
-                      </span>
-                    </div>
-                    {domainInfo.domain.userQuota && (
-                      <div className="col-span-2">
-                        <span className="text-muted-foreground">Quota Usage:</span>
-                        <div className="mt-1 h-2 bg-muted rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full transition-all ${
-                              (domainInfo.domain.userCount / domainInfo.domain.userQuota) >= 0.9 
-                                ? 'bg-destructive' 
-                                : (domainInfo.domain.userCount / domainInfo.domain.userQuota) >= 0.7 
-                                  ? 'bg-yellow-500' 
-                                  : 'bg-primary'
-                            }`}
-                            style={{ width: `${Math.min(100, (domainInfo.domain.userCount / domainInfo.domain.userQuota) * 100)}%` }}
-                          />
+            {/* ── Users tab ── */}
+            <TabsContent value="users" className="flex-1 overflow-y-auto m-0 px-6 lg:px-8 py-6">
+              <div className="space-y-6">
+                {isSuperAdmin && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Globe className="h-5 w-5" />
+                        Select Domain
+                      </CardTitle>
+                      <CardDescription>Choose a domain to manage its users</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Select value={selectedDomainId} onValueChange={setSelectedDomainId}>
+                        <SelectTrigger className="w-full" data-testid="select-domain">
+                          <SelectValue placeholder="Select a domain to manage" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {domainInfo?.domains?.map((d) => (
+                            <SelectItem key={d.id} value={d.id}>
+                              {d.name} - {d.adminEmail}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {domainInfo?.domains?.length === 0 && (
+                        <p className="text-sm text-muted-foreground mt-2">
+                          No domains created yet. Go to Domain Management to create one.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {!isSuperAdmin && domainInfo?.domain && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Globe className="h-5 w-5" />
+                        Domain Information
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Domain:</span>
+                          <span className="ml-2 font-medium" data-testid="text-domain-name">{domainInfo.domain.name}</span>
                         </div>
-                        {(domainInfo.domain.userCount / domainInfo.domain.userQuota) >= 0.9 && (
-                          <p className="text-xs text-destructive mt-1">
-                            Approaching user limit. Contact support to increase quota.
-                          </p>
+                        <div>
+                          <span className="text-muted-foreground">Admin:</span>
+                          <span className="ml-2 font-medium">{domainInfo.domain.adminEmail}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Default OTP:</span>
+                          <span className="ml-2 font-medium">
+                            {domainInfo.domain.defaultOtp || 'Email OTP'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Users:</span>
+                          <span className="ml-2 font-medium" data-testid="text-user-count">
+                            {domainInfo.domain.userCount}
+                            {domainInfo.domain.userQuota && (
+                              <span className="text-muted-foreground"> / {domainInfo.domain.userQuota}</span>
+                            )}
+                          </span>
+                        </div>
+                        {domainInfo.domain.userQuota && (
+                          <div className="col-span-2">
+                            <span className="text-muted-foreground">Quota Usage:</span>
+                            <div className="mt-1 h-2 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={`h-full transition-all ${
+                                  (domainInfo.domain.userCount / domainInfo.domain.userQuota) >= 0.9
+                                    ? 'bg-destructive'
+                                    : (domainInfo.domain.userCount / domainInfo.domain.userQuota) >= 0.7
+                                      ? 'bg-yellow-500'
+                                      : 'bg-primary'
+                                }`}
+                                style={{ width: `${Math.min(100, (domainInfo.domain.userCount / domainInfo.domain.userQuota) * 100)}%` }}
+                              />
+                            </div>
+                            {(domainInfo.domain.userCount / domainInfo.domain.userQuota) >= 0.9 && (
+                              <p className="text-xs text-destructive mt-1">
+                                Approaching user limit. Contact support to increase quota.
+                              </p>
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                    </CardContent>
+                  </Card>
+                )}
 
-            {currentDomainId && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Domain Users</CardTitle>
-                  <CardDescription>Users registered in {currentDomain?.name || 'this domain'}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {usersLoading ? (
-                    <div className="text-center py-8">Loading users...</div>
-                  ) : users.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      No users in this domain yet. Click "Invite User" to add someone.
-                    </div>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Email</TableHead>
-                          <TableHead>Role</TableHead>
-                          <TableHead>OTP</TableHead>
-                          <TableHead>Added</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {users.map((user) => (
-                          <TableRow key={user.id} data-testid={`row-user-${user.id}`}>
-                            <TableCell className="font-medium">{user.email}</TableCell>
-                            <TableCell>
-                              {user.role === 'admin' ? (
-                                <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
-                                  <CheckCircle className="h-3 w-3" />
-                                  Admin
-                                </span>
-                              ) : (
-                                <span className="text-muted-foreground">Standard</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {user.hardcodedOtp ? (
-                                <span className="inline-flex items-center gap-1 text-sm font-mono">
-                                  <Key className="h-3 w-3" />
-                                  {user.hardcodedOtp}
-                                </span>
-                              ) : (
-                                <span className="text-muted-foreground">Email OTP</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {new Date(user.createdAt).toLocaleDateString()}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openEditDialog(user)}
-                                  data-testid={`button-edit-user-${user.id}`}
-                                >
-                                  <Edit className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => {
-                                    if (confirm(`Remove user "${user.email}"?`)) {
-                                      deleteUserMutation.mutate(user.id);
-                                    }
-                                  }}
-                                  disabled={deleteUserMutation.isPending}
-                                  data-testid={`button-delete-user-${user.id}`}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                {currentDomainId && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Domain Users</CardTitle>
+                      <CardDescription>Users registered in {currentDomain?.name || 'this domain'}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {usersLoading ? (
+                        <div className="text-center py-8">Loading users...</div>
+                      ) : users.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground">
+                          No users in this domain yet. Click "Invite User" to add someone.
+                        </div>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Email</TableHead>
+                              <TableHead>Role</TableHead>
+                              <TableHead>OTP</TableHead>
+                              <TableHead>Added</TableHead>
+                              <TableHead>Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {users.map((user) => (
+                              <TableRow key={user.id} data-testid={`row-user-${user.id}`}>
+                                <TableCell className="font-medium">{user.email}</TableCell>
+                                <TableCell>
+                                  {user.role === 'admin' ? (
+                                    <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
+                                      <CheckCircle className="h-3 w-3" />
+                                      Admin
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">Standard</span>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  {user.hardcodedOtp ? (
+                                    <span className="inline-flex items-center gap-1 text-sm font-mono">
+                                      <Key className="h-3 w-3" />
+                                      {user.hardcodedOtp}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">Email OTP</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-sm text-muted-foreground">
+                                  {new Date(user.createdAt).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => openEditDialog(user)}
+                                      data-testid={`button-edit-user-${user.id}`}
+                                    >
+                                      <Edit className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() => {
+                                        if (confirm(`Remove user "${user.email}"?`)) {
+                                          deleteUserMutation.mutate(user.id);
+                                        }
+                                      }}
+                                      disabled={deleteUserMutation.isPending}
+                                      data-testid={`button-delete-user-${user.id}`}
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
-            {!currentDomainId && isSuperAdmin && (
-              <Card>
-                <CardContent className="py-8 text-center text-muted-foreground">
-                  Select a domain above to manage its users
-                </CardContent>
-              </Card>
-            )}
-          </div>
+                {!currentDomainId && isSuperAdmin && (
+                  <Card>
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      Select a domain above to manage its users
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </TabsContent>
+
+            {/* ── SSO Audit tab ── */}
+            <TabsContent value="sso-audit" className="flex-1 overflow-y-auto m-0 px-6 lg:px-8 py-6">
+              {isSuperAdmin && !currentDomainId ? (
+                <Card>
+                  <CardContent className="py-8 text-center text-muted-foreground text-sm">
+                    Switch to the <strong>Users</strong> tab and select a domain first, then come back here to see its SSO audit log.
+                  </CardContent>
+                </Card>
+              ) : (
+                <SsoAuditDomainAdmin
+                  domainId={currentDomainId}
+                  domainName={currentDomain?.name}
+                  isSuperAdmin={isSuperAdmin}
+                />
+              )}
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
 

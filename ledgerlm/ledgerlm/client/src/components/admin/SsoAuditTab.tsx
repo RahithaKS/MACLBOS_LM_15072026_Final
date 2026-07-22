@@ -106,6 +106,8 @@ function getFailureReason(log: SsoAuditLog): string {
   return String(log.details?.reason ?? '');
 }
 
+interface ManagedDomain { id: string; name: string; }
+
 export default function SsoAuditTab() {
   const [filterAction, setFilterAction] = useState('');
   const [filterEmail, setFilterEmail] = useState('');
@@ -114,6 +116,12 @@ export default function SsoAuditTab() {
   const [filterTo, setFilterTo] = useState('');
   const [page, setPage] = useState(1);
   const LIMIT = 50;
+
+  // Domain dropdown — load all managed domains for the super-admin filter
+  const { data: managedDomains = [] } = useQuery<ManagedDomain[]>({
+    queryKey: ['/api/super-admin/domains'],
+    select: (rows: any[]) => rows.map((r: any) => ({ id: r.id, name: r.name })),
+  });
 
   const params = new URLSearchParams();
   if (filterAction) params.set('action', filterAction);
@@ -204,12 +212,15 @@ export default function SsoAuditTab() {
           className="w-52 h-8 text-xs"
         />
 
-        <Input
-          placeholder="Filter by domain…"
-          value={filterDomain}
-          onChange={(e) => { setFilterDomain(e.target.value); setPage(1); }}
-          className="w-36 h-8 text-xs"
-        />
+        <Select value={filterDomain || '__all__'} onValueChange={(v) => { setFilterDomain(v === '__all__' ? '' : v); setPage(1); }}>
+          <SelectTrigger className="w-40 h-8 text-xs"><SelectValue placeholder="All Domains" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All Domains</SelectItem>
+            {managedDomains.map(d => (
+              <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         <div className="flex items-center gap-1">
           <Input type="date" value={filterFrom} onChange={(e) => { setFilterFrom(e.target.value); setPage(1); }} className="w-36 h-8 text-xs" />

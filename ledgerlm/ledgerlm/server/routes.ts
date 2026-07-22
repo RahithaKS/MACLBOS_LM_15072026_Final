@@ -8872,6 +8872,132 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
     }
   });
 
+  // ── Domain Admin SSO Audit ────────────────────────────────────────────────
+  // These routes are scoped to the logged-in admin's domain via requireDomainAdmin.
+  // Super admins may pass ?domainId= to inspect any tenant (mirrors the users pattern).
+  const SSO_AUDIT_ACTIONS = ['SSO_LOGIN','SSO_LOGIN_FAILED','SSO_USER_PROVISIONED','SSO_USER_DEACTIVATED','SSO_ROLE_SYNCED','SSO_ROLE_UPDATED'];
+  const ssoActionsLiteral = SSO_AUDIT_ACTIONS.map(a => `'${a}'`).join(',');
+
+  app.get("/api/domain-admin/sso-audit-logs", requireDomainAdmin, async (req, res) => {
+    try {
+      const isSuperAdmin = (req as any).isSuperAdmin;
+      const domain = (req as any).domain;
+      const { action, email, from, to, domainId, page = "1", limit = "50" } = req.query as Record<string, string>;
+      const pageNum  = Math.max(1, parseInt(page));
+      const limitNum = Math.min(200, Math.max(1, parseInt(limit)));
+      const offsetNum = (pageNum - 1) * limitNum;
+
+      // Resolve domain name: super admin may pass domainId, regular admin is locked to their domain
+      let domainName: string | null = null;
+      if (isSuperAdmin && domainId) {
+        const d = await storage.getDomain(domainId);
+        domainName = d?.name ?? null;
+      } else if (domain?.name) {
+        domainName = domain.name;
+      }
+      if (!domainName) return res.status(400).json({ error: "No domain resolved" });
+
+      const parts: ReturnType<typeof sql>[] = [
+        sql`action = ANY(ARRAY[${sql.raw(ssoActionsLiteral)}])`,
+        sql`(resource = ${domainName} OR details->>'domain' = ${domainName})`,
+      ];
+      if (action && SSO_AUDIT_ACTIONS.includes(action)) parts.push(sql`action = ${action}`);
+      if (email)  parts.push(sql`details->>'email' ILIKE ${'%' + email + '%'}`);
+      if (from)   parts.push(sql`created_at >= ${new Date(from)}`);
+      if (to)     parts.push(sql`created_at <= ${new Date(to + 'T23:59:59')}`);
+      const where = sql.join(parts, sql` AND `);
+
+      const [dataRows, countRow] = await Promise.all([
+        db.execute(sql`SELECT id, user_id, action, resource, resource_id, ip_address, status, details, created_at FROM audit_logs WHERE ${where} ORDER BY created_at DESC LIMIT ${limitNum} OFFSET ${offsetNum}`),
+        db.execute(sql`SELECT COUNT(*) AS total FROM audit_logs WHERE ${where}`),
+      ]);
+
+      res.json({ logs: dataRows.rows, total: Number((countRow.rows[0] as any).total), page: pageNum, limit: limitNum });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/domain-admin/sso-audit-logs/stats", requireDomainAdmin, async (req, res) => {
+    try {
+      const isSuperAdmin = (req as any).isSuperAdmin;
+      const domain = (req as any).domain;
+      const { domainId } = req.query as Record<string, string>;
+
+      let domainName: string | null = null;
+      if (isSuperAdmin && domainId) {
+        const d = await storage.getDomain(domainId);
+        domainName = d?.name ?? null;
+      } else if (domain?.name) {
+        domainName = domain.name;
+      }
+      if (!domainName) return res.status(400).json({ error: "No domain resolved" });
+
+      const ssoArr = sql.raw(ssoActionsLiteral);
+      const [breakdown, totalRow] = await Promise.all([
+        db.execute(sql`
+          SELECT action, status, COUNT(*) AS cnt FROM audit_logs
+          WHERE action = ANY(ARRAY[${ssoArr}])
+            AND (resource = ${domainName} OR details->>'domain' = ${domainName})
+            AND created_at >= NOW() - INTERVAL '30 days'
+          GROUP BY action, status`),
+        db.execute(sql`SELECT COUNT(*) AS total FROM audit_logs WHERE action = ANY(ARRAY[${ssoArr}]) AND (resource = ${domainName} OR details->>'domain' = ${domainName})`),
+      ]);
+
+      const rows = breakdown.rows as { action: string; status: string; cnt: string }[];
+      const count = (a: string, s?: string) => rows.filter(r => r.action === a && (!s || r.status === s)).reduce((sum, r) => sum + Number(r.cnt), 0);
+
+      res.json({
+        totalEvents: Number((totalRow.rows[0] as any).total),
+        loginsLast30d: count('SSO_LOGIN', 'success'),
+        provisionedLast30d: count('SSO_USER_PROVISIONED', 'success'),
+        deactivatedLast30d: count('SSO_USER_DEACTIVATED', 'success'),
+        roleChangesLast30d: count('SSO_ROLE_SYNCED') + count('SSO_ROLE_UPDATED'),
+      });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/domain-admin/sso-audit-logs/export", requireDomainAdmin, async (req, res) => {
+    try {
+      const isSuperAdmin = (req as any).isSuperAdmin;
+      const domain = (req as any).domain;
+      const { action, email, from, to, domainId } = req.query as Record<string, string>;
+
+      let domainName: string | null = null;
+      if (isSuperAdmin && domainId) {
+        const d = await storage.getDomain(domainId);
+        domainName = d?.name ?? null;
+      } else if (domain?.name) {
+        domainName = domain.name;
+      }
+      if (!domainName) return res.status(400).json({ error: "No domain resolved" });
+
+      const ssoArr = sql.raw(ssoActionsLiteral);
+      const parts: ReturnType<typeof sql>[] = [
+        sql`action = ANY(ARRAY[${ssoArr}])`,
+        sql`(resource = ${domainName} OR details->>'domain' = ${domainName})`,
+      ];
+      if (action && SSO_AUDIT_ACTIONS.includes(action)) parts.push(sql`action = ${action}`);
+      if (email)  parts.push(sql`details->>'email' ILIKE ${'%' + email + '%'}`);
+      if (from)   parts.push(sql`created_at >= ${new Date(from)}`);
+      if (to)     parts.push(sql`created_at <= ${new Date(to + 'T23:59:59')}`);
+      const where = sql.join(parts, sql` AND `);
+
+      const rows = await db.execute(sql`SELECT id, user_id, action, resource, ip_address, status, details, created_at FROM audit_logs WHERE ${where} ORDER BY created_at DESC LIMIT 10000`);
+
+      const header = "timestamp,email,domain,event,role_change,triggered_by,status,ip_address\n";
+      const csv = header + (rows.rows as any[]).map((r) => {
+        const d = r.details || {};
+        const roleChange = d.oldRole && d.newRole ? `${d.oldRole} -> ${d.newRole}` : (d.role || '');
+        return [r.created_at, d.email || r.user_id || '', d.domain || r.resource || '', r.action, roleChange, d.triggeredBy || '', r.status, r.ip_address || '']
+          .map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+      }).join('\n');
+
+      const date = new Date().toISOString().slice(0, 10);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${domainName}-sso-audit-${date}.csv"`);
+      res.send(csv);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // ── Health endpoint (Azure App Service probe) ─────────────────────────────
   app.get("/api/health", async (_req, res) => {
     const checks: Record<string, string> = {};
