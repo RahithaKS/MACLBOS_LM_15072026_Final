@@ -6122,6 +6122,9 @@ Return a JSON object with:
             'offshore vs onsite', 'onsite vs offshore',
             'onsite offshore split', 'offshore onsite split',
             'by onsite offshore', 'onsite/offshore split',
+            # "and" variants — e.g. "onsite and offshore split of revenue"
+            'onsite and offshore', 'offshore and onsite',
+            'onsite & offshore', 'offshore & onsite',
         ]
         if any(t in query_lower for t in _oo_triggers):
             if 'onsite_offshore' not in intent.get('group_by', []):
@@ -15724,6 +15727,9 @@ Return a JSON object with:
                         'offshore vs onsite', 'onsite vs offshore',
                         'onsite offshore split', 'offshore onsite split',
                         'by onsite offshore', 'onsite/offshore split',
+                        # "and" variants — e.g. "onsite and offshore split of revenue"
+                        'onsite and offshore', 'offshore and onsite',
+                        'onsite & offshore', 'offshore & onsite',
                     ]
                     if any(t in _q_lower for t in _rev_oo_triggers):
                         if 'onsite_offshore' not in intent['group_by']:
