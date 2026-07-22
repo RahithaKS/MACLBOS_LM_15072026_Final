@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
   Pencil,
   Trash2,
+  ScrollText,
 } from "lucide-react";
 import { LuLayoutDashboard } from "react-icons/lu"
 import { GoHomeFill } from "react-icons/go";
@@ -24,6 +25,7 @@ import { FaFolderClosed } from "react-icons/fa6";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState, useRef } from "react";
+import { TermsAndConditionsModal } from "@/components/TermsAndConditionsModal";
 import {
   Dialog,
   DialogContent,
@@ -127,6 +129,7 @@ export function AppSidebar() {
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renamingChat, setRenamingChat] = useState<Chat | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [showTermsModal, setShowTermsModal] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
@@ -720,6 +723,13 @@ export function AppSidebar() {
                   <Settings className="w-4 h-4 mr-2" />
                   Settings
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setShowTermsModal(true)}
+                  data-testid="menu-item-bosch-principles"
+                >
+                  <ScrollText className="w-4 h-4 mr-2" />
+                  Bosch Collective Principles
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleLogout}
@@ -778,6 +788,13 @@ export function AppSidebar() {
                   <Settings className="w-4 h-4 mr-2" />
                   Settings
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setShowTermsModal(true)}
+                  data-testid="menu-item-bosch-principles"
+                >
+                  <ScrollText className="w-4 h-4 mr-2" />
+                  Bosch Collective Principles
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleLogout}
@@ -830,6 +847,12 @@ export function AppSidebar() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bosch Collective Principles — view-only modal triggered from user menu */}
+      <TermsAndConditionsModal
+        open={showTermsModal}
+        onClose={() => setShowTermsModal(false)}
+      />
     </Sidebar>
   );
 }

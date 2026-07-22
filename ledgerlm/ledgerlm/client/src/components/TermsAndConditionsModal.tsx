@@ -5,19 +5,32 @@ import { ScrollText } from 'lucide-react';
 
 const SESSION_KEY = 'ledgerlm_terms_accepted_session';
 
-export function TermsAndConditionsModal() {
-  const [open, setOpen] = useState(false);
+interface TermsAndConditionsModalProps {
+  /** Controlled mode: pass open+onClose to use as a view-only modal (e.g. from the sidebar menu) */
+  open?: boolean;
+  onClose?: () => void;
+}
 
+export function TermsAndConditionsModal({ open: controlledOpen, onClose }: TermsAndConditionsModalProps = {}) {
+  const [internalOpen, setInternalOpen] = useState(false);
+
+  // Auto-show on login (uncontrolled mode only)
   useEffect(() => {
-    // Show once per browser session — sessionStorage is cleared on tab/browser close
-    if (!sessionStorage.getItem(SESSION_KEY)) {
-      setOpen(true);
+    if (controlledOpen === undefined && !sessionStorage.getItem(SESSION_KEY)) {
+      setInternalOpen(true);
     }
-  }, []);
+  }, [controlledOpen]);
+
+  const isViewOnly = controlledOpen !== undefined;
+  const open = isViewOnly ? controlledOpen : internalOpen;
 
   const handleAccept = () => {
-    sessionStorage.setItem(SESSION_KEY, '1');
-    setOpen(false);
+    if (isViewOnly) {
+      onClose?.();
+    } else {
+      sessionStorage.setItem(SESSION_KEY, '1');
+      setInternalOpen(false);
+    }
   };
 
   return (
@@ -25,10 +38,9 @@ export function TermsAndConditionsModal() {
       {/* onOpenChange is a no-op: user must click the button to close */}
       <DialogContent
         className="max-w-[580px] w-full p-0 gap-0 overflow-hidden rounded-2xl"
-        // Remove the default X close button from DialogContent
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onInteractOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => { if (!isViewOnly) e.preventDefault(); }}
+        onInteractOutside={(e) => { if (!isViewOnly) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => { if (!isViewOnly) e.preventDefault(); else handleAccept(); }}
       >
         {/* Header */}
         <div className="flex flex-col items-center gap-3 pt-8 pb-4 px-8">
@@ -170,13 +182,13 @@ export function TermsAndConditionsModal() {
           </Section>
         </div>
 
-        {/* Accept button */}
+        {/* Accept / Close button */}
         <div className="px-8 py-5 border-t bg-background">
           <Button
             onClick={handleAccept}
             className="w-full h-11 text-base font-medium rounded-lg"
           >
-            I Understand &amp; Accept
+            {isViewOnly ? 'Close' : 'I Understand & Accept'}
           </Button>
         </div>
       </DialogContent>
