@@ -108,12 +108,17 @@ export async function runBackup(
       if (code !== 0) {
         const msg = `pg_dump exited with code ${code}: ${errorOutput.slice(0, 500)}`;
         logger.error({ msg }, "Backup failed");
-        await db.execute(sql`
-          INSERT INTO backup_logs (filename, size_bytes, status, triggered_by, error_message)
-          VALUES (${filename}, 0, 'failed', ${triggeredBy}, ${msg})
-        `);
+        try {
+          await ensureBackupLogTable();
+          await db.execute(sql`
+            INSERT INTO backup_logs (filename, size_bytes, status, triggered_by, error_message)
+            VALUES (${filename}, 0, 'failed', ${triggeredBy}, ${msg})
+          `);
+        } catch (dbErr: any) {
+          logger.warn({ dbErr: dbErr.message }, "Could not write backup failure to backup_logs");
+        }
         writeAuditLog({ action: "BACKUP_TRIGGERED", status: "failed", details: { error: msg, triggeredBy } }).catch(() => {});
-        await completeSchedulerLog(logId, "failed", null, msg);
+        completeSchedulerLog(logId, "failed", null, msg).catch(() => {});
         resolve({ success: false, error: msg });
         return;
       }
@@ -167,12 +172,17 @@ export async function runBackup(
     pgDump.on("error", async (err) => {
       const msg = `pg_dump not found or failed to start: ${err.message}`;
       logger.error({ msg }, "Backup error");
-      await db.execute(sql`
-        INSERT INTO backup_logs (filename, size_bytes, status, triggered_by, error_message)
-        VALUES (${filename}, 0, 'failed', ${triggeredBy}, ${msg})
-      `);
+      try {
+        await ensureBackupLogTable();
+        await db.execute(sql`
+          INSERT INTO backup_logs (filename, size_bytes, status, triggered_by, error_message)
+          VALUES (${filename}, 0, 'failed', ${triggeredBy}, ${msg})
+        `);
+      } catch (dbErr: any) {
+        logger.warn({ dbErr: dbErr.message }, "Could not write backup error to backup_logs");
+      }
       writeAuditLog({ action: "BACKUP_TRIGGERED", status: "failed", details: { error: msg } }).catch(() => {});
-      await completeSchedulerLog(logId, "failed", null, msg);
+      completeSchedulerLog(logId, "failed", null, msg).catch(() => {});
       resolve({ success: false, error: msg });
     });
   });
