@@ -17,6 +17,7 @@ import { useLocation } from 'wouter';
 import AuditLogTab from '@/components/admin/AuditLogTab';
 import BackupTab from '@/components/admin/BackupTab';
 import RetentionTab from '@/components/admin/RetentionTab';
+import SsoAuditTab from '@/components/admin/SsoAuditTab';
 
 interface SsoGroupMapping {
   groupId: string;
@@ -305,6 +306,7 @@ export default function SuperAdmin() {
               <TabsList className="h-9 mb-0">
                 <TabsTrigger value="domains" className="text-xs gap-1.5"><Globe className="h-3.5 w-3.5" />Domains</TabsTrigger>
                 <TabsTrigger value="audit" className="text-xs gap-1.5"><ClipboardList className="h-3.5 w-3.5" />Audit Log</TabsTrigger>
+                <TabsTrigger value="sso-audit" className="text-xs gap-1.5"><Shield className="h-3.5 w-3.5" />SSO Audit</TabsTrigger>
                 <TabsTrigger value="backup" className="text-xs gap-1.5"><HardDrive className="h-3.5 w-3.5" />Backup & Recovery</TabsTrigger>
                 <TabsTrigger value="retention" className="text-xs gap-1.5"><Timer className="h-3.5 w-3.5" />Retention</TabsTrigger>
               </TabsList>
@@ -806,6 +808,20 @@ export default function SuperAdmin() {
             {/* ── Audit Log Tab ──────────────────────────────────────────── */}
             <TabsContent value="audit" className="flex-1 overflow-auto m-0 p-6">
               <AuditLogTab />
+            </TabsContent>
+
+            {/* ── SSO Audit Tab ────────────────────────────────────────────── */}
+            <TabsContent value="sso-audit" className="flex-1 overflow-auto m-0 p-6">
+              <div className="mb-4">
+                <h2 className="text-base font-semibold flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-primary" />
+                  SSO User Lifecycle Audit
+                </h2>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Full history of SSO logins, auto-provisioning, deactivations, and role changes — including background sync events.
+                </p>
+              </div>
+              <SsoAuditTab />
             </TabsContent>
 
             {/* ── Backup & Recovery Tab ──────────────────────────────────── */}

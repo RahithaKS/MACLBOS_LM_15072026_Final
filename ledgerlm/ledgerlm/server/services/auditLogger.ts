@@ -16,7 +16,13 @@ export type AuditAction =
   | "ADMIN_CUBE_DELETE"
   | "ADMIN_USER_INVITE"
   | "ADMIN_USER_REMOVE"
-  | "SSO_LOGIN";
+  // ── SSO User Lifecycle ──────────────────────────────────────────────────────
+  | "SSO_LOGIN"             // successful SSO login (existing + returning users)
+  | "SSO_LOGIN_FAILED"      // login attempt blocked (not_in_group, inactive, mismatch…)
+  | "SSO_USER_PROVISIONED"  // new user auto-created from AD group membership on first login
+  | "SSO_USER_DEACTIVATED"  // user deactivated by background sync (removed from all groups)
+  | "SSO_ROLE_SYNCED"       // role updated at login time (AD promotion/demotion)
+  | "SSO_ROLE_UPDATED";     // role updated by background sync job
 
 interface AuditEntry {
   userId?: string | null;

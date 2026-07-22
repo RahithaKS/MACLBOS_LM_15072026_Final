@@ -16,6 +16,7 @@ import { eq, and } from 'drizzle-orm';
 import { domains, domainUsers, users } from '@shared/schema';
 import { sql } from 'drizzle-orm';
 import { resolveGroupRole, hasSsoGroupMappings } from './ssoService';
+import { writeAuditLog } from './auditLogger';
 
 let isRunning = false;
 
@@ -119,6 +120,14 @@ async function runSsoSync(): Promise<void> {
                 await invalidateUserSessions(userId);
               }
 
+              // Audit: user deactivated by sync job
+              writeAuditLog({
+                action: 'SSO_USER_DEACTIVATED',
+                resource: domain.name,
+                status: 'success',
+                details: { email: du.email, domain: domain.name, role: du.role, triggeredBy: 'background_sync' },
+              });
+
               totalDeactivated++;
               console.log(`[SSO Sync] Deactivated ${du.email} (domain: ${domain.name}) — no longer in any group`);
             } else if (resolvedRole !== du.role) {
@@ -127,6 +136,14 @@ async function runSsoSync(): Promise<void> {
                 .update(domainUsers)
                 .set({ role: resolvedRole })
                 .where(eq(domainUsers.id, du.id));
+
+              // Audit: role updated by sync job
+              writeAuditLog({
+                action: 'SSO_ROLE_UPDATED',
+                resource: domain.name,
+                status: 'success',
+                details: { email: du.email, domain: domain.name, oldRole: du.role, newRole: resolvedRole, triggeredBy: 'background_sync' },
+              });
 
               totalRoleUpdated++;
               console.log(`[SSO Sync] Updated role for ${du.email} (domain: ${domain.name}): ${du.role} → ${resolvedRole}`);

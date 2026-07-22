@@ -475,6 +475,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate the email belongs to this domain
       if (!validateEmailDomain(email, domainName)) {
         console.warn(`SSO callback: email ${email} does not match domain ${domainName}`);
+        writeAuditLog({ action: 'SSO_LOGIN_FAILED', resource: domainName, ipAddress: extractIp(req as any), status: 'failed', details: { email, domain: domainName, reason: 'domain_mismatch', triggeredBy: 'login' } });
         return res.redirect(`/?sso_error=domain_mismatch`);
       }
 
@@ -491,6 +492,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const resolvedRole = await resolveGroupRole(domain, email);
           if (!resolvedRole) {
             console.warn(`SSO callback: ${email} is not a member of any configured group for domain ${domainName}`);
+            writeAuditLog({ action: 'SSO_LOGIN_FAILED', resource: domainName, ipAddress: extractIp(req as any), status: 'failed', details: { email, domain: domainName, reason: 'not_in_group', triggeredBy: 'login' } });
             return res.redirect(`/?sso_error=not_in_group`);
           }
           // Auto-provision this user with the role resolved from their AD group
@@ -501,15 +503,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             role: resolvedRole,
             hardcodedOtp: null,
           });
+          writeAuditLog({ action: 'SSO_USER_PROVISIONED', resource: domainName, ipAddress: extractIp(req as any), status: 'success', details: { email, domain: domainName, role: resolvedRole, triggeredBy: 'login' } });
         } else {
           // No groups configured — fall back to invite-only
           console.warn(`SSO callback: ${email} not registered in domain ${domainName}`);
+          writeAuditLog({ action: 'SSO_LOGIN_FAILED', resource: domainName, ipAddress: extractIp(req as any), status: 'failed', details: { email, domain: domainName, reason: 'not_registered', triggeredBy: 'login' } });
           return res.redirect(`/?sso_error=not_registered`);
         }
       } else {
         // Existing domain user — block if deactivated by SSO sync
         if ((domainUser as any).status === 'inactive') {
           console.warn(`SSO callback: ${email} account is inactive (deactivated by SSO sync)`);
+          writeAuditLog({ action: 'SSO_LOGIN_FAILED', resource: domainName, ipAddress: extractIp(req as any), status: 'failed', details: { email, domain: domainName, reason: 'account_inactive', triggeredBy: 'login' } });
           return res.redirect(`/?sso_error=account_inactive`);
         }
 
@@ -518,12 +523,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const resolvedRole = await resolveGroupRole(domain, email);
           if (!resolvedRole) {
             console.warn(`SSO callback: ${email} is no longer in any configured group`);
+            writeAuditLog({ action: 'SSO_LOGIN_FAILED', resource: domainName, ipAddress: extractIp(req as any), status: 'failed', details: { email, domain: domainName, reason: 'not_in_group', triggeredBy: 'login' } });
             return res.redirect(`/?sso_error=not_in_group`);
           }
           // Sync role if it changed (promotion or demotion in AD)
           if (domainUser.role !== resolvedRole) {
             console.log(`SSO callback: syncing role for ${email}: ${domainUser.role} → ${resolvedRole}`);
             await storage.updateDomainUser(domainUser.id, { role: resolvedRole });
+            writeAuditLog({ action: 'SSO_ROLE_SYNCED', resource: domainName, ipAddress: extractIp(req as any), status: 'success', details: { email, domain: domainName, oldRole: domainUser.role, newRole: resolvedRole, triggeredBy: 'login' } });
             domainUser = { ...domainUser, role: resolvedRole };
           }
         }
@@ -537,6 +544,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         req.session.regenerate((err) => (err ? reject(err) : resolve()))
       );
       (req.session as any).userId = userId;
+
+      // Audit: successful SSO login
+      writeAuditLog({ userId, action: 'SSO_LOGIN', resource: domainName, ipAddress: extractIp(req as any), status: 'success', details: { email, domain: domainName, role: domainUser.role, triggeredBy: 'login' } });
 
       res.redirect('/dashboard');
     } catch (error: any) {
@@ -8965,6 +8975,112 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
       const date = new Date().toISOString().slice(0, 10);
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename="ledgerlm-audit-log-${date}.csv"`);
+      res.send(csv);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── SSO User Lifecycle Audit API ─────────────────────────────────────────
+  const SSO_ACTIONS = ['SSO_LOGIN', 'SSO_LOGIN_FAILED', 'SSO_USER_PROVISIONED', 'SSO_USER_DEACTIVATED', 'SSO_ROLE_SYNCED', 'SSO_ROLE_UPDATED'];
+
+  app.get("/api/super-admin/sso-audit-logs", requireSuperAdmin, async (req, res) => {
+    try {
+      const { action, email, domain, from, to, page = "1", limit = "50" } = req.query as Record<string, string>;
+      const pageNum  = Math.max(1, parseInt(page));
+      const limitNum = Math.min(200, Math.max(1, parseInt(limit)));
+      const offsetNum = (pageNum - 1) * limitNum;
+
+      const parts: ReturnType<typeof sql>[] = [
+        sql`action = ANY(ARRAY[${sql.raw(SSO_ACTIONS.map(a => `'${a}'`).join(','))}])`,
+      ];
+      if (action && SSO_ACTIONS.includes(action)) parts.push(sql`action = ${action}`);
+      if (email)  parts.push(sql`details->>'email' ILIKE ${'%' + email + '%'}`);
+      if (domain) parts.push(sql`(resource ILIKE ${'%' + domain + '%'} OR details->>'domain' ILIKE ${'%' + domain + '%'})`);
+      if (from)   parts.push(sql`created_at >= ${new Date(from)}`);
+      if (to)     parts.push(sql`created_at <= ${new Date(to + 'T23:59:59')}`);
+      const where = sql.join(parts, sql` AND `);
+
+      const [dataRows, countRow] = await Promise.all([
+        db.execute(sql`SELECT id, user_id, action, resource, resource_id, ip_address, status, details, created_at FROM audit_logs WHERE ${where} ORDER BY created_at DESC LIMIT ${limitNum} OFFSET ${offsetNum}`),
+        db.execute(sql`SELECT COUNT(*) AS total FROM audit_logs WHERE ${where}`),
+      ]);
+
+      res.json({
+        logs: dataRows.rows,
+        total: Number((countRow.rows[0] as any).total),
+        page: pageNum,
+        limit: limitNum,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/super-admin/sso-audit-logs/stats", requireSuperAdmin, async (_req, res) => {
+    try {
+      const ssoActionsArray = sql.raw(SSO_ACTIONS.map(a => `'${a}'`).join(','));
+      const [breakdown, totalRow] = await Promise.all([
+        db.execute(sql`
+          SELECT action, status, COUNT(*) AS cnt
+          FROM audit_logs
+          WHERE action = ANY(ARRAY[${ssoActionsArray}])
+            AND created_at >= NOW() - INTERVAL '30 days'
+          GROUP BY action, status
+        `),
+        db.execute(sql`SELECT COUNT(*) AS total FROM audit_logs WHERE action = ANY(ARRAY[${ssoActionsArray}])`),
+      ]);
+
+      const rows = breakdown.rows as { action: string; status: string; cnt: string }[];
+      const count = (action: string, status?: string) =>
+        rows.filter(r => r.action === action && (!status || r.status === status))
+          .reduce((s, r) => s + Number(r.cnt), 0);
+
+      res.json({
+        totalEvents: Number((totalRow.rows[0] as any).total),
+        loginsLast30d: count('SSO_LOGIN', 'success'),
+        provisionedLast30d: count('SSO_USER_PROVISIONED', 'success'),
+        deactivatedLast30d: count('SSO_USER_DEACTIVATED', 'success'),
+        roleChangesLast30d: count('SSO_ROLE_SYNCED') + count('SSO_ROLE_UPDATED'),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/super-admin/sso-audit-logs/export", requireSuperAdmin, async (req, res) => {
+    try {
+      const { action, email, domain, from, to } = req.query as Record<string, string>;
+      const ssoActionsArray = sql.raw(SSO_ACTIONS.map(a => `'${a}'`).join(','));
+      const parts: ReturnType<typeof sql>[] = [
+        sql`action = ANY(ARRAY[${ssoActionsArray}])`,
+      ];
+      if (action && SSO_ACTIONS.includes(action)) parts.push(sql`action = ${action}`);
+      if (email)  parts.push(sql`details->>'email' ILIKE ${'%' + email + '%'}`);
+      if (domain) parts.push(sql`(resource ILIKE ${'%' + domain + '%'} OR details->>'domain' ILIKE ${'%' + domain + '%'})`);
+      if (from)   parts.push(sql`created_at >= ${new Date(from)}`);
+      if (to)     parts.push(sql`created_at <= ${new Date(to + 'T23:59:59')}`);
+      const where = sql.join(parts, sql` AND `);
+
+      const rows = await db.execute(sql`
+        SELECT id, user_id, action, resource, ip_address, status, details, created_at
+        FROM audit_logs WHERE ${where} ORDER BY created_at DESC LIMIT 10000
+      `);
+
+      const header = "timestamp,email,domain,event,role_change,triggered_by,status,ip_address,raw_details\n";
+      const csv = header + (rows.rows as any[]).map((r) => {
+        const d = r.details || {};
+        const roleChange = d.oldRole && d.newRole ? `${d.oldRole} -> ${d.newRole}` : (d.role || '');
+        return [
+          r.created_at, d.email || r.user_id || '', d.domain || r.resource || '',
+          r.action, roleChange, d.triggeredBy || '', r.status, r.ip_address || '',
+          JSON.stringify(d),
+        ].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+      }).join('\n');
+
+      const date = new Date().toISOString().slice(0, 10);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="ledgerlm-sso-audit-${date}.csv"`);
       res.send(csv);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
