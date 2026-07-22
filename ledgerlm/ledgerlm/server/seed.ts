@@ -30,12 +30,6 @@ export async function seedDatabase() {
   const hashedPassword = await bcrypt.hash("password123", 10);
 
   // Create companies
-  const [nemkoCompany] = await db.insert(companies).values({
-    name: "Nemko",
-    slug: "nemko",
-    description: "Nemko Group AS - Testing, Inspection, and Certification",
-  }).returning();
-
   const [ledgerlmCompany] = await db.insert(companies).values({
     name: "LedgerLM",
     slug: "ledgerlm",
@@ -49,13 +43,6 @@ export async function seedDatabase() {
   }).returning();
 
   // Create users
-  const [nemkoAdmin] = await db.insert(users).values({
-    username: "nemkomatasma@nemko.com",
-    password: hashedPassword,
-    displayName: "Nemko Admin",
-    role: "admin",
-  }).returning();
-
   const [ledgerlmAdmin] = await db.insert(users).values({
     username: "customer@ledgerlm.ai",
     password: hashedPassword,
@@ -70,7 +57,7 @@ export async function seedDatabase() {
     role: "admin",
   }).returning();
 
-  const [nemkoUser] = await db.insert(users).values({
+  const [sampleUser] = await db.insert(users).values({
     username: defaultUsername,
     password: hashedPassword,
     displayName: "John Smith",
@@ -79,16 +66,6 @@ export async function seedDatabase() {
 
   // Create company memberships
   await db.insert(companyMemberships).values([
-    {
-      userId: nemkoAdmin.id,
-      companyId: nemkoCompany.id,
-      role: "admin",
-    },
-    {
-      userId: nemkoUser.id,
-      companyId: nemkoCompany.id,
-      role: "member",
-    },
     {
       userId: ledgerlmAdmin.id,
       companyId: ledgerlmCompany.id,
@@ -103,16 +80,6 @@ export async function seedDatabase() {
 
   // Create user settings
   await db.insert(userSettings).values([
-    {
-      userId: nemkoAdmin.id,
-      enterpriseEnabled: 1,
-      activeCompanyId: nemkoCompany.id,
-    },
-    {
-      userId: nemkoUser.id,
-      enterpriseEnabled: 0,
-      activeCompanyId: nemkoCompany.id,
-    },
     {
       userId: ledgerlmAdmin.id,
       enterpriseEnabled: 1,
@@ -135,23 +102,22 @@ export async function seedDatabase() {
 
   for (const chat of sampleChats) {
     await db.insert(chats).values({
-      userId: nemkoUser.id,
+      userId: sampleUser.id,
       title: chat.title,
       preview: chat.preview,
     });
   }
 
   console.log('✅ Multi-tenant database seeded successfully!');
-  console.log('   🏢 Companies: Nemko, LedgerLM, Bosch');
-  console.log('   👤 Admins: nemkomatasma@nemko.com, customer@ledgerlm.ai (Super Admin), boschmatasma@bosch.com');
-  console.log('   👥 Users: john.smith@example.com (Nemko member)');
+  console.log('   🏢 Companies: LedgerLM, Bosch');
+  console.log('   👤 Admins: customer@ledgerlm.ai (Super Admin), boschmatasma@bosch.com');
+  console.log('   👥 Users: john.smith@example.com (LedgerLM member)');
 
   // Seed board templates
   await seedBoardTemplates();
   
-  // Seed domains (Nemko, LedgerLM, Bosch)
+  // Seed domains (LedgerLM, Bosch)
   await seedDomains(
-    nemkoCompany.id, nemkoAdmin.id,
     boschCompany.id, boschAdmin.id, 
     ledgerlmCompany.id, ledgerlmAdmin.id
   );
@@ -381,7 +347,6 @@ Share your financial data and I'll help prepare compelling investor materials.`,
 
 // Called when seeding fresh database with known IDs
 async function seedDomains(
-  nemkoCompanyId: string, nemkoAdminId: string,
   boschCompanyId: string, boschAdminId: string, 
   ledgerlmCompanyId?: string, ledgerlmAdminId?: string
 ) {
@@ -413,35 +378,6 @@ async function seedDomains(
     });
     
     console.log('✅ Created domain admin: customer@ledgerlm.ai (Super Admin - uses email OTP)');
-  }
-  
-  // Seed nemko.com domain
-  const existingNemkoDomain = await db.query.domains.findFirst({
-    where: (d, { eq }) => eq(d.name, 'nemko.com')
-  });
-  
-  if (existingNemkoDomain) {
-    console.log('✅ nemko.com domain already exists');
-  } else {
-    const [nemkoDomain] = await db.insert(domains).values({
-      name: 'nemko.com',
-      adminEmail: 'nemkomatasma@nemko.com',
-      companyId: nemkoCompanyId,
-      userQuota: 100,
-      createdBy: nemkoAdminId,
-    }).returning();
-    
-    console.log('✅ Created domain: nemko.com');
-    
-    await db.insert(domainUsers).values({
-      domainId: nemkoDomain.id,
-      email: 'nemkomatasma@nemko.com',
-      role: 'admin',
-      hardcodedOtp: '123456', // Default OTP for testing
-      invitedBy: nemkoAdminId,
-    });
-    
-    console.log('✅ Created domain admin: nemkomatasma@nemko.com (OTP: 123456)');
   }
   
   // Seed bosch.com domain
@@ -527,11 +463,6 @@ async function seedDomains(
 
 // Called when companies already exist - looks up IDs dynamically
 async function seedDomainsIfNeeded() {
-  // Look up Nemko company
-  const nemkoCompany = await db.query.companies.findFirst({
-    where: (c, { eq }) => eq(c.slug, 'nemko')
-  });
-  
   // Look up Bosch company
   const boschCompany = await db.query.companies.findFirst({
     where: (c, { eq }) => eq(c.slug, 'bosch')
@@ -540,11 +471,6 @@ async function seedDomainsIfNeeded() {
   // Look up LedgerLM company
   const ledgerlmCompany = await db.query.companies.findFirst({
     where: (c, { eq }) => eq(c.slug, 'ledgerlm')
-  });
-  
-  // Look up Nemko admin
-  const nemkoAdmin = await db.query.users.findFirst({
-    where: (u, { eq }) => eq(u.username, 'nemkomatasma@nemko.com')
   });
   
   // Look up Bosch admin
@@ -557,10 +483,6 @@ async function seedDomainsIfNeeded() {
     where: (u, { eq }) => eq(u.username, 'customer@ledgerlm.ai')
   });
   
-  if (!nemkoCompany || !nemkoAdmin) {
-    console.log('⚠️ Nemko company or admin not found, skipping Nemko domain seed');
-  }
-  
   if (!boschCompany || !boschAdmin) {
     console.log('⚠️ Bosch company or admin not found, skipping bosch.com domain seed');
   }
@@ -570,10 +492,8 @@ async function seedDomainsIfNeeded() {
   }
   
   // Seed domains with available data
-  if (nemkoCompany && nemkoAdmin && boschCompany && boschAdmin) {
+  if (boschCompany && boschAdmin) {
     await seedDomains(
-      nemkoCompany.id, 
-      nemkoAdmin.id,
       boschCompany.id, 
       boschAdmin.id, 
       ledgerlmCompany?.id, 

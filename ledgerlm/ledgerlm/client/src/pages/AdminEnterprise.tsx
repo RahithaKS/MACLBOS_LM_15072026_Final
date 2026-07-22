@@ -137,9 +137,6 @@ export default function AdminEnterprise() {
   const [selectedCubeId, setSelectedCubeId] = useState<string>("");
   const [isConnectorsDialogOpen, setIsConnectorsDialogOpen] = useState(false);
   const [isHierarchyDialogOpen, setIsHierarchyDialogOpen] = useState(false);
-  const [nemkoCubeId, setNemkoCubeId] = useState<string>("");
-  const [nemkoSheetName, setNemkoSheetName] = useState<string>("Sheet 1");
-  const [nemkoFile, setNemkoFile] = useState<File | null>(null);
   const [selectedConnectorFilter, setSelectedConnectorFilter] = useState<string>("all");
   const [selectedViewCubeId, setSelectedViewCubeId] = useState<string>("all");
   const [selectedVersionIds, setSelectedVersionIds] = useState<Set<string>>(new Set());
@@ -260,35 +257,6 @@ export default function AdminEnterprise() {
 
   // Get total document count for selected cube (ignoring connector filter) for accurate delete all warning
   const totalCubeDocumentCount = documents?.filter(doc => doc.cubeId === selectedViewCubeId).length || 0;
-
-  const nemkoUploadMutation = useMutation({
-    mutationFn: async () => {
-      if (!nemkoCubeId) throw new Error("Please select a cube");
-      if (!nemkoFile) throw new Error("Please select an Excel file");
-      const formData = new FormData();
-      formData.append('file', nemkoFile);
-      formData.append('cube_id', nemkoCubeId);
-      formData.append('sheet_name', nemkoSheetName || 'Sheet 1');
-      const response = await fetch('/api/v2/semantic-sql/ingest-nemko-pl', {
-        method: 'POST',
-        credentials: 'include',
-        body: formData,
-      });
-      const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || 'Upload failed');
-      return data;
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Nemko Anaplan P&L ingested",
-        description: `${data.rows_inserted?.toLocaleString()} rows inserted from ${data.total_rows?.toLocaleString()} source rows in ${data.elapsed_seconds?.toFixed(1)}s`,
-      });
-      setNemkoFile(null);
-    },
-    onError: (error: Error) => {
-      toast({ title: "Ingestion failed", description: error.message, variant: "destructive" });
-    },
-  });
 
   const uploadMutation = useMutation({
     mutationFn: async (files: File[]) => {

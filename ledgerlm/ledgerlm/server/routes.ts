@@ -658,10 +658,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Legacy list of admin emails that use hardcoded OTP from NEMKO_ADMIN_OTP environment variable
+  // Legacy list of admin emails that use the hardcoded OTP from environment variable
   // NOTE: This is kept for backward compatibility. New users should be added via Super Admin domain management.
   const HARDCODED_OTP_ADMINS = [
-    "nemkomatasma@nemko.com",
     "customer@ledgerlm.ai",
     "boschmatasma@bosch.com",
   ];

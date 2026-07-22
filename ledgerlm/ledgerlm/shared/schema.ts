@@ -279,7 +279,7 @@ export const queryAudit = pgTable("query_audit", {
 export const companies = pgTable("companies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
-  slug: varchar("slug", { length: 100 }).notNull().unique(), // URL-friendly identifier (e.g., "nemko")
+  slug: varchar("slug", { length: 100 }).notNull().unique(), // URL-friendly identifier (e.g., "bosch")
   description: text("description"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => ({
@@ -422,7 +422,7 @@ export const schedulerConfig = pgTable("scheduler_config", {
 // Super Admin Domain Management tables
 export const domains = pgTable("domains", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull().unique(), // e.g., 'bosch.com', 'nemko.com', 'ledgerlm.ai'
+  name: text("name").notNull().unique(), // e.g., 'bosch.com', 'ledgerlm.ai'
   adminEmail: text("admin_email").notNull(), // Primary domain admin email (first admin)
   companyId: varchar("company_id").references(() => companies.id, { onDelete: 'set null' }), // Link domain to company for enterprise data isolation
   userQuota: integer("user_quota").default(50), // Maximum number of users that can be invited to this domain
@@ -829,7 +829,7 @@ export const cubeColumnRelationships = pgTable("cube_column_relationships", {
 
 // Plan/Budget data - stores CTG override values from Manual inputs MBR Master
 // Used for Plan vs Actual comparisons and dynamic CTG values
-// Extended to support multi-tenant (Bosch, Nemko) with different statement types (P&L, BS, Cash)
+// Extended to support multi-tenant with different statement types (P&L, BS, Cash)
 export const cubePlanData = pgTable("cube_plan_data", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   cubeId: varchar("cube_id").notNull().references(() => cubes.id, { onDelete: 'cascade' }),
@@ -845,13 +845,13 @@ export const cubePlanData = pgTable("cube_plan_data", {
   page: varchar("page", { length: 100 }), // Page reference
   sourceFile: varchar("source_file", { length: 255 }), // Original file name
   ingestedAt: timestamp("ingested_at").defaultNow(),
-  // Multi-tenant and multi-statement type support (Nemko, etc.)
+  // Multi-tenant and multi-statement type support
   companyId: varchar("company_id", { length: 255 }), // Company ID for multi-tenant isolation
   statementType: varchar("statement_type", { length: 50 }), // 'P&L', 'BS', 'Cash' - identifies file type
   viewType: varchar("view_type", { length: 50 }), // 'Location', 'Subsidiary' - view perspective
-  subsidiary: varchar("subsidiary", { length: 255 }), // Nemko: 'E1 Nemko Foundation', 'E7 Nemko Group AS'
-  location: varchar("location", { length: 255 }), // Nemko: 'E1 Nemko Foundation (Oslo)'
-  ds: varchar("ds", { length: 255 }), // Nemko P&L: Department/Service 'S106 Safety', 'S107 Energy'
+  subsidiary: varchar("subsidiary", { length: 255 }), // Subsidiary/entity identifier
+  location: varchar("location", { length: 255 }), // Location identifier
+  ds: varchar("ds", { length: 255 }), // Department/Service identifier
   accountCode: varchar("account_code", { length: 100 }), // Account code '30000', '20600'
   accountName: varchar("account_name", { length: 500 }), // Account name 'External Revenue', 'VAT Payables'
   bsCategory: varchar("bs_category", { length: 255 }), // Balance Sheet category 'Other equity', 'VAT Payables'

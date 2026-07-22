@@ -26,7 +26,7 @@ class SemanticQueryRequest(BaseModel):
     cube_id: str
     user_id: str
     cube_metadata: Optional[Dict[str, Any]] = None
-    domain: Optional[str] = None  # For multi-tenant routing (e.g., 'nemko.com', 'bosch.com')
+    domain: Optional[str] = None  # For multi-tenant routing (e.g., 'bosch.com')
 
 
 class QueryIntentResponse(BaseModel):
@@ -60,7 +60,7 @@ class IngestionResponse(BaseModel):
 class StructuredQueryRequest(BaseModel):
     cube_id: str
     structured_query: Dict[str, Any]
-    domain: Optional[str] = None  # For multi-tenant routing (e.g., 'nemko.com', 'bosch.com')
+    domain: Optional[str] = None  # For multi-tenant routing (e.g., 'bosch.com')
 
 
 class TimeFilter(BaseModel):
@@ -162,7 +162,7 @@ async def execute_structured_query(request: StructuredQueryRequest):
                 )
 
         # Check if this is a plan query and try to get plan data first
-        # Pass domain for multi-tenant routing (Bosch vs Nemko)
+        # Pass domain for multi-tenant routing
         plan_detection = semantic_sql_service.detect_plan_type(original_query, request.domain)
         
         plan_results = []
@@ -173,11 +173,11 @@ async def execute_structured_query(request: StructuredQueryRequest):
                 plan_results = plan_result.get('results', [])
                 logger.info(f"Got {len(plan_results)} rows from plan data")
         
-        # Pass domain for multi-tenant routing (Bosch vs Nemko calculation layer)
+        # Pass domain for multi-tenant routing
         sql_result = semantic_sql_service.compile_sql(intent, request.cube_id, domain=request.domain)
         
         if not sql_result.get('success'):
-            # Check if this is a RAG fallback suggestion (for Nemko domain)
+            # Check if this is a RAG fallback suggestion
             if sql_result.get('use_rag'):
                 return StructuredQueryResponse(
                     success=False,
@@ -402,7 +402,7 @@ async def execute_semantic_query(request: SemanticQueryRequest):
         logger.info(f"Semantic query: '{processed_query}' for cube {request.cube_id}")
         
         # Step 0c: Check if this is a plan query (Budget/Forecast/CF)
-        # Pass domain for multi-tenant routing (Bosch vs Nemko)
+        # Pass domain for multi-tenant routing
         plan_detection = semantic_sql_service.detect_plan_type(processed_query, request.domain)
         
         if plan_detection.get('is_plan_query'):
@@ -460,7 +460,6 @@ async def execute_semantic_query(request: SemanticQueryRequest):
         sql_result = semantic_sql_service.compile_sql(intent, request.cube_id, domain=request.domain)
         
         if not sql_result.get('success'):
-            # For Nemko domain, indicate that RAG should be used instead
             error_msg = sql_result.get('error', 'Failed to compile SQL')
             if sql_result.get('use_rag'):
                 error_msg = f"{error_msg} - Please query your uploaded documents directly."
@@ -686,14 +685,6 @@ class IntentResponse(BaseModel):
     schema_type: Optional[str] = None  # 'kpi' | 'investment_capex_pmo'
 
 
-def is_nemko_domain(domain: str) -> bool:
-    """Check if domain is Nemko for multi-tenant routing."""
-    if not domain:
-        return False
-    domain_lower = domain.lower()
-    return 'nemko' in domain_lower
-
-
 @router.post("/semantic-sql/intent", response_model=IntentResponse)
 async def get_query_intent(request: IntentRequest):
     """
@@ -708,17 +699,9 @@ async def get_query_intent(request: IntentRequest):
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         # Check for fact data in both possible tables
-        is_nemko = is_nemko_domain(request.domain)
-        
         # First check cube_fact_data (standard KPI structure)
         cursor.execute("SELECT COUNT(*) as count FROM cube_fact_data WHERE cube_id = %s", (request.cube_id,))
         row_count = cursor.fetchone()['count']
-        
-        # For Nemko domains, also check nemko_pl_fact_data if cube_fact_data is empty
-        if is_nemko and row_count == 0:
-            cursor.execute("SELECT COUNT(*) as count FROM nemko_pl_fact_data WHERE cube_id = %s OR cube_id IS NULL", (request.cube_id,))
-            nemko_count = cursor.fetchone()['count']
-            row_count = nemko_count
 
         # Check investment/CAPEX/PMO table if KPI table is empty
         is_investment = False
@@ -733,7 +716,7 @@ async def get_query_intent(request: IntentRequest):
         cursor.close()
         conn.close()
         
-        logger.info(f"Intent check: domain={request.domain}, is_nemko={is_nemko}, cube_id={request.cube_id}, row_count={row_count}, is_investment={is_investment}")
+        logger.info(f"Intent check: domain={request.domain}, cube_id={request.cube_id}, row_count={row_count}, is_investment={is_investment}")
         
         if row_count == 0:
             raise HTTPException(status_code=404, detail=f"No fact data found for cube {request.cube_id}")
@@ -994,58 +977,6 @@ async def ingest_plan_data(
             success=False,
             error=str(e)
         )
-
-
-@router.post("/semantic-sql/ingest-nemko-pl", response_model=PlanDataIngestionResponse)
-async def ingest_nemko_anaplan_pl(
-    file: UploadFile = File(...),
-    cube_id: str = Form(...),
-    sheet_name: str = Form(default='Sheet 1'),
-    statement_type: str = Form(default='P&L'),
-):
-    """
-    Ingest Nemko Anaplan wide-format P&L export into cube_plan_data.
-
-    Expected columns: Location, DS, LIS (P&L line), Versions, Line Items,
-    then monthly columns (Jan 24, Feb 24, … Dec 26). FY totals are skipped.
-    Versions (Actual / Budget / Forecast) map to plan_type.
-    """
-    try:
-        logger.info(f"[Nemko Anaplan] Ingest request: cube={cube_id}, file={file.filename}, sheet={sheet_name}")
-
-        if not file.filename.endswith(('.xlsx', '.xls')):
-            return PlanDataIngestionResponse(success=False, error="Only Excel files (.xlsx, .xls) are supported")
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-            shutil.copyfileobj(file.file, tmp)
-            tmp_path = tmp.name
-
-        try:
-            result = semantic_sql_service.ingest_nemko_anaplan_pl(
-                tmp_path,
-                cube_id,
-                sheet_name=sheet_name,
-                source_file=file.filename,
-                statement_type=statement_type,
-            )
-            if result.get('success'):
-                return PlanDataIngestionResponse(
-                    success=True,
-                    rows_inserted=result.get('rows_inserted'),
-                    rows_skipped=result.get('rows_skipped'),
-                    total_rows=result.get('total_rows'),
-                    elapsed_seconds=result.get('elapsed_seconds'),
-                    errors=result.get('errors'),
-                )
-            else:
-                return PlanDataIngestionResponse(success=False, error=result.get('error'))
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-    except Exception as e:
-        logger.error(f"[Nemko Anaplan] Ingest endpoint error: {e}")
-        return PlanDataIngestionResponse(success=False, error=str(e))
 
 
 @router.post("/semantic-sql/plan-data")

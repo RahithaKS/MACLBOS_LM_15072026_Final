@@ -674,14 +674,6 @@ COMPANY_CONFIG = {
         'plan_data_table': 'cube_plan_data',
         'fact_data_table': 'cube_fact_data',
     },
-    'nemko': {
-        'company_id': None,  # Will be fetched from database
-        'domains': ['nemko.com'],
-        'cube_id': None,  # Will be fetched from database
-        'plan_data_table': 'cube_plan_data',
-        'fact_data_table':
-        'cube_plan_data',  # Nemko uses plan_data for all data with scenario dimension
-    }
 }
 
 # Cache for domain configurations fetched from database
@@ -789,60 +781,6 @@ def get_cube_for_statement_type(domain_config: Dict[str, Any],
     return domain_config.get('cube_id')
 
 
-# Nemko-specific plan type mappings
-NEMKO_PLAN_TYPE_MAPPING = {
-    # Actuals
-    'actual fy22': 'Actual FY22',
-    'actual fy23': 'Actual FY23',
-    'actual fy24': 'Actual FY24',
-    'actual fy25': 'Actual FY25',
-    'actuals fy22': 'Actual FY22',
-    'actuals fy23': 'Actual FY23',
-    'actuals fy24': 'Actual FY24',
-    'actuals fy25': 'Actual FY25',
-    'actual 2022': 'Actual FY22',
-    'actual 2023': 'Actual FY23',
-    'actual 2024': 'Actual FY24',
-    'actual 2025': 'Actual FY25',
-    # Budget
-    'budget fy24': 'Budget FY24',
-    'budget fy25': 'Budget FY25',
-    'budget 2024': 'Budget FY24',
-    'budget 2025': 'Budget FY25',
-    'fy24 budget': 'Budget FY24',
-    'fy25 budget': 'Budget FY25',
-    # Forecast
-    'forecast fy24': 'Forecast FY24',
-    'forecast fy25': 'Forecast FY25',
-    'forecast 2024': 'Forecast FY24',
-    'forecast 2025': 'Forecast FY25',
-    'fy24 forecast': 'Forecast FY24',
-    'fy25 forecast': 'Forecast FY25',
-}
-
-# Nemko statement type detection keywords
-NEMKO_STATEMENT_KEYWORDS = {
-    'P&L': [
-        'p&l', 'profit and loss', 'profit & loss', 'income statement',
-        'revenue', 'expense', 'sales'
-    ],
-    'BS': ['balance sheet', 'bs ', 'assets', 'liabilities', 'equity'],
-    'Cash': ['cash flow', 'cash ', 'operating cash', 'financing'],
-}
-
-# Nemko subsidiary mappings
-NEMKO_SUBSIDIARY_MAPPING = {
-    'nemko foundation': 'E1 Nemko Foundation',
-    'e1': 'E1 Nemko Foundation',
-    'nemko group': 'E7 Nemko Group AS',
-    'e7': 'E7 Nemko Group AS',
-    'group elimination': 'E8 Nemko Group AS Elimination',
-    'e8': 'E8 Nemko Group AS Elimination',
-    'group total': 'E0 Group Total',
-    'e0': 'E0 Group Total',
-}
-
-
 def get_company_by_domain(domain: str) -> dict:
     """
     Get company configuration by domain name.
@@ -867,65 +805,6 @@ def get_company_by_domain(domain: str) -> dict:
             return config
 
     return COMPANY_CONFIG.get('bosch')  # Default to Bosch
-
-
-def is_nemko_domain(domain: str) -> bool:
-    """Check if domain is a Nemko domain."""
-    if not domain:
-        return False
-    domain_lower = domain.lower()
-
-    # Check database config first
-    db_config = get_domain_config_from_db(domain_lower)
-    if db_config:
-        return 'nemko' in db_config.get('domain_name', '').lower()
-
-    # Fallback to hardcoded check
-    nemko_config = COMPANY_CONFIG.get('nemko', {})
-    return any(d in domain_lower for d in nemko_config.get('domains', []))
-
-
-def detect_nemko_plan_type(query: str) -> str:
-    """Detect Nemko-specific plan type from query."""
-    query_lower = ' ' + query.lower() + ' '
-
-    # Check Nemko-specific mappings first
-    for pattern, plan_type in NEMKO_PLAN_TYPE_MAPPING.items():
-        if pattern in query_lower:
-            return plan_type
-
-    # Fallback to general keywords with default year (FY25)
-    if 'budget' in query_lower:
-        return 'Budget FY25'
-    if 'forecast' in query_lower:
-        return 'Forecast FY25'
-    if 'actual' in query_lower:
-        return 'Actual FY25'
-
-    return None
-
-
-def detect_nemko_statement_type(query: str) -> str:
-    """Detect statement type (P&L, BS, Cash) from query."""
-    query_lower = query.lower()
-
-    for stmt_type, keywords in NEMKO_STATEMENT_KEYWORDS.items():
-        for keyword in keywords:
-            if keyword in query_lower:
-                return stmt_type
-
-    return 'P&L'  # Default to P&L
-
-
-def detect_nemko_subsidiary(query: str) -> str:
-    """Detect Nemko subsidiary from query."""
-    query_lower = query.lower()
-
-    for pattern, subsidiary in NEMKO_SUBSIDIARY_MAPPING.items():
-        if pattern in query_lower:
-            return subsidiary
-
-    return None
 
 
 # ============================================================================
@@ -2542,17 +2421,16 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
         - sub_category: str or None - Average/End filter (normalized)
         - year: int or None - Extracted year filter
         - month: int or None - Extracted month filter
-        - company: str or None - Detected company (bosch/nemko)
+        - company: str or None - Detected company 
         - cube_id: str or None - Company-specific cube ID
-        - statement_type: str or None - Nemko statement type (P&L, BS, Cash)
-        - subsidiary: str or None - Nemko subsidiary
+        - statement_type: str or None - Statement type (P&L, BS, Cash)
+        - subsidiary: str or None - Subsidiary filter
         """
         query_lower = ' ' + query.lower(
         ) + ' '  # Add spaces for word boundary matching
 
         # Get company configuration based on domain
         company_config = get_company_by_domain(domain)
-        is_nemko = is_nemko_domain(domain) if domain else False
 
         result = {
             'is_plan_query': False,
@@ -2564,59 +2442,31 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
             'sub_category': None,
             'year': None,
             'month': None,
-            'company': 'nemko' if is_nemko else 'bosch',
+            'company': 'bosch',
             'cube_id': company_config.get('cube_id'),
             'statement_type': None,
             'subsidiary': None,
         }
 
-        if is_nemko:
-            # Nemko-specific plan type detection
-            nemko_plan_type = detect_nemko_plan_type(query)
-            if nemko_plan_type:
-                result['plan_type'] = nemko_plan_type
-                result['is_plan_query'] = not nemko_plan_type.startswith(
-                    'Actual')
+        # Bosch-specific plan type detection (original logic)
+        # Plan Type Detection - check longer patterns first (more specific)
+        sorted_plan_types = sorted(PLAN_TYPE_MAPPING.items(),
+                                   key=lambda x: -len(x[0]))
+        for pattern, plan_type in sorted_plan_types:
+            if pattern in query_lower or f' {pattern} ' in query_lower:
+                result['plan_type'] = plan_type
+                result['is_plan_query'] = plan_type != 'Actual'
+                break
 
-            # Nemko statement type detection
-            result['statement_type'] = detect_nemko_statement_type(query)
-
-            # Nemko subsidiary detection
-            result['subsidiary'] = detect_nemko_subsidiary(query)
-
-            # Route to correct cube based on statement type (P&L, Balance Sheet, Cash Flow)
-            statement_specific_cube = get_cube_for_statement_type(
-                company_config, result['statement_type'])
-            if statement_specific_cube:
-                result['cube_id'] = statement_specific_cube
-                logger.debug(
-                    f"Routed Nemko query to cube {statement_specific_cube} for statement type {result['statement_type']}"
-                )
-
-            logger.info(
-                f"Nemko plan type detection: plan_type={result['plan_type']}, "
-                f"statement_type={result['statement_type']}, subsidiary={result['subsidiary']}, cube_id={result['cube_id']}"
-            )
-        else:
-            # Bosch-specific plan type detection (original logic)
-            # Plan Type Detection - check longer patterns first (more specific)
-            sorted_plan_types = sorted(PLAN_TYPE_MAPPING.items(),
-                                       key=lambda x: -len(x[0]))
-            for pattern, plan_type in sorted_plan_types:
-                if pattern in query_lower or f' {pattern} ' in query_lower:
-                    result['plan_type'] = plan_type
-                    result['is_plan_query'] = plan_type != 'Actual'
+        # Also check PLAN_KEYWORDS for is_plan_query detection
+        if not result['is_plan_query']:
+            for keyword in PLAN_KEYWORDS:
+                if keyword in query_lower:
+                    result['is_plan_query'] = True
+                    # Try to infer plan_type from keyword
+                    if keyword in PLAN_TYPE_MAPPING:
+                        result['plan_type'] = PLAN_TYPE_MAPPING[keyword]
                     break
-
-            # Also check PLAN_KEYWORDS for is_plan_query detection
-            if not result['is_plan_query']:
-                for keyword in PLAN_KEYWORDS:
-                    if keyword in query_lower:
-                        result['is_plan_query'] = True
-                        # Try to infer plan_type from keyword
-                        if keyword in PLAN_TYPE_MAPPING:
-                            result['plan_type'] = PLAN_TYPE_MAPPING[keyword]
-                        break
 
         # Page/View Detection - check longer patterns first
         sorted_pages = sorted(PAGE_VIEW_MAPPING.items(),
@@ -4634,143 +4484,6 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
 
         except Exception as e:
             logger.error(f"Plan data ingestion failed: {e}")
-            return {'success': False, 'error': str(e)}
-        finally:
-            if conn:
-                conn.close()
-
-    def ingest_nemko_anaplan_pl(self,
-                                file_path: str,
-                                cube_id: str,
-                                sheet_name: str = 'Sheet 1',
-                                source_file: str = None,
-                                statement_type: str = 'P&L',
-                                batch_size: int = 1000) -> Dict[str, Any]:
-        """
-        Ingest Nemko Anaplan P&L export (wide-format) into cube_plan_data.
-
-        Expected Excel structure (Anaplan export):
-          Col 1: Location   - entity/location name
-          Col 2: DS         - Department/Service (e.g. 'S106 Safety')
-          Col 3: LIS:…      - P&L line item (particulars)
-          Col 4: Versions   - 'Actual' | 'Budget' | 'Forecast'
-          Col 5: Line Items - always 'LC Amount [Incl Elimination]' (skipped)
-          Col 6+: monthly   - 'Jan 24', 'Feb 24', … 'FY24', 'Jan 25', … FY26
-
-        Months are unpivoted: each (row × month-column) → one DB row.
-        FY totals (FY24, FY25, FY26) are skipped.
-        """
-        from psycopg2.extras import execute_values
-
-        MONTH_ABBR = {
-            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
-            'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-        }
-
-        logger.info(f"[Nemko Anaplan] Starting P&L ingestion: {file_path} for cube {cube_id}")
-        start_time = datetime.now()
-        conn = None
-
-        try:
-            if not self.validate_cube_exists(cube_id):
-                return {'success': False, 'error': f"Cube ID '{cube_id}' does not exist"}
-
-            df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl', header=0)
-            logger.info(f"[Nemko Anaplan] Read {len(df)} rows, {len(df.columns)} columns")
-            logger.info(f"[Nemko Anaplan] Columns: {list(df.columns)[:10]} ...")
-
-            cols = list(df.columns)
-
-            # Identify month columns and parse year/month from header like "Jan 24", "Dec 25"
-            month_cols = []
-            for col in cols[5:]:  # skip first 5 fixed columns
-                col_str = str(col).strip()
-                parts = col_str.split()
-                if len(parts) == 2 and parts[0] in MONTH_ABBR:
-                    try:
-                        yr = int('20' + parts[1]) if len(parts[1]) == 2 else int(parts[1])
-                        month_cols.append((col, MONTH_ABBR[parts[0]], yr))
-                    except ValueError:
-                        pass
-                # Skip FY totals (FY24, FY25, FY26)
-
-            if not month_cols:
-                return {'success': False, 'error': 'No monthly columns found (expected "Jan 24", "Feb 25" format)'}
-
-            logger.info(f"[Nemko Anaplan] Found {len(month_cols)} month columns: "
-                        f"{month_cols[0]} … {month_cols[-1]}")
-
-            file_name = source_file or os.path.basename(file_path)
-            batch_data = []
-            skipped_rows = 0
-            rows_inserted = 0
-            errors = []
-
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-
-            INSERT_SQL = """
-                INSERT INTO cube_plan_data
-                    (cube_id, year, month, plan_type, location, ds, particulars,
-                     amount_lc, statement_type, source_file)
-                VALUES %s
-                ON CONFLICT DO NOTHING
-            """
-
-            for idx, row in df.iterrows():
-                location  = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else None
-                ds        = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else None
-                particulars = str(row.iloc[2]).strip() if pd.notna(row.iloc[2]) else None
-                plan_type = str(row.iloc[3]).strip() if pd.notna(row.iloc[3]) else None
-
-                if not plan_type or not particulars:
-                    skipped_rows += 1
-                    continue
-
-                for (col_name, month_num, year_num) in month_cols:
-                    raw_val = row[col_name]
-                    if pd.isna(raw_val):
-                        continue
-                    try:
-                        amount_lc = float(raw_val)
-                    except (ValueError, TypeError):
-                        continue
-
-                    batch_data.append((
-                        cube_id, year_num, month_num, plan_type,
-                        location, ds, particulars,
-                        amount_lc, statement_type, file_name
-                    ))
-
-                    if len(batch_data) >= batch_size:
-                        execute_values(cursor, INSERT_SQL, batch_data)
-                        conn.commit()
-                        rows_inserted += len(batch_data)
-                        logger.info(f"[Nemko Anaplan] Inserted batch: {rows_inserted} rows so far")
-                        batch_data = []
-
-            # Final batch
-            if batch_data:
-                execute_values(cursor, INSERT_SQL, batch_data)
-                conn.commit()
-                rows_inserted += len(batch_data)
-
-            elapsed = (datetime.now() - start_time).total_seconds()
-            logger.info(f"[Nemko Anaplan] Done — {rows_inserted} rows inserted in {elapsed:.1f}s")
-            return {
-                'success': True,
-                'rows_inserted': rows_inserted,
-                'rows_skipped': skipped_rows,
-                'total_rows': len(df),
-                'month_columns': len(month_cols),
-                'elapsed_seconds': elapsed,
-                'errors': errors,
-            }
-
-        except Exception as e:
-            logger.error(f"[Nemko Anaplan] Ingestion failed: {e}", exc_info=True)
-            if conn:
-                conn.rollback()
             return {'success': False, 'error': str(e)}
         finally:
             if conn:
@@ -8305,14 +8018,10 @@ Return a JSON object with:
         Uses the formula from cube_calculation_rules and adapts it for cube_fact_data.
         Falls back to hardcoded builders if calculation not found in database (not on DB errors).
         
-        NOTE: Hardcoded builders are Bosch-specific. For Nemko domain, only database-defined
-        calculations are used; if not found, returns an error to trigger RAG fallback.
+        NOTE: Hardcoded builders are Bosch-specific.
         """
         # CASE-INSENSITIVE: Normalize calculation_name to lowercase for consistent matching
         calculation_name = calculation_name.lower() if calculation_name else ''
-
-        # Check if this is a Nemko domain - they use different data structures
-        is_nemko = is_nemko_domain(domain) if domain else False
 
         # Normalize underscore format (from LLM metric routing) to space format (used in DB and hardcoded builders)
         # e.g. 'outsourcing_capacity_avg' -> 'outsourcing capacity avg'
@@ -8414,31 +8123,15 @@ Return a JSON object with:
                 calc_name_lower = calc_name.lower(
                 ) if calc_name else calculation_name.lower()
                 # sql_template is empty — fall back to Python builders below
-                if not is_nemko:
-                    logger.info(
-                        f"[DB-TEMPLATE] calc_rule found for '{calc_name}' but sql_template is empty. "
-                        f"Falling back to Python builders."
-                    )
-                    # Fall through to METRIC_CATALOG / legacy builder routing below
+                logger.info(
+                    f"[DB-TEMPLATE] calc_rule found for '{calc_name}' but sql_template is empty. "
+                    f"Falling back to Python builders."
+                )
+                # Fall through to METRIC_CATALOG / legacy builder routing below
             else:
                 # No DB record found — fall back to Python builders for Bosch domain.
                 calc_name_lower = calculation_name.lower()
                 rounding = 2  # default rounding
-
-                # Nemko domain has its own separate SQL builders (different schema)
-                if is_nemko:
-                    nemko_result = self._compile_nemko_sql(
-                        calculation_name, intent, domain)
-                    if nemko_result.get('success'):
-                        return nemko_result
-                    logger.info(
-                        f"Nemko domain - no SQL builder for '{calculation_name}', use RAG instead"
-                    )
-                    return {
-                        'success': False,
-                        'error': f"Calculation '{calculation_name}' not available for Nemko domain.",
-                        'use_rag': True
-                    }
 
                 if db_error:
                     return {'success': False, 'error': f"Database error: {db_error}"}
@@ -13436,1046 +13129,6 @@ Return a JSON object with:
 
     # ==================== END NEW WW KPI BUILDERS ====================
 
-    # ==================== NEMKO P&L SQL BUILDERS ====================
-
-    def _load_nemko_column_config(self, cube_id: str) -> Dict[str, Dict]:
-        """
-        Load column configuration from database for dynamic SQL generation.
-        Returns a dict keyed by column_index for reliable lookup.
-        """
-        try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT json_key, display_name, column_type, aliases, column_index
-                FROM cube_column_config 
-                WHERE cube_id = %s
-                ORDER BY column_index
-            """, (cube_id, ))
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
-
-            # Index by column_index for reliable lookup
-            config = {}
-            for row in rows:
-                json_key, display_name, column_type, aliases, column_index = row
-                config[column_index] = {
-                    'json_key': json_key,
-                    'display_name': display_name,
-                    'column_type': column_type,
-                    'aliases': aliases or [],
-                    'column_index': column_index
-                }
-            return config
-        except Exception as e:
-            logger.error(f"Failed to load column config: {e}")
-            # Fallback to index-based config
-            return {
-                0: {
-                    'json_key': 'Values',
-                    'display_name': 'Location',
-                    'column_type': 'dimension'
-                },
-                1: {
-                    'json_key': 'Unnamed: 1',
-                    'display_name': 'Department',
-                    'column_type': 'dimension'
-                },
-                2: {
-                    'json_key': 'Unnamed: 2',
-                    'display_name': 'Account',
-                    'column_type': 'dimension'
-                },
-                3: {
-                    'json_key': 'Unnamed: 3',
-                    'display_name': 'Month',
-                    'column_type': 'period'
-                },
-                4: {
-                    'json_key': 'Unnamed: 4',
-                    'display_name': 'Actual FY24',
-                    'column_type': 'metric'
-                },
-                5: {
-                    'json_key': 'Unnamed: 5',
-                    'display_name': 'Actual FY25',
-                    'column_type': 'metric'
-                },
-            }
-
-    def _load_nemko_entity_values(self, cube_id: str) -> Dict[str, str]:
-        """
-        Load known entity values and their aliases from cube_column_values table.
-        Falls back to auto-discovery from cube_fact_data if table is empty.
-        Returns a dict mapping alias -> actual_value for entity resolution.
-        """
-        try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT value_name, value_aliases
-                FROM cube_column_values 
-                WHERE cube_id = %s AND column_name = 'subsidiary' AND is_active = 1
-            """, (cube_id, ))
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
-
-            alias_map = {}
-            for value_name, aliases in rows:
-                if aliases:
-                    for alias in aliases:
-                        alias_map[alias.lower()] = value_name
-
-            # If no configured values, use auto-discovery
-            if not alias_map:
-                logger.info(
-                    "No configured entity values, using auto-discovery")
-                alias_map = self._auto_discover_entity_values(cube_id)
-
-            return alias_map
-        except Exception as e:
-            logger.error(f"Failed to load entity values: {e}")
-            return {}
-
-    def _get_country_entity_groups(self, cube_id: str) -> Dict[str, List[str]]:
-        """
-        Group entities by country/region for aggregate queries.
-        E.g., "india" -> [all 5 India entities], "taiwan" -> [all Taiwan entities]
-        """
-        try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT DISTINCT entity_name FROM dim_entity WHERE cube_id = %s
-            """, (cube_id, ))
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
-
-            # Country/region keywords to entity mappings
-            country_groups = {}
-            country_keywords = [
-                'india', 'taiwan', 'china', 'korea', 'japan', 'usa', 'canada',
-                'germany', 'norway', 'scandinavia', 'asia', 'europe',
-                'americas'
-            ]
-
-            for (entity_name, ) in rows:
-                entity_lower = entity_name.lower()
-                for country in country_keywords:
-                    if country in entity_lower:
-                        if country not in country_groups:
-                            country_groups[country] = []
-                        if entity_name not in country_groups[country]:
-                            country_groups[country].append(entity_name)
-
-            logger.info(
-                f"Country entity groups: {[(k, len(v)) for k, v in country_groups.items()]}"
-            )
-            return country_groups
-        except Exception as e:
-            logger.error(f"Country grouping failed: {e}")
-            return {}
-
-    def _auto_discover_entity_values(self, cube_id: str) -> Dict[str, str]:
-        """
-        AUTO-DISCOVERY: Extract unique entity values directly from cube_fact_data.
-        Generates aliases automatically from entity names.
-        Returns dict mapping alias -> actual_value.
-        """
-        try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-
-            # Get column config to find the right JSONB key
-            col_config = self._load_nemko_column_config(cube_id)
-            entity_key = col_config.get(0, {}).get('json_key', 'Values')
-
-            # Extract unique entity values from actual data
-            cursor.execute(
-                f"""
-                SELECT DISTINCT REPLACE(row_data->>'{entity_key}', chr(160), ' ') as entity
-                FROM cube_fact_data 
-                WHERE cube_id = %s
-                AND row_data->>'{entity_key}' IS NOT NULL
-                AND row_data->>'{entity_key}' != 'Location'
-                AND row_data->>'{entity_key}' != ''
-            """, (cube_id, ))
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
-
-            alias_map = {}
-            for (entity_value, ) in rows:
-                if not entity_value:
-                    continue
-
-                # Generate aliases from entity name
-                aliases = self._generate_entity_aliases(entity_value)
-                for alias in aliases:
-                    alias_lower = alias.lower()
-                    # Map alias to entity value
-                    if alias_lower not in alias_map:
-                        alias_map[alias_lower] = entity_value
-                    else:
-                        # If alias maps to multiple entities, keep as list
-                        existing = alias_map[alias_lower]
-                        if isinstance(existing, list):
-                            if entity_value not in existing:
-                                existing.append(entity_value)
-                        elif existing != entity_value:
-                            alias_map[alias_lower] = [existing, entity_value]
-
-            logger.info(
-                f"Auto-discovered {len(rows)} entities with {len(alias_map)} aliases"
-            )
-            return alias_map
-        except Exception as e:
-            logger.error(f"Auto-discovery failed: {e}")
-            return {}
-
-    def _generate_entity_aliases(self, entity_value: str) -> List[str]:
-        """
-        Generate aliases from an entity name.
-        E.g., "E16 India (Test Lab) Private Limited" -> ["e16", "india", "test lab"]
-        """
-        import re
-        aliases = []
-
-        # Extract E-code (e.g., E16, E10)
-        e_code_match = re.match(r'^(E\d{1,2})\s', entity_value)
-        if e_code_match:
-            aliases.append(e_code_match.group(1).lower())
-
-        # Extract key words (skip common words)
-        skip_words = {
-            'ltd', 'limited', 'private', 'pvt', 'inc', 'corp', 'branch',
-            'group', 'total', 'location', 'elimination'
-        }
-        words = re.findall(r'\b([a-zA-Z]{3,})\b', entity_value.lower())
-        for word in words:
-            if word not in skip_words and word not in aliases:
-                aliases.append(word)
-
-        # Extract multi-word phrases in parentheses
-        paren_match = re.search(r'\(([^)]+)\)', entity_value)
-        if paren_match:
-            phrase = paren_match.group(1).lower().strip()
-            if len(phrase) > 2:
-                aliases.append(phrase)
-
-        return aliases
-
-    def _load_nemko_filter_rules(self, cube_id: str) -> List[Dict]:
-        """
-        Load filter rules from cube_filter_rules table.
-        Returns list of filter rule dictionaries with aliases for matching.
-        """
-        try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT filter_name, filter_aliases, sql_predicate, target_column, is_default
-                FROM cube_filter_rules 
-                WHERE cube_id = %s AND is_active = 1
-            """, (cube_id, ))
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
-
-            rules = []
-            for row in rows:
-                filter_name, aliases, sql_predicate, target_column, is_default = row
-                rules.append({
-                    'filter_name': filter_name,
-                    'aliases': [a.lower() for a in (aliases or [])],
-                    'sql_predicate': sql_predicate,
-                    'target_column': target_column,
-                    'is_default': bool(is_default)
-                })
-            logger.info(f"Loaded {len(rules)} filter rules for cube {cube_id}")
-            return rules
-        except Exception as e:
-            logger.error(f"Failed to load filter rules: {e}")
-            return []
-
-    def _match_filter_rules(self, query: str,
-                            filter_rules: List[Dict]) -> List[Dict]:
-        """
-        Match query text against filter rule aliases.
-        Returns list of matching filter rules.
-        """
-        query_lower = query.lower()
-        matched = []
-
-        for rule in filter_rules:
-            # Check if any alias matches the query
-            for alias in rule['aliases']:
-                if alias in query_lower:
-                    matched.append(rule)
-                    break
-
-            # Also check filter_name (e.g., "E10 Asia")
-            if rule['filter_name'].lower() in query_lower:
-                if rule not in matched:
-                    matched.append(rule)
-
-        return matched
-
-    def _parse_nemko_query_intent(
-            self,
-            query: str,
-            entity_alias_map: Dict[str, str] = None) -> Dict[str, Any]:
-        """
-        Parse natural language query into structured intent.
-        Uses data-driven entity matching from cube_column_values.
-        Detects: entities, departments, months, years, metrics, comparison types.
-        """
-        import re
-        query_lower = query.lower()
-        intent = {
-            'entities': [],
-            'entity_values': [],  # Resolved entity names for WHERE clause
-            'departments': [],
-            'months': [],
-            'years': [],
-            'account_filter': None,
-            'wants_breakdown': False,
-            'breakdown_by': [],
-            'is_comparison': False,
-            'compare_years': False,
-        }
-
-        # Detect months
-        month_map = {
-            'jan': 'Jan',
-            'january': 'Jan',
-            'feb': 'Feb',
-            'february': 'Feb',
-            'mar': 'Mar',
-            'march': 'Mar',
-            'apr': 'Apr',
-            'april': 'Apr',
-            'may': 'May',
-            'jun': 'Jun',
-            'june': 'Jun',
-            'jul': 'Jul',
-            'july': 'Jul',
-            'aug': 'Aug',
-            'august': 'Aug',
-            'sep': 'Sep',
-            'september': 'Sep',
-            'oct': 'Oct',
-            'october': 'Oct',
-            'nov': 'Nov',
-            'november': 'Nov',
-            'dec': 'Dec',
-            'december': 'Dec'
-        }
-        for key, val in month_map.items():
-            if re.search(r'\b' + key + r'\b', query_lower):
-                if val not in intent['months']:
-                    intent['months'].append(val)
-
-        # Sort months in calendar order
-        month_order = [
-            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
-            'Oct', 'Nov', 'Dec'
-        ]
-        intent['months'] = sorted(intent['months'],
-                                  key=lambda m: month_order.index(m)
-                                  if m in month_order else 99)
-
-        # Detect years
-        if '2024' in query_lower or 'fy24' in query_lower:
-            intent['years'].append('FY24')
-        if '2025' in query_lower or 'fy25' in query_lower:
-            intent['years'].append('FY25')
-        if not intent['years']:
-            intent['years'] = ['FY24']
-
-        # Detect Budget vs Actuals comparison
-        if 'budget' in query_lower and 'actual' in query_lower:
-            intent['compare_years'] = True
-            intent['years'] = ['FY24', 'FY25']
-        if 'vs' in query_lower and ('fy24' in query_lower or 'fy25'
-                                    in query_lower or '2024' in query_lower
-                                    or '2025' in query_lower):
-            intent['compare_years'] = True
-            intent['years'] = ['FY24', 'FY25']
-
-        # DATA-DRIVEN entity detection using database aliases (supports multi-entity aliases)
-        if entity_alias_map:
-            for alias, entity_value in entity_alias_map.items():
-                if re.search(r'\b' + re.escape(alias) + r'\b', query_lower):
-                    # Handle case where alias maps to multiple entities (list)
-                    if isinstance(entity_value, list):
-                        for ev in entity_value:
-                            if ev not in intent['entity_values']:
-                                intent['entity_values'].append(ev)
-                        intent['entities'].append(alias)
-                    elif entity_value not in intent['entity_values']:
-                        intent['entity_values'].append(entity_value)
-                        intent['entities'].append(alias)
-
-        # Fallback 1: Partial matching on entity VALUE names (e.g., "india" matches "E16 India...")
-        if not intent['entity_values'] and entity_alias_map:
-            # Get unique entity values - flatten lists
-            unique_values = set()
-            for val in entity_alias_map.values():
-                if isinstance(val, list):
-                    unique_values.update(val)
-                else:
-                    unique_values.add(val)
-
-            query_words = query_lower.split()
-            for entity_value in unique_values:
-                entity_lower = entity_value.lower()
-                for word in query_words:
-                    # Skip common words
-                    if word in [
-                            'what', 'is', 'the', 'for', 'in', 'to', 'a', 'an',
-                            'total', 'revenue', 'jan', 'feb', 'mar', 'apr',
-                            'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov',
-                            'dec', '2024', '2025', 'fy24', 'fy25'
-                    ]:
-                        continue
-                    if len(word) >= 3 and word in entity_lower:
-                        if entity_value not in intent['entity_values']:
-                            intent['entity_values'].append(entity_value)
-                            intent['entities'].append(word)
-
-        # Fallback 2: detect E-codes if no match yet
-        if not intent['entity_values']:
-            e_code_matches = re.findall(r'\b(e\d{1,2})\b', query_lower)
-            for code in e_code_matches:
-                if code.upper() not in intent['entities']:
-                    intent['entities'].append(code.upper())
-
-        # Detect breakdown requests
-        breakdown_keywords = {
-            'by subsidiary': 'subsidiary',
-            'by entity': 'subsidiary',
-            'by location': 'subsidiary',
-            'by department': 'department',
-            'by dept': 'department',
-            'by account': 'account',
-            'breakdown': 'all',
-            'all depart': 'department',
-        }
-        for keyword, breakdown_type in breakdown_keywords.items():
-            if keyword in query_lower:
-                intent['wants_breakdown'] = True
-                if breakdown_type not in intent['breakdown_by']:
-                    intent['breakdown_by'].append(breakdown_type)
-
-        # Detect account types
-        if 'revenue' in query_lower or 'sales' in query_lower:
-            intent['account_filter'] = 'Revenue'
-        elif 'cost' in query_lower or 'expense' in query_lower:
-            intent['account_filter'] = 'Cost'
-        elif 'ebit' in query_lower or 'operating' in query_lower:
-            intent['account_filter'] = 'Operating'
-        elif 'net income' in query_lower or 'net profit' in query_lower:
-            intent['account_filter'] = 'Net'
-
-        # Detect comparison type
-        if len(intent['months']) > 1 or intent['compare_years']:
-            intent['is_comparison'] = True
-
-        return intent
-
-    def _compile_nemko_sql(self,
-                           calculation_name: str,
-                           intent: Dict[str, Any],
-                           domain: str = None) -> Dict[str, Any]:
-        """
-        Compile SQL for Nemko P&L queries using STAR SCHEMA (Fact/Dimension tables).
-        Uses proper joins against dim_entity, dim_department, dim_account, dim_time.
-        Supports: single/multi-month, entity filters, breakdowns, budget vs actuals.
-        """
-        import re
-
-        original_query = intent.get('original_query', calculation_name).lower()
-        nemko_pl_cube_id = '663678fc-a902-42d7-8c57-dd40a24e130a'
-
-        # Parse query intent using auto-discovered entity aliases from star schema
-        entity_alias_map = self._auto_discover_entity_values(nemko_pl_cube_id)
-        query_intent = self._parse_nemko_query_intent(original_query,
-                                                      entity_alias_map)
-
-        # PRIORITY 1: Check for country-level queries (e.g., "India" should return ALL India entities)
-        country_groups = self._get_country_entity_groups(nemko_pl_cube_id)
-        country_keywords = [
-            'india', 'taiwan', 'china', 'korea', 'japan', 'usa', 'canada',
-            'germany', 'norway', 'scandinavia', 'asia', 'europe', 'americas'
-        ]
-
-        country_match_found = False
-        for country in country_keywords:
-            if re.search(r'\b' + country + r'\b', original_query):
-                if country in country_groups and len(
-                        country_groups[country]) > 1:
-                    # Country name in query AND multiple entities exist - use ALL of them
-                    query_intent['entity_values'] = country_groups[country]
-                    query_intent['entities'] = [country]
-                    country_match_found = True
-                    logger.info(
-                        f"Country-level query detected: '{country}' -> {len(country_groups[country])} entities"
-                    )
-                    break
-
-        # PRIORITY 2: If no country match, use GPT-parsed filters as fallback
-        if not country_match_found:
-            gpt_parsed_filters = intent.get('filters', [])
-            for f in gpt_parsed_filters:
-                if f.get('column') == 'Location' and f.get('value'):
-                    entity_val = f.get('value')
-                    if entity_val not in query_intent['entity_values']:
-                        query_intent['entity_values'].append(entity_val)
-                        logger.info(
-                            f"Added entity from GPT filter: {entity_val}")
-
-        # Extract month from GPT filters
-        gpt_parsed_filters = intent.get('filters', [])
-        for f in gpt_parsed_filters:
-            if f.get('column') == 'Fake Months' and f.get('value'):
-                month_val = f.get('value')
-                if month_val not in query_intent['months']:
-                    query_intent['months'].append(month_val)
-                    logger.info(f"Added month from GPT filter: {month_val}")
-
-        # Extract fiscal year from GPT metrics (e.g., Actual_FY25 -> FY25)
-        gpt_parsed_metrics = intent.get('metrics', [])
-        for m in gpt_parsed_metrics:
-            metric_name = m.get('name', '')
-            if 'FY25' in metric_name:
-                if 'FY25' not in query_intent['years']:
-                    query_intent['years'] = ['FY25']  # Override default FY24
-                    logger.info(f"Set year to FY25 from metric: {metric_name}")
-            elif 'FY24' in metric_name:
-                if 'FY24' not in query_intent['years']:
-                    query_intent['years'] = ['FY24']
-                    logger.info(f"Set year to FY24 from metric: {metric_name}")
-
-        logger.info(f"Nemko query intent (star schema): {query_intent}")
-
-        # Build WHERE conditions for star schema joins
-        where_conditions = ["f.cube_id = %s"]
-        params = [nemko_pl_cube_id]
-
-        # Entity filter - dynamic matching using exact match or ILIKE for partial matches
-        entity_filter_applied = False
-        if query_intent.get('entity_values'):
-            entity_conditions = []
-            for entity_value in query_intent['entity_values']:
-                entity_conditions.append("e.entity_name = %s")
-                params.append(entity_value)
-            where_conditions.append(f"({' OR '.join(entity_conditions)})")
-            entity_filter_applied = True
-            logger.info(
-                f"Applied entity filter for: {query_intent['entity_values']}")
-
-        # Department filter - default to TOTAL SERVICES/DEPARTMENTS for aggregated queries
-        if entity_filter_applied:
-            where_conditions.append(
-                "d.department_name = 'TOTAL SERVICES/DEPARTMENTS'")
-            logger.info(
-                "Applied default department filter: TOTAL SERVICES/DEPARTMENTS"
-            )
-
-        # Month filter
-        if query_intent['months']:
-            if len(query_intent['months']) == 1:
-                where_conditions.append("t.period_name = %s")
-                params.append(query_intent['months'][0])
-            else:
-                placeholders = ', '.join(['%s'] * len(query_intent['months']))
-                where_conditions.append(f"t.period_name IN ({placeholders})")
-                params.extend(query_intent['months'])
-
-        # Account filter - use hierarchy-aware matching
-        account_filter = query_intent.get('account_filter')
-        if account_filter:
-            if account_filter == 'Revenue':
-                where_conditions.append("a.account_name = 'Net Revenue'")
-            elif account_filter == 'Cost':
-                where_conditions.append("a.account_category = 'Cost'")
-            elif account_filter == 'Operating':
-                where_conditions.append("a.account_name IN ('EBITDA', 'EBIT')")
-            elif account_filter == 'Net':
-                where_conditions.append("a.account_name = 'Net Income'")
-
-        where_clause = " AND ".join(where_conditions)
-
-        # Build SQL using star schema with proper joins
-        if query_intent['compare_years']:
-            sql = f"""
-                SELECT 
-                    e.entity_name as entity,
-                    d.department_name as department,
-                    a.account_name as account,
-                    t.period_name as month,
-                    SUM(f.amount_fy24) as fy24_amount,
-                    SUM(f.amount_fy25) as fy25_amount,
-                    SUM(f.amount_fy25) - SUM(f.amount_fy24) as variance
-                FROM fact_financials f
-                JOIN dim_entity e ON f.entity_id = e.entity_id
-                JOIN dim_department d ON f.department_id = d.department_id
-                JOIN dim_account a ON f.account_id = a.account_id
-                JOIN dim_time t ON f.time_id = t.time_id
-                WHERE {where_clause}
-                GROUP BY e.entity_name, d.department_name, a.account_name, t.period_name
-                ORDER BY e.entity_name, fy25_amount DESC NULLS LAST
-                LIMIT 100
-            """
-        elif query_intent['wants_breakdown']:
-            value_col = "f.amount_fy24" if 'FY24' in query_intent.get(
-                'years', ['FY25']) else "f.amount_fy25"
-            sql = f"""
-                SELECT 
-                    e.entity_name as entity,
-                    d.department_name as department,
-                    a.account_name as account,
-                    t.period_name as month,
-                    SUM({value_col}) as total_amount
-                FROM fact_financials f
-                JOIN dim_entity e ON f.entity_id = e.entity_id
-                JOIN dim_department d ON f.department_id = d.department_id
-                JOIN dim_account a ON f.account_id = a.account_id
-                JOIN dim_time t ON f.time_id = t.time_id
-                WHERE {where_clause}
-                GROUP BY e.entity_name, d.department_name, a.account_name, t.period_name
-                ORDER BY total_amount DESC NULLS LAST
-                LIMIT 100
-            """
-        else:
-            # Summary query - single aggregated value
-            value_col = "f.amount_fy24" if 'FY24' in query_intent.get(
-                'years', ['FY25']) else "f.amount_fy25"
-            year_label = query_intent['years'][0] if query_intent.get(
-                'years') else 'FY25'
-            month_label = query_intent['months'][0] if query_intent.get(
-                'months') else 'Total'
-            entity_list = query_intent.get('entity_values', [])
-            entity_label = entity_list[0] if entity_list else 'Nemko Group'
-            metric_label = account_filter if account_filter else 'Total'
-
-            sql = f"""
-                SELECT 
-                    e.entity_name as entity,
-                    t.period_name as period,
-                    a.account_name as metric,
-                    SUM({value_col}) as value,
-                    COUNT(*) as record_count
-                FROM fact_financials f
-                JOIN dim_entity e ON f.entity_id = e.entity_id
-                JOIN dim_department d ON f.department_id = d.department_id
-                JOIN dim_account a ON f.account_id = a.account_id
-                JOIN dim_time t ON f.time_id = t.time_id
-                WHERE {where_clause}
-                GROUP BY e.entity_name, t.period_name, a.account_name
-                ORDER BY e.entity_name, value DESC NULLS LAST
-                LIMIT 50
-            """
-
-        logger.info(f"Generated STAR SCHEMA SQL with {len(params)} params")
-        return {
-            'success': True,
-            'sql': sql,
-            'params': params,
-            'calculation_type': 'nemko_star_schema'
-        }
-
-    def _compile_nemko_sql_legacy(self,
-                                  calculation_name: str,
-                                  intent: Dict[str, Any],
-                                  domain: str = None) -> Dict[str, Any]:
-        """
-        LEGACY: Original Nemko SQL builder - kept for reference.
-        """
-        calc_lower = calculation_name.lower()
-        original_query = intent.get('original_query', calculation_name).lower()
-
-        nemko_keywords = [
-            'revenue', 'sales', 'turnover', 'gross profit', 'gross margin',
-            'operating profit', 'operating income', 'ebit', 'ebitda',
-            'net income', 'net profit', 'profit after tax', 'expenses',
-            'costs', 'cost of sales', 'p&l', 'profit and loss',
-            'income statement', 'total'
-        ]
-
-        is_nemko_query = any(kw in calc_lower for kw in nemko_keywords)
-
-        if not is_nemko_query:
-            return {
-                'success': False,
-                'error': 'Not a recognized Nemko P&L query'
-            }
-
-        filters = intent.get('filters', [])
-        nemko_pl_cube_id = '663678fc-a902-42d7-8c57-dd40a24e130a'
-        where_parts = [f"cube_id = '{nemko_pl_cube_id}'"]
-        params = []
-        entity_filter = None
-        month_filter = None
-        year_filter = 'FY24'
-
-        for fil in filters:
-            col = fil.get('column', '').lower()
-            val = str(fil.get('value', ''))
-
-            # Year filter
-            if 'year' in col or 'fy' in col:
-                if '25' in val:
-                    year_filter = 'FY25'
-                elif '24' in val:
-                    year_filter = 'FY24'
-
-            # Entity/subsidiary filter - look for E-codes or entity names
-            if 'entity' in col or 'subsidiary' in col or 'location' in col:
-                entity_filter = val
-
-            # Month filter
-            if 'month' in col or 'period' in col:
-                month_filter = val
-
-        # Also detect entity from calculation name (e.g., "e16 total revenue")
-        entity_patterns = [
-            'e16', 'e10', 'e27', 'e33', 'e34', 'e48', 'e50', 'e51', 'e21',
-            'e18', 'e1 ', 'e0 '
-        ]
-        for pattern in entity_patterns:
-            if pattern in calc_lower:
-                entity_filter = pattern.strip().upper()
-                break
-
-        # Detect month(s) from ORIGINAL QUERY (not calc_lower which may be "Revenue Summary")
-        import re
-        month_names = {
-            'jan': 'Jan',
-            'feb': 'Feb',
-            'mar': 'Mar',
-            'apr': 'Apr',
-            'may': 'May',
-            'jun': 'Jun',
-            'jul': 'Jul',
-            'aug': 'Aug',
-            'sep': 'Sep',
-            'oct': 'Oct',
-            'nov': 'Nov',
-            'dec': 'Dec',
-            'january': 'Jan',
-            'february': 'Feb',
-            'march': 'Mar',
-            'april': 'Apr',
-            'june': 'Jun',
-            'july': 'Jul',
-            'august': 'Aug',
-            'september': 'Sep',
-            'october': 'Oct',
-            'november': 'Nov',
-            'december': 'Dec'
-        }
-
-        # Detect ALL months mentioned (for comparison queries like "jan and feb")
-        detected_months = []
-        for month_key, month_val in month_names.items():
-            # Use word boundary to avoid matching "mar" in "departmenrs"
-            # Search in original_query, not calc_lower
-            if re.search(r'\b' + month_key + r'\b', original_query):
-                if month_val not in detected_months:
-                    detected_months.append(month_val)
-
-        # Sort months in calendar order
-        month_order = [
-            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
-            'Oct', 'Nov', 'Dec'
-        ]
-        detected_months = sorted(detected_months,
-                                 key=lambda m: month_order.index(m)
-                                 if m in month_order else 99)
-
-        # Set month_filter based on detected months
-        if len(detected_months) == 1:
-            month_filter = detected_months[0]
-        elif len(detected_months) > 1:
-            month_filter = detected_months  # List for multi-month comparisons
-
-        # Also detect year from original query (2024 -> FY24, 2025 -> FY25)
-        if '2024' in original_query or 'fy24' in original_query:
-            year_filter = 'FY24'
-        elif '2025' in original_query or 'fy25' in original_query:
-            year_filter = 'FY25'
-
-        # Ensure month_filter is a list if multiple months detected
-        is_multi_month = isinstance(month_filter,
-                                    list) and len(month_filter) > 1
-
-        logger.info(
-            f"Nemko query filters - entity: {entity_filter}, month: {month_filter}, is_multi_month: {is_multi_month}, year: {year_filter}"
-        )
-
-        # Apply entity filter to WHERE clause
-        if entity_filter:
-            where_parts.append(
-                f"row_data->>'Values' ILIKE '%%{entity_filter}%%'")
-
-        # Apply month filter to WHERE clause
-        if month_filter:
-            if is_multi_month:
-                # Multiple months for comparison - use IN clause
-                months_str = ", ".join([f"'{m}'" for m in month_filter])
-                where_parts.append(
-                    f"row_data->>'Unnamed: 3' IN ({months_str})")
-            else:
-                # Single month - extract from list if needed
-                single_month = month_filter[0] if isinstance(
-                    month_filter, list) else month_filter
-                where_parts.append(
-                    f"row_data->>'Unnamed: 3' = '{single_month}'")
-
-        # Map year to JSONB value column key name (without quotes - we add them in SQL)
-        value_key = 'Unnamed: 4' if year_filter == 'FY24' else 'Unnamed: 5'
-
-        # Add account filter based on query type
-        # NOTE: Use %% to escape % for psycopg2 parameter substitution
-        account_filter = None
-        if 'revenue' in calc_lower or 'sales' in calc_lower:
-            account_filter = "Revenue"
-            where_parts.append(
-                "(row_data->>'Unnamed: 2' ILIKE '%%Revenue%%' OR row_data->>'Unnamed: 2' ILIKE '%%Sales%%')"
-            )
-        elif 'cost' in calc_lower or 'expense' in calc_lower:
-            account_filter = "Cost"
-            where_parts.append(
-                "(row_data->>'Unnamed: 2' ILIKE '%%Cost%%' OR row_data->>'Unnamed: 2' ILIKE '%%Expense%%')"
-            )
-        elif 'ebit' in calc_lower or 'operating' in calc_lower:
-            account_filter = "Operating"
-            where_parts.append(
-                "(row_data->>'Unnamed: 2' ILIKE '%%EBIT%%' OR row_data->>'Unnamed: 2' ILIKE '%%Operating%%')"
-            )
-        elif 'net income' in calc_lower or 'net profit' in calc_lower:
-            account_filter = "Net"
-            where_parts.append("row_data->>'Unnamed: 2' ILIKE '%%Net%%'")
-
-        where_clause = " AND ".join(where_parts)
-
-        # Check if user wants a BREAKDOWN (by subsidiary, by department, etc.)
-        wants_breakdown = any(kw in original_query for kw in [
-            'by subsidiary', 'by department', 'by entity', 'by location',
-            'breakdown', 'compare'
-        ])
-
-        # Format month label properly for SQL (no Python list representation)
-        if is_multi_month:
-            month_label = f" for {' vs '.join(month_filter)}"  # e.g., "for Jan vs Feb"
-        elif month_filter:
-            single_month = month_filter[0] if isinstance(
-                month_filter, list) else month_filter
-            month_label = f" for {single_month}"
-        else:
-            month_label = ""
-
-        if wants_breakdown:
-            # User wants breakdown by subsidiary/department - include month for comparison
-            sql = f"""
-                SELECT 
-                    row_data->>'Values' as subsidiary,
-                    row_data->>'Unnamed: 1' as department,
-                    row_data->>'Unnamed: 2' as account,
-                    row_data->>'Unnamed: 3' as month,
-                    SUM(NULLIF(row_data->>'{value_key}', '')::numeric) as total_amount,
-                    COUNT(*) as row_count
-                FROM cube_fact_data
-                WHERE {where_clause}
-                  AND row_data->>'Values' IS NOT NULL
-                  AND row_data->>'Values' != 'Location'
-                  AND NULLIF(row_data->>'{value_key}', '') IS NOT NULL
-                GROUP BY 
-                    row_data->>'Values',
-                    row_data->>'Unnamed: 1',
-                    row_data->>'Unnamed: 2',
-                    row_data->>'Unnamed: 3'
-                ORDER BY row_data->>'Values', row_data->>'Unnamed: 1', total_amount DESC
-                LIMIT 200
-            """
-        elif entity_filter:
-            # Specific entity query - aggregate for that entity
-            entity_label = f"{entity_filter} Total"
-            sql = f"""
-                SELECT 
-                    '{entity_label}' as entity,
-                    '{year_filter}{month_label}' as fiscal_period,
-                    '{account_filter or "All"}' as metric_type,
-                    SUM(NULLIF(row_data->>'{value_key}', '')::numeric) as total_amount,
-                    COUNT(*) as record_count
-                FROM cube_fact_data
-                WHERE {where_clause}
-                  AND row_data->>'Values' IS NOT NULL
-                  AND row_data->>'Values' != 'Location'
-                  AND NULLIF(row_data->>'{value_key}', '') IS NOT NULL
-            """
-        else:
-            # General query - return breakdown by location, department, account
-            sql = f"""
-                SELECT 
-                    row_data->>'Values' as location,
-                    row_data->>'Unnamed: 1' as department,
-                    row_data->>'Unnamed: 2' as account,
-                    SUM(NULLIF(row_data->>'{value_key}', '')::numeric) as total_amount,
-                    COUNT(*) as row_count
-                FROM cube_fact_data
-                WHERE {where_clause}
-                  AND row_data->>'Values' IS NOT NULL
-                  AND row_data->>'Values' != 'Location'
-                  AND NULLIF(row_data->>'{value_key}', '') IS NOT NULL
-                GROUP BY 
-                    row_data->>'Values',
-                    row_data->>'Unnamed: 1',
-                    row_data->>'Unnamed: 2'
-                ORDER BY total_amount DESC
-                LIMIT 100
-            """
-
-        logger.info(
-            f"Generated Nemko JSONB P&L SQL for '{calculation_name}' (year={year_filter})"
-        )
-        return {
-            'success': True,
-            'sql': sql,
-            'params': params,
-            'calculation_type': f'nemko_{calc_lower.replace(" ", "_")}'
-        }
-
-    def _compile_nemko_data_sql(self,
-                                intent: Dict[str, Any],
-                                domain: str = None) -> Dict[str, Any]:
-        """
-        Compile SQL for Nemko data queries using cube_fact_data table.
-        Uses data-driven entity resolution from cube_column_values and index-based column config.
-        """
-        import re
-        original_query = intent.get('original_query', '').lower()
-        nemko_pl_cube_id = '663678fc-a902-42d7-8c57-dd40a24e130a'
-
-        # Load column config and entity aliases from database
-        col_config = self._load_nemko_column_config(nemko_pl_cube_id)
-        entity_alias_map = self._load_nemko_entity_values(nemko_pl_cube_id)
-
-        # Get JSONB keys from config using column index
-        subsidiary_key = col_config.get(0, {}).get('json_key', 'Values')
-        month_key = col_config.get(3, {}).get('json_key', 'Unnamed: 3')
-        account_key = col_config.get(2, {}).get('json_key', 'Unnamed: 2')
-        fy24_key = col_config.get(4, {}).get('json_key', 'Unnamed: 4')
-        fy25_key = col_config.get(5, {}).get('json_key', 'Unnamed: 5')
-
-        # Parse query intent with data-driven entity matching
-        query_intent = self._parse_nemko_query_intent(original_query,
-                                                      entity_alias_map)
-        logger.info(f"Nemko data query intent: {query_intent}")
-
-        # Build parameterized WHERE clause
-        where_parts = ["cube_id = %s"]
-        params = [nemko_pl_cube_id]
-
-        # Entity filter - prefer resolved entity_values
-        # Use REPLACE to normalize non-breaking spaces (chr(160)) to regular spaces for matching
-        entity_list = query_intent.get('entity_values') or query_intent.get(
-            'entities', [])
-        if entity_list:
-            entity_placeholders = []
-            for entity in entity_list:
-                safe_entity = re.sub(r'[^\w\s()-]', '', str(entity))
-                # Normalize non-breaking space (chr(160)) to regular space before ILIKE
-                entity_placeholders.append(
-                    f"REPLACE(row_data->>'{subsidiary_key}', chr(160), ' ') ILIKE %s"
-                )
-                params.append(f'%{safe_entity}%')
-            if entity_placeholders:
-                where_parts.append(f"({' OR '.join(entity_placeholders)})")
-
-        # Month filter from parsed intent
-        if query_intent['months']:
-            if len(query_intent['months']) == 1:
-                where_parts.append(f"row_data->>'{month_key}' = %s")
-                params.append(query_intent['months'][0])
-            else:
-                placeholders = ', '.join(['%s'] * len(query_intent['months']))
-                where_parts.append(
-                    f"row_data->>'{month_key}' IN ({placeholders})")
-                params.extend(query_intent['months'])
-        else:
-            # Default to 'Total' for yearly aggregates
-            where_parts.append(f"row_data->>'{month_key}' = %s")
-            params.append('Total')
-
-        # Account filter
-        if query_intent['account_filter']:
-            acc = query_intent['account_filter']
-            if acc == 'Revenue':
-                where_parts.append(
-                    f"(row_data->>'{account_key}' ILIKE %s OR row_data->>'{account_key}' ILIKE %s)"
-                )
-                params.extend(['%Revenue%', '%Sales%'])
-            elif acc == 'Cost':
-                where_parts.append(
-                    f"(row_data->>'{account_key}' ILIKE %s OR row_data->>'{account_key}' ILIKE %s)"
-                )
-                params.extend(['%Cost%', '%Expense%'])
-
-        # Determine value column based on year
-        value_key = fy24_key if 'FY24' in query_intent['years'] else fy25_key
-        year_label = query_intent['years'][0] if query_intent[
-            'years'] else 'FY24'
-
-        # Get department key from config
-        department_key = col_config.get(1, {}).get('json_key', 'Unnamed: 1')
-
-        where_clause = " AND ".join(where_parts)
-
-        # Build the SQL query using config-loaded JSONB keys
-        sql = f"""
-            SELECT 
-                row_data->>'{subsidiary_key}' as location,
-                row_data->>'{department_key}' as department,
-                row_data->>'{account_key}' as account,
-                row_data->>'{month_key}' as month,
-                SUM(NULLIF(row_data->>'{value_key}', '')::numeric) as total_amount,
-                COUNT(*) as row_count
-            FROM cube_fact_data
-            WHERE {where_clause}
-              AND row_data->>'{subsidiary_key}' IS NOT NULL
-              AND row_data->>'{subsidiary_key}' != 'Location'
-              AND NULLIF(row_data->>'{value_key}', '') IS NOT NULL
-            GROUP BY 
-                row_data->>'{subsidiary_key}',
-                row_data->>'{department_key}',
-                row_data->>'{account_key}',
-                row_data->>'{month_key}'
-            ORDER BY total_amount DESC
-            LIMIT 100
-        """
-
-        logger.info(
-            f"Generated Nemko JSONB data SQL for year={year_label}, months={query_intent['months']}, entities={entity_list}"
-        )
-        return {
-            'success': True,
-            'sql': sql,
-            'params': params,
-            'calculation_type': 'nemko_jsonb_query'
-        }
-
-    # ==================== END NEMKO P&L SQL BUILDERS ====================
-
     def _compile_multi_metric_sql(
         self,
         metric_ids: List[str],
@@ -15197,16 +13850,14 @@ Return a JSON object with:
             intent: Structured query intent
             cube_id: Cube ID for filtering
             domain_id: Domain ID (for logging)
-            domain: Domain name (e.g., 'bosch.com', 'nemko.com') for multi-tenant routing
+            domain: Domain name (e.g., 'bosch.com') for multi-tenant routing
         """
         try:
-            # Check if this is a Nemko domain - route to Nemko-specific tables
-            is_nemko = is_nemko_domain(domain) if domain else False
             # CASE-INSENSITIVE: Normalize use_calculation to lowercase for consistent matching
             use_calculation = intent.get('use_calculation', '').lower()
 
             logger.info(
-                f"compile_sql: domain='{domain}', is_nemko={is_nemko}, use_calculation='{use_calculation}'"
+                f"compile_sql: domain='{domain}', use_calculation='{use_calculation}'"
             )
 
             # ----------------------------------------------------------------
@@ -15214,22 +13865,21 @@ Return a JSON object with:
             # so ALL downstream metric builders receive the correct amt_col.
             # This covers EBIT, direct cost, gross margin, budget KPIs, etc.
             # ----------------------------------------------------------------
-            if not is_nemko:
-                _orig_q = intent.get('original_query', '')
-                if _orig_q and 'currency' not in intent:
-                    _detected_currency = detect_currency(_orig_q)
-                    intent['currency'] = _detected_currency
-                    if _detected_currency == 'inr':
-                        logger.info(
-                            f"Currency propagation: detected INR from query, setting intent['currency']='inr'"
-                        )
+            _orig_q = intent.get('original_query', '')
+            if _orig_q and 'currency' not in intent:
+                _detected_currency = detect_currency(_orig_q)
+                intent['currency'] = _detected_currency
+                if _detected_currency == 'inr':
+                    logger.info(
+                        f"Currency propagation: detected INR from query, setting intent['currency']='inr'"
+                    )
 
             # ================================================================
             # MTD / YTD RESOLUTION  — set ONCE, before every fast-path.
             # All standalone revenue builders read intent['_time_agg'].
             # P&L / EBIT / composite builders ignore this flag (always YTD).
             # ================================================================
-            if not is_nemko and '_time_agg' not in intent:
+            if '_time_agg' not in intent:
                 _orig_q_ta = intent.get('original_query', '')
                 if _orig_q_ta:
                     intent['_time_agg'] = self._resolve_time_aggregation(_orig_q_ta)
@@ -15238,13 +13888,13 @@ Return a JSON object with:
                     )
 
             # ================================================================
-            # BOSCH P2 ANALYTICS PRE-PROCESSING
-            # Applied to all non-Nemko queries before any fast-path dispatch.
+            # P2 ANALYTICS PRE-PROCESSING
+            # Applied to all queries before any fast-path dispatch.
             # Order matters: time expansion first (quarter/FY/last-N), then
             # structural detections (ranking, "which month"), then early-return
             # builders (spike, difference, pct, variance).
             # ================================================================
-            if not is_nemko:
+            if True:
                 _p2_raw_q = intent.get('original_query', '')
                 _p2_q_lower = _p2_raw_q.lower() if _p2_raw_q else ''
 
@@ -15424,23 +14074,6 @@ Return a JSON object with:
                                 intent, cube_id, domain)
                         # else: not enough temporal info → normal path
 
-            if is_nemko:
-                # If use_calculation is specified, try _compile_nemko_sql first for P&L calculations
-                if use_calculation:
-                    nemko_calc_result = self._compile_nemko_sql(
-                        use_calculation, intent, domain)
-                    if nemko_calc_result.get('success'):
-                        return nemko_calc_result
-
-                # For general data queries (no specific calculation), use _compile_nemko_data_sql
-                nemko_result = self._compile_nemko_data_sql(intent, domain)
-                if nemko_result.get('success'):
-                    return nemko_result
-                # If Nemko-specific doesn't handle it, fall through to RAG
-                logger.info(
-                    f"Nemko domain query not handled by SQL builder, will use RAG"
-                )
-
             # ================================================================
             # GB P&L SUMMARY FAST PATH
             # Handles "summarise GB P&L", "GB P&L overview", "GB P&L report", etc.
@@ -15483,7 +14116,7 @@ Return a JSON object with:
             # ================================================================
             _multi_calcs = intent.get('multi_metric_calcs', [])
             _pre_calc_for_multi = intent.get('use_calculation', '')
-            if not _multi_calcs and not is_nemko and not _pre_calc_for_multi:
+            if not _multi_calcs and not _pre_calc_for_multi:
                 _orig_q = intent.get('original_query', '')
                 if _orig_q:
                     _all_m = self.get_matching_calculation(
@@ -15582,7 +14215,7 @@ Return a JSON object with:
             # Falls back to keyword matching if LLM fails or has low confidence
             # ================================================================
             original_query = intent.get('original_query', '')
-            if original_query and not is_nemko and not has_cost_class_filter:
+            if original_query and not has_cost_class_filter:
                 # ----------------------------------------------------------------
                 # CUSTOMER REVENUE FAST-PATH — must be BEFORE the plain revenue
                 # fast-path so "customer revenue" doesn't fall into it.
@@ -16041,8 +14674,7 @@ Return a JSON object with:
             if use_calculation:
                 calc_lower = use_calculation.lower()
                 # List of all supported KPI calculation keywords
-                # For Bosch, these trigger hardcoded SQL builders
-                # For Nemko, these first check DB for custom rules, then fall back to RAG
+                # These trigger hardcoded SQL builders
                 kpi_keywords = [
                     'ebit',
                     'billing utilization',
@@ -16106,9 +14738,7 @@ Return a JSON object with:
                     'other direct cost'
                 ]
 
-                # Route to calculation SQL builder - it handles domain-awareness internally
-                # For Nemko: checks DB first, falls back to RAG if no rule found
-                # For Bosch: uses hardcoded builders
+                # Route to calculation SQL builder
                 if any(kw in calc_lower for kw in kpi_keywords):
                     return self.compile_calculation_sql(
                         use_calculation, cube_id, intent, domain)
