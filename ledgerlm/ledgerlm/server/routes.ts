@@ -9031,6 +9031,81 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
     }
   });
 
+  // ── Scheduler Settings ────────────────────────────────────────────────────
+  app.get("/api/super-admin/scheduler-settings", requireSuperAdmin, async (_req, res) => {
+    try {
+      const { getSchedulerSettings } = await import("./services/schedulerService");
+      const settings = await getSchedulerSettings();
+      // Never expose the full connection string to the client — just mask it
+      res.json({
+        backupUtcHour: settings.backupUtcHour,
+        blobConnectionStringSet: !!settings.blobConnectionString,
+        blobConnectionStringMasked: settings.blobConnectionString
+          ? settings.blobConnectionString.replace(/AccountKey=[^;]+/, "AccountKey=***")
+          : null,
+        blobContainer: settings.blobContainer,
+        updatedAt: settings.updatedAt,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/super-admin/scheduler-settings", requireSuperAdmin, async (req, res) => {
+    try {
+      const { updateSchedulerSettings } = await import("./services/schedulerService");
+      const { backupUtcHour, blobConnectionString, blobContainer } = req.body;
+      const updated = await updateSchedulerSettings({
+        ...(backupUtcHour !== undefined && { backupUtcHour: Number(backupUtcHour) }),
+        ...(blobConnectionString !== undefined && { blobConnectionString }),
+        ...(blobContainer !== undefined && { blobContainer }),
+      });
+      res.json({
+        backupUtcHour: updated.backupUtcHour,
+        blobConnectionStringSet: !!updated.blobConnectionString,
+        blobConnectionStringMasked: updated.blobConnectionString
+          ? updated.blobConnectionString.replace(/AccountKey=[^;]+/, "AccountKey=***")
+          : null,
+        blobContainer: updated.blobContainer,
+        updatedAt: updated.updatedAt,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/super-admin/scheduler-settings/test-blob", requireSuperAdmin, async (req, res) => {
+    try {
+      const { testBlobConnection, getSchedulerSettings } = await import("./services/schedulerService");
+      let { connectionString, container } = req.body;
+      // If no new connection string provided, test the saved one
+      if (!connectionString) {
+        const saved = await getSchedulerSettings();
+        connectionString = saved.blobConnectionString;
+        container = container || saved.blobContainer;
+      }
+      if (!connectionString) {
+        return res.json({ ok: false, error: "No connection string configured" });
+      }
+      const result = await testBlobConnection(connectionString, container || "ledgerlm-backups");
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // ── Scheduler Logs ────────────────────────────────────────────────────────
+  app.get("/api/super-admin/scheduler-logs", requireSuperAdmin, async (req, res) => {
+    try {
+      const { listSchedulerLogs } = await import("./services/schedulerService");
+      const limit = Math.min(Number(req.query.limit ?? 50), 200);
+      const logs = await listSchedulerLogs(limit);
+      res.json(logs);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // PPT file download route
   app.get("/api/download/ppt/:filename", (req, res) => {
     const filename = path.basename(req.params.filename);

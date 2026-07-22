@@ -319,25 +319,48 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT",  () => shutdown("SIGINT"));
 
-  // ── Nightly scheduler jobs ──────────────────────────────────────────────────
-  // Run at 02:00 UTC — after Anaplan jobs (06:00 IST = 00:30 UTC)
-  const scheduleNightlyJobs = () => {
-    const now = new Date();
-    const next2am = new Date();
-    next2am.setUTCHours(2, 0, 0, 0);
-    if (next2am <= now) next2am.setUTCDate(next2am.getUTCDate() + 1);
-    const delay = next2am.getTime() - now.getTime();
-    setTimeout(() => {
-      runRetentionEngine("scheduler").catch((e) => logger.error({ e }, "Retention engine error"));
-      runBackup("scheduler").catch((e) => logger.error({ e }, "Backup error"));
-      setInterval(() => {
+  // ── Nightly scheduler jobs (dynamic — reads UTC hour from DB) ───────────────
+  const scheduleNightlyJobs = async () => {
+    try {
+      const { getSchedulerSettings, ensureSchedulerTables } = await import("./services/schedulerService");
+      await ensureSchedulerTables();
+      const settings = await getSchedulerSettings();
+      const utcHour = settings.backupUtcHour ?? 2;
+
+      const now = new Date();
+      const nextRun = new Date();
+      nextRun.setUTCHours(utcHour, 0, 0, 0);
+      if (nextRun <= now) nextRun.setUTCDate(nextRun.getUTCDate() + 1);
+      const delay = nextRun.getTime() - now.getTime();
+
+      setTimeout(() => {
         runRetentionEngine("scheduler").catch((e) => logger.error({ e }, "Retention engine error"));
         runBackup("scheduler").catch((e) => logger.error({ e }, "Backup error"));
-      }, 24 * 60 * 60 * 1000);
-    }, delay);
-    log(`Nightly jobs (retention + backup) scheduled — first run in ${Math.round(delay / 3600000)}h`);
+        // Reschedule every 24 h so it picks up any setting changes on the next cycle
+        setInterval(() => {
+          scheduleNightlyJobs().catch((e) => logger.error({ e }, "Scheduler reschedule error"));
+        }, 24 * 60 * 60 * 1000);
+      }, delay);
+
+      log(`Nightly jobs (retention + backup) scheduled at ${String(utcHour).padStart(2, "0")}:00 UTC — first run in ${Math.round(delay / 3600000)}h`);
+    } catch (e) {
+      logger.error({ e }, "Failed to schedule nightly jobs — falling back to 02:00 UTC");
+      const now = new Date();
+      const next2am = new Date();
+      next2am.setUTCHours(2, 0, 0, 0);
+      if (next2am <= now) next2am.setUTCDate(next2am.getUTCDate() + 1);
+      const delay = next2am.getTime() - now.getTime();
+      setTimeout(() => {
+        runRetentionEngine("scheduler").catch(() => {});
+        runBackup("scheduler").catch(() => {});
+        setInterval(() => {
+          runRetentionEngine("scheduler").catch(() => {});
+          runBackup("scheduler").catch(() => {});
+        }, 24 * 60 * 60 * 1000);
+      }, delay);
+    }
   };
-  scheduleNightlyJobs();
+  scheduleNightlyJobs().catch((e) => logger.error({ e }, "scheduleNightlyJobs failed"));
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

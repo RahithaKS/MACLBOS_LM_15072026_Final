@@ -3,6 +3,7 @@ import { logger } from "../logger";
 import { writeAuditLog } from "./auditLogger";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { getSchedulerSettings, createSchedulerLog, completeSchedulerLog } from "./schedulerService";
 
 export interface BackupRecord {
   id: string;
@@ -57,10 +58,16 @@ export async function listBackups(limit = 20): Promise<BackupRecord[]> {
   }
 }
 
-export async function runBackup(triggeredBy: string = "scheduler"): Promise<{ success: boolean; filename?: string; sizeBytes?: number; error?: string }> {
+export async function runBackup(
+  triggeredBy: string = "scheduler"
+): Promise<{ success: boolean; filename?: string; sizeBytes?: number; error?: string }> {
   await ensureBackupLogTable();
 
-  const dbUrl = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL || process.env.AZURE_POSTGRESQL_URL;
+  const dbUrl =
+    process.env.NEON_DATABASE_URL ||
+    process.env.DATABASE_URL ||
+    process.env.AZURE_POSTGRESQL_URL;
+
   if (!dbUrl) {
     const error = "No database URL configured for backup";
     logger.error(error);
@@ -71,22 +78,28 @@ export async function runBackup(triggeredBy: string = "scheduler"): Promise<{ su
     return { success: false, error };
   }
 
+  // Read blob config from DB (falls back to env var inside getSchedulerSettings)
+  const settings = await getSchedulerSettings();
+  const connStr = settings.blobConnectionString;
+  const containerName = settings.blobContainer;
+
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const filename = `ledgerlm-backup-${timestamp}.sql`;
 
   logger.info({ filename, triggeredBy }, "Starting database backup");
 
+  // Create scheduler log entry
+  const logId = await createSchedulerLog("backup", triggeredBy);
+
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let errorOutput = "";
 
-    const pgDump = spawn("pg_dump", [
-      "--no-password",
-      "--format=plain",
-      "--no-owner",
-      "--no-acl",
-      dbUrl,
-    ], { env: { ...process.env, PGPASSWORD: "" } });
+    const pgDump = spawn(
+      "pg_dump",
+      ["--no-password", "--format=plain", "--no-owner", "--no-acl", dbUrl],
+      { env: { ...process.env, PGPASSWORD: "" } }
+    );
 
     pgDump.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
     pgDump.stderr.on("data", (d: Buffer) => { errorOutput += d.toString(); });
@@ -100,22 +113,21 @@ export async function runBackup(triggeredBy: string = "scheduler"): Promise<{ su
           VALUES (${filename}, 0, 'failed', ${triggeredBy}, ${msg})
         `);
         writeAuditLog({ action: "BACKUP_TRIGGERED", status: "failed", details: { error: msg, triggeredBy } }).catch(() => {});
+        await completeSchedulerLog(logId, "failed", null, msg);
         resolve({ success: false, error: msg });
         return;
       }
 
       const dumpBuffer = Buffer.concat(chunks);
       const sizeBytes = dumpBuffer.length;
-
       let blobUrl: string | null = null;
 
-      // Upload to Azure Blob if configured
-      const connStr = process.env.AZURE_STORAGE_CONNECTION_STRING;
+      // Upload to Azure Blob if connection string is configured
       if (connStr) {
         try {
           const { BlobServiceClient } = await import("@azure/storage-blob");
           const blobServiceClient = BlobServiceClient.fromConnectionString(connStr);
-          const containerClient = blobServiceClient.getContainerClient("ledgerlm-backups");
+          const containerClient = blobServiceClient.getContainerClient(containerName);
           await containerClient.createIfNotExists();
           const blockBlobClient = containerClient.getBlockBlobClient(filename);
           await blockBlobClient.upload(dumpBuffer, sizeBytes, {
@@ -127,7 +139,7 @@ export async function runBackup(triggeredBy: string = "scheduler"): Promise<{ su
           logger.warn({ err: err.message }, "Blob upload failed — backup stored locally only");
         }
       } else {
-        logger.warn("AZURE_STORAGE_CONNECTION_STRING not set — backup not uploaded to Blob");
+        logger.warn("No blob connection string configured — backup not uploaded to Azure");
       }
 
       await db.execute(sql`
@@ -141,6 +153,13 @@ export async function runBackup(triggeredBy: string = "scheduler"): Promise<{ su
         details: { filename, sizeBytes, blobUrl, triggeredBy },
       }).catch(() => {});
 
+      await completeSchedulerLog(logId, "success", {
+        filename,
+        sizeBytes,
+        blobUrl,
+        uploadedToAzure: !!blobUrl,
+      });
+
       logger.info({ filename, sizeBytes }, "Backup completed successfully");
       resolve({ success: true, filename, sizeBytes });
     });
@@ -153,6 +172,7 @@ export async function runBackup(triggeredBy: string = "scheduler"): Promise<{ su
         VALUES (${filename}, 0, 'failed', ${triggeredBy}, ${msg})
       `);
       writeAuditLog({ action: "BACKUP_TRIGGERED", status: "failed", details: { error: msg } }).catch(() => {});
+      await completeSchedulerLog(logId, "failed", null, msg);
       resolve({ success: false, error: msg });
     });
   });

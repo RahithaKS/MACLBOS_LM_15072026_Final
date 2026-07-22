@@ -2,6 +2,7 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { logger } from "../logger";
 import { writeAuditLog } from "./auditLogger";
+import { createSchedulerLog, completeSchedulerLog } from "./schedulerService";
 
 const ALLOWED_TABLES = new Set([
   "messages",
@@ -33,7 +34,10 @@ export async function listRetentionPolicies(): Promise<RetentionPolicy[]> {
   return (rows.rows as any[]).map(mapPolicy);
 }
 
-export async function updateRetentionPolicy(id: string, patch: { retainDays?: number; enabled?: boolean }): Promise<RetentionPolicy | null> {
+export async function updateRetentionPolicy(
+  id: string,
+  patch: { retainDays?: number; enabled?: boolean }
+): Promise<RetentionPolicy | null> {
   const sets: string[] = ["updated_at = NOW()"];
   if (patch.retainDays !== undefined) sets.push(`retain_days = ${Number(patch.retainDays)}`);
   if (patch.enabled !== undefined) sets.push(`enabled = ${patch.enabled}`);
@@ -45,13 +49,19 @@ export async function updateRetentionPolicy(id: string, patch: { retainDays?: nu
   return r ? mapPolicy(r) : null;
 }
 
-export async function runRetentionEngine(triggeredBy = "scheduler"): Promise<{ policies: number; totalDeleted: number }> {
+export async function runRetentionEngine(
+  triggeredBy = "scheduler"
+): Promise<{ policies: number; totalDeleted: number }> {
   const rows = await db.execute(sql`
     SELECT id, table_name, retain_days FROM retention_policies WHERE enabled = true
   `);
 
   const policies = rows.rows as any[];
   let totalDeleted = 0;
+
+  // Create scheduler log entry
+  const logId = await createSchedulerLog("retention", triggeredBy);
+  const tableResults: Record<string, number> = {};
 
   for (const policy of policies) {
     const tableName: string = policy.table_name;
@@ -74,6 +84,7 @@ export async function runRetentionEngine(triggeredBy = "scheduler"): Promise<{ p
 
       const cnt = Number((result.rows[0] as any)?.cnt ?? 0);
       totalDeleted += cnt;
+      tableResults[tableName] = cnt;
 
       await db.execute(sql`
         UPDATE retention_policies
@@ -97,6 +108,12 @@ export async function runRetentionEngine(triggeredBy = "scheduler"): Promise<{ p
       }).catch(() => {});
     }
   }
+
+  await completeSchedulerLog(logId, "success", {
+    policiesRun: policies.length,
+    totalRowsDeleted: totalDeleted,
+    tableResults,
+  });
 
   return { policies: policies.length, totalDeleted };
 }
