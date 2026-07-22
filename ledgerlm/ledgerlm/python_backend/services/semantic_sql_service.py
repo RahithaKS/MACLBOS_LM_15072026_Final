@@ -5818,13 +5818,18 @@ Return a JSON object with:
         # - All other views/queries default to region_entity
         _default_group_by = group_by_hint if group_by_hint else ['region_entity']
 
-        # Initialize intent with defaults
+        # Initialize intent with defaults.
+        # use_calculation is stamped here so the intent is self-routing when
+        # compile_sql receives it directly (e.g. tests, or callers that don't
+        # add it manually afterwards).  The real pipeline overwrites it with the
+        # same value anyway, so this is always safe.
         intent = {
             'query_type': 'aggregation',
             'metrics': [],
             'filters': [],
             'group_by': _default_group_by,
-            'limit': 100
+            'limit': 100,
+            'use_calculation': calc_name.lower(),
         }
 
         # Extract year from query
@@ -6113,6 +6118,23 @@ Return a JSON object with:
             if 'split_itrams_sds' not in intent.get('group_by', []):
                 intent['group_by'] = intent.get('group_by', []) + ['split_itrams_sds']
             logger.info('_build_kpi_intent_fast: split_itrams_sds group_by injected')
+
+        # Revenue type split: CASE WHEN on order_reason → Reimbursement / Sale of Scrap /
+        # Asset Sales / Volume Discount / InterLocation Stock / Revenue.
+        # Applies to KPI Revenue (cost_category='Revenue Summary') only.
+        _rev_type_triggers = [
+            'revenue type', 'by revenue type', 'split by revenue type',
+            'split of revenue by type', 'revenue split by type',
+            'type of revenue', 'revenue breakdown by type',
+            # order-reason phrasing (user-facing language)
+            'order split', 'by order split', 'order reason split',
+            'split by order', 'by order reason', 'order wise',
+            'order-wise', 'order reason wise', 'order type split',
+            'split by order reason', 'revenue by order',
+        ]
+        if any(t in query_lower for t in _rev_type_triggers):
+            intent['revenue_type_split'] = True
+            logger.info('_build_kpi_intent_fast: revenue_type_split=True — order_reason CASE WHEN will be applied')
 
         # Org hierarchy filter: "BU AR", "section X", "dept Y", "group Z"
         # Patterns: (label, column, regex)
@@ -8244,50 +8266,65 @@ Return a JSON object with:
             result = None
             db_error = None
             logger.info(f"[DB-LOOKUP] Starting DB lookup for calc='{calculation_name}', cube_id={cube_id}")
-            try:
-                conn = psycopg2.connect(self.db_url)
-                cursor = conn.cursor()
 
-                # Build candidate names: original + progressively stripped suffixes
-                # e.g. "total capacity end" → ["total capacity end", "total capacity"]
-                # This handles fast-path-generated names like "...End", "...Avg" that
-                # may not match seeded calc names exactly.
-                _suffix_words = {'end', 'avg', 'average', 'count', 'percentage', '%', 'mix', 'ratio'}
-                _name_words = calculation_name.lower().split()
-                candidate_names = [calculation_name.lower()]
-                _stripped = list(_name_words)
-                while len(_stripped) > 1 and _stripped[-1] in _suffix_words:
-                    _stripped.pop()
-                    candidate_names.append(' '.join(_stripped))
-                logger.info(f"[DB-LOOKUP] Candidates to try: {candidate_names}")
+            # Revenue type split (order_reason CASE WHEN) must use _build_revenue_type_sql.
+            # Skip the DB lookup entirely so no sql_template can intercept it before
+            # the METRIC_CATALOG branch for catalog_key='revenue' is reached.
+            if intent.get('revenue_type_split') and calculation_name == 'revenue':
+                # Revenue type split must use _build_revenue_type_sql (CASE WHEN on
+                # order_reason).  Skip the DB lookup so no sql_template or
+                # partial-name match (e.g. "GB P&L Revenue") can intercept it.
+                logger.info(
+                    "[DB-LOOKUP] Skipping DB lookup for 'revenue' because "
+                    "revenue_type_split=True — routing directly to Python builder"
+                )
+                rounding = 0
+                calc_name_lower = 'revenue'
+            else:
+                try:
+                    conn = psycopg2.connect(self.db_url)
+                    cursor = conn.cursor()
 
-                # Try each candidate in order (longest/most-specific first)
-                result = None
-                for _candidate in candidate_names:
-                    cursor.execute(
-                        """
-                        SELECT calculation_name, formula, result_type, required_columns, default_filters, rounding_precision, sql_template
-                        FROM cube_calculation_rules
-                        WHERE cube_id = %s AND (
-                            calculation_name ILIKE %s 
-                            OR %s = ANY(calculation_aliases)
-                        )
-                        AND is_active = 1
-                        ORDER BY sql_template IS NOT NULL DESC,
-                                 LENGTH(calculation_name) ASC
-                        LIMIT 1
-                    """, (cube_id, f"%{_candidate}%", _candidate))
-                    result = cursor.fetchone()
-                    if result:
-                        if _candidate != calculation_name.lower():
-                            logger.info(
-                                f"[DB-LOOKUP] Matched '{calculation_name}' → seeded calc '{result[0]}' (via stripped candidate '{_candidate}')"
+                    # Build candidate names: original + progressively stripped suffixes
+                    # e.g. "total capacity end" → ["total capacity end", "total capacity"]
+                    # This handles fast-path-generated names like "...End", "...Avg" that
+                    # may not match seeded calc names exactly.
+                    _suffix_words = {'end', 'avg', 'average', 'count', 'percentage', '%', 'mix', 'ratio'}
+                    _name_words = calculation_name.lower().split()
+                    candidate_names = [calculation_name.lower()]
+                    _stripped = list(_name_words)
+                    while len(_stripped) > 1 and _stripped[-1] in _suffix_words:
+                        _stripped.pop()
+                        candidate_names.append(' '.join(_stripped))
+                    logger.info(f"[DB-LOOKUP] Candidates to try: {candidate_names}")
+
+                    # Try each candidate in order (longest/most-specific first)
+                    result = None
+                    for _candidate in candidate_names:
+                        cursor.execute(
+                            """
+                            SELECT calculation_name, formula, result_type, required_columns, default_filters, rounding_precision, sql_template
+                            FROM cube_calculation_rules
+                            WHERE cube_id = %s AND (
+                                calculation_name ILIKE %s 
+                                OR %s = ANY(calculation_aliases)
                             )
-                        break
-                conn.close()
-            except Exception as db_err:
-                db_error = db_err
-                logger.warning(f"DB error fetching calculation: {db_err}")
+                            AND is_active = 1
+                            ORDER BY sql_template IS NOT NULL DESC,
+                                     LENGTH(calculation_name) ASC
+                            LIMIT 1
+                        """, (cube_id, f"%{_candidate}%", _candidate))
+                        result = cursor.fetchone()
+                        if result:
+                            if _candidate != calculation_name.lower():
+                                logger.info(
+                                    f"[DB-LOOKUP] Matched '{calculation_name}' → seeded calc '{result[0]}' (via stripped candidate '{_candidate}')"
+                                )
+                            break
+                    conn.close()
+                except Exception as db_err:
+                    db_error = db_err
+                    logger.warning(f"DB error fetching calculation: {db_err}")
 
             # ================================================================
             # DB-FIRST: If the matched calculation has a sql_template, execute
@@ -8299,11 +8336,20 @@ Return a JSON object with:
                 f"has_template={bool(result and result[6])} | db_error={db_error}"
             )
             if result and result[6]:  # result[6] = sql_template
-                sql_template = result[6]
-                logger.info(
-                    f"[DB-TEMPLATE] Found sql_template for '{calculation_name}' → '{result[0]}' — executing directly (bypassing hardcoded builders)"
-                )
-                return self._execute_sql_template(sql_template, cube_id, intent)
+                # Revenue type split (order_reason CASE WHEN) cannot be expressed
+                # as a generic sql_template — skip the DB template and fall through
+                # to _build_revenue_type_sql so the CASE WHEN is applied correctly.
+                if intent.get('revenue_type_split'):
+                    logger.info(
+                        f"[DB-TEMPLATE] Skipping sql_template for '{calculation_name}' "
+                        f"because revenue_type_split=True — falling through to Python builder"
+                    )
+                else:
+                    sql_template = result[6]
+                    logger.info(
+                        f"[DB-TEMPLATE] Found sql_template for '{calculation_name}' → '{result[0]}' — executing directly (bypassing hardcoded builders)"
+                    )
+                    return self._execute_sql_template(sql_template, cube_id, intent)
 
             # Use database result if found
             if result:
@@ -15653,6 +15699,11 @@ Return a JSON object with:
                         'revenue type', 'by revenue type', 'split by revenue type',
                         'split of revenue by type', 'revenue split by type',
                         'type of revenue', 'revenue breakdown by type',
+                        # order-reason phrasing (user-facing language)
+                        'order split', 'by order split', 'order reason split',
+                        'split by order', 'by order reason', 'order wise',
+                        'order-wise', 'order reason wise', 'order type split',
+                        'split by order reason', 'revenue by order',
                     ]
                     if any(t in _q_lower for t in _rev_type_triggers):
                         intent['revenue_type_split'] = True
