@@ -6144,11 +6144,30 @@ Return a JSON object with:
 
         # Avg monthly mode: SUM / n_months wrapper applied by compile_sql.
         # Mutually exclusive with MoM (which uses LAG window instead).
-        if detect_avg_monthly_intent(query):
+        _kpi_avg_monthly = detect_avg_monthly_intent(query)
+        if _kpi_avg_monthly:
             intent['avg_monthly_mode'] = True
             if 'month' not in intent.get('group_by', []):
                 intent['group_by'] = ['month'] + intent.get('group_by', [])
             logger.info('_build_kpi_intent_fast: avg_monthly_mode=True')
+
+        # MoM mode: adds LAG() window for month-over-month growth %.
+        # Mutually exclusive with avg_monthly_mode.
+        if detect_mom_intent(query) and not _kpi_avg_monthly:
+            intent['mom_mode'] = True
+            if 'month' not in intent.get('group_by', []):
+                intent['group_by'] = ['month'] + intent.get('group_by', [])
+            logger.info('_build_kpi_intent_fast: mom_mode=True — MoM LAG wrapper will be applied by compile_sql')
+
+        # Comparison mode: side-by-side year columns (e.g. "2025 vs 2026").
+        # Mutually exclusive with avg_monthly_mode and mom_mode.
+        if detect_comparison_query(query) and not _kpi_avg_monthly and not intent.get('mom_mode'):
+            intent['comparison_mode'] = True
+            if 'month' not in intent.get('group_by', []):
+                intent['group_by'] = ['month'] + intent.get('group_by', [])
+            if 'year' not in intent.get('group_by', []):
+                intent['group_by'] = intent.get('group_by', []) + ['year']
+            logger.info('_build_kpi_intent_fast: comparison_mode=True — year column added to group_by')
 
         logger.info(
             f"Built fast KPI intent: year={[f['value'] for f in intent['filters'] if f['column']=='year']}, month={[f['value'] for f in intent['filters'] if f['column']=='month']}, group_by={intent['group_by']}"
@@ -6840,6 +6859,19 @@ Return a JSON object with:
             logger.info(
                 "_build_gb_pl_cost_breakdown_intent: mom_mode=True — "
                 "MoM LAG wrapper will be applied by compile_sql"
+            )
+
+        # Comparison mode: side-by-side year columns (e.g. "2025 vs 2026").
+        # Mutually exclusive with avg_monthly_mode and mom_mode.
+        if detect_comparison_query(query) and not _gbpl_avg_monthly and not intent.get('mom_mode'):
+            intent['comparison_mode'] = True
+            if 'month' not in intent['group_by']:
+                intent['group_by'] = ['month'] + intent['group_by']
+            if 'year' not in intent['group_by']:
+                intent['group_by'] = intent['group_by'] + ['year']
+            logger.info(
+                "_build_gb_pl_cost_breakdown_intent: comparison_mode=True — "
+                "year column added to group_by, YTD expansion blocked"
             )
 
         logger.info(
