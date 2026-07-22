@@ -9186,7 +9186,11 @@ Return a JSON object with:
         # Dimension cols from group_by (all non-time dims)
         gb = intent.get('group_by', [])
         dim_cols = [c for c in gb if c not in ('month', 'year')]
-        has_year = 'year' in gb or re.search(r'\byear\b', original_sql, re.IGNORECASE)
+        # Check if year is actually in the GROUP BY (i.e. a selected column in _mom_base).
+        # Do NOT use re.search over the full SQL — that fires on WHERE clauses like
+        # "AND year = 2025", which are NOT selected, causing "column year does not exist".
+        has_year = ('year' in gb or
+                    bool(re.search(r'GROUP\s+BY\s+[^;]*\byear\b', original_sql, re.IGNORECASE)))
 
         # Build SELECT / PARTITION / ORDER fragments
         dim_select   = (', '.join(dim_cols) + ', ') if dim_cols else ''
