@@ -6206,6 +6206,25 @@ Return a JSON object with:
             intent['mom_mode'] = True
             if 'month' not in intent.get('group_by', []):
                 intent['group_by'] = ['month'] + intent.get('group_by', [])
+            # Single-month MoM: expand month=N to month IN (1..N) so the LAG
+            # window has all preceding months and growth is calculable.
+            # Mirrors the same expansion in _build_cost_class_intent and
+            # _build_entity_pl_intent.  Only fires when the user named exactly
+            # one month (operator='='); multi-month and no-month filters are
+            # left untouched.
+            _month_f = next(
+                (f for f in intent.get('filters', []) if f.get('column') == 'month'),
+                None
+            )
+            if _month_f and _month_f.get('operator') == '=':
+                _single_month = _month_f['value']
+                if isinstance(_single_month, int) and 1 <= _single_month <= 12:
+                    _month_f['operator'] = 'IN'
+                    _month_f['value'] = list(range(1, _single_month + 1))
+                    logger.info(
+                        f'_build_kpi_intent_fast: MoM single-month expansion '
+                        f'month={_single_month} → month IN {_month_f["value"]}'
+                    )
             logger.info('_build_kpi_intent_fast: mom_mode=True — MoM LAG wrapper will be applied by compile_sql')
 
         # Comparison mode: side-by-side year columns (e.g. "2025 vs 2026").
@@ -9227,7 +9246,7 @@ Return a JSON object with:
             'SELECT\n'
             '    *,\n'
             '    CASE\n'
-            '        WHEN prev_month_value IS NULL THEN NULL\n'
+            '        WHEN prev_month_value IS NULL THEN 0.00\n'
             '        ELSE ROUND(\n'
             f'            100.0 * ({value_alias} - prev_month_value)\n'
             '            / NULLIF(ABS(prev_month_value), 0),\n'
