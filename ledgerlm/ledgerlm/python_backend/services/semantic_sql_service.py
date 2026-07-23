@@ -6020,8 +6020,15 @@ Return a JSON object with:
             _ccl_dims.append('sector')
         if any(p in query_lower for p in ['by service area', 'by new service area']):
             _ccl_dims.append('new_service_area')
-        if any(p in query_lower for p in ['by project', 'by projectgb']):
+        # "by Project GB" grouping — only when no specific value follows (those become filters below)
+        if any(p in query_lower for p in ['by project gb', 'by gb', 'project gb wise', 'gb wise', 'by projectgb']) \
+                and not _PROJECT_GB_RE.search(query):
             _ccl_dims.append('project_gb')
+            logger.info("_build_cost_class_intent: GB grouping — GROUP BY project_gb")
+        # "by Planning GB" grouping — only when no specific value follows
+        if 'by planning gb' in query_lower and not _PLANNING_GB_RE.search(query):
+            _ccl_dims.append('planning_gb')
+            logger.info("_build_cost_class_intent: GB grouping — GROUP BY planning_gb")
         if any(p in query_lower for p in ['by month', 'monthly', 'month wise', 'month-wise', 'monthwise', 'month by month']):
             _ccl_dims.append('month')
         if any(p in query_lower for p in ['by year', 'yearly', 'year wise', 'year-wise', 'annual']):
@@ -6284,6 +6291,22 @@ Return a JSON object with:
         if _ccl_month_f and isinstance(_ccl_month_f.get('value'), list) and len(_ccl_month_f['value']) > 1:
             if 'month' not in intent['group_by']:
                 intent['group_by'] = ['month'] + intent['group_by']
+
+        # ProjectGB specific value filter (e.g. "Project GB MA")
+        _ccl_pgb_m = _PROJECT_GB_RE.search(query)
+        if _ccl_pgb_m:
+            intent['filters'].append({
+                'column': 'project_gb', 'operator': '=', 'value': _ccl_pgb_m.group(1)
+            })
+            logger.info(f"_build_cost_class_intent: ProjectGB filter = {_ccl_pgb_m.group(1)}")
+
+        # PlanningGB specific value filter (e.g. "Planning GB MA")
+        _ccl_plgb_m = _PLANNING_GB_RE.search(query)
+        if _ccl_plgb_m:
+            intent['filters'].append({
+                'column': 'planning_gb', 'operator': '=', 'value': _ccl_plgb_m.group(1)
+            })
+            logger.info(f"_build_cost_class_intent: PlanningGB filter = {_ccl_plgb_m.group(1)}")
 
         logger.info(
             f"Built cost class intent: class='{cost_class}', group_by={intent['group_by']}, entities={detected_entities}"
