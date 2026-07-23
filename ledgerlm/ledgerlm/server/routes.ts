@@ -146,6 +146,78 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/webp',
 ]);
 
+// SG-SEC: Blocklist of dangerous file extensions — rejected regardless of MIME type.
+// Covers executables, scripts, macros, archives-with-code, and web payloads.
+const BLOCKED_EXTENSIONS = new Set([
+  // Executables
+  '.exe', '.com', '.scr', '.pif', '.msi', '.msp', '.application',
+  // Scripts
+  '.bat', '.cmd', '.sh', '.bash', '.zsh', '.fish', '.ksh', '.csh',
+  '.ps1', '.psm1', '.psd1', '.ps1xml', '.vbs', '.vbe', '.wsf', '.wsh', '.js',
+  '.mjs', '.cjs', '.ts', '.jsx', '.tsx', '.py', '.pyw', '.rb', '.pl', '.php',
+  '.php3', '.php4', '.php5', '.phtml', '.asp', '.aspx', '.jsp', '.jspx',
+  // Web payloads
+  '.html', '.htm', '.xhtml', '.svg', '.xml',
+  // Office macros
+  '.xlsm', '.xltm', '.xlam', '.docm', '.dotm', '.pptm', '.potm', '.ppam',
+  // Libraries / native code
+  '.dll', '.so', '.dylib', '.ocx', '.sys', '.drv',
+  // Archives (can contain malicious payloads)
+  '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.iso', '.img',
+  // Shortcuts / links
+  '.lnk', '.url', '.desktop', '.jar', '.class', '.war', '.ear',
+  // Other risky
+  '.reg', '.inf', '.ini', '.cpl', '.hta', '.chm',
+]);
+
+// SG-SEC: For text/plain MIME, only these safe extensions are permitted.
+const ALLOWED_TEXT_EXTENSIONS = new Set(['.txt', '.csv', '.tsv', '.log', '.md']);
+
+// SG-SEC: Sanitise a filename — strip path separators, null bytes, leading dots,
+// and collapse to a safe basename. Returns the safe name.
+function sanitiseFilename(raw: string): string {
+  // Decode any URL encoding
+  let name = decodeURIComponent(raw).replace(/\0/g, '');
+  // Strip path traversal
+  name = path.basename(name);
+  // Remove leading dots (hidden files) and spaces
+  name = name.replace(/^[.\s]+/, '');
+  // Collapse unsafe chars to underscores
+  name = name.replace(/[^\w\s.\-]/g, '_');
+  return name || 'upload';
+}
+
+// SG-SEC: Validate the original filename — blocked extension, double-extension,
+// and text/plain extension allowlist. Returns an error string or null if OK.
+function validateFilename(originalname: string, mimetype: string): string | null {
+  const safe = sanitiseFilename(originalname);
+  const ext  = path.extname(safe).toLowerCase();
+
+  // Block dangerous extensions
+  if (BLOCKED_EXTENSIONS.has(ext)) {
+    return `File extension "${ext}" is not permitted.`;
+  }
+
+  // Block double-extension attacks (e.g. "report.pdf.exe" → ext=".exe" already caught,
+  // but catch "invoice.js.txt" style where only the last ext looks safe)
+  const allParts  = safe.split('.');
+  if (allParts.length > 2) {
+    for (const part of allParts.slice(1, -1)) {
+      if (BLOCKED_EXTENSIONS.has(`.${part.toLowerCase()}`)) {
+        return `Filename contains a blocked extension ".${part}".`;
+      }
+    }
+  }
+
+  // For text/plain MIME, restrict to safe text extensions only
+  if ((mimetype === 'text/plain' || mimetype === 'application/csv') &&
+      ext !== '' && !ALLOWED_TEXT_EXTENSIONS.has(ext)) {
+    return `Files with extension "${ext}" are not accepted as plain text.`;
+  }
+
+  return null;
+}
+
 // SG-43: Magic-byte validation — verify actual file content matches declared type.
 // Called AFTER multer writes the file to disk; deletes the file if invalid.
 async function validateFileMagicBytes(filePath: string, mimetype: string): Promise<boolean> {
@@ -202,11 +274,16 @@ const upload = multer({
     fileSize: 250 * 1024 * 1024, // 250MB outer limit — per-type caps enforced post-upload
   },
   fileFilter: (req, file, cb) => {
-    // SG-43: First gate — reject by MIME type before writing to disk
+    // Gate 1 — MIME type whitelist
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
       return cb(new Error(
         `File type not allowed: "${file.mimetype}". Accepted formats: PDF, Excel, Word, PowerPoint, CSV, and images.`
       ));
+    }
+    // Gate 2 — extension blocklist + double-extension + text/plain allowlist
+    const extErr = validateFilename(file.originalname, file.mimetype);
+    if (extErr) {
+      return cb(new Error(extErr));
     }
     cb(null, true);
   },
@@ -1653,9 +1730,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No file uploaded" });
       }
 
+      // Gate 3 — magic-byte validation (checks actual file content vs declared MIME)
+      const magicOk = await validateFileMagicBytes(req.file.path, req.file.mimetype);
+      if (!magicOk) {
+        await fs.unlink(req.file.path).catch(() => {});
+        return res.status(400).json({
+          error: "File content does not match its declared type. Upload rejected.",
+        });
+      }
+
+      // Sanitise the display name stored in DB (never use raw originalname)
+      const safeName = sanitiseFilename(req.file.originalname);
+
       const document = await storage.createDocument({
         userId,
-        name: req.file.originalname,
+        name: safeName,
         filePath: req.file.filename,
         fileSize: req.file.size.toString(),
         fileType: req.file.mimetype,
@@ -1668,7 +1757,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         resourceId: document.id,
         ipAddress:  extractIp(req),
         status:     "success",
-        details:    { fileName: req.file.originalname, fileSize: req.file.size, mimeType: req.file.mimetype },
+        details:    { fileName: safeName, fileSize: req.file.size, mimeType: req.file.mimetype },
       }).catch(() => {});
 
       res.status(201).json(document);
