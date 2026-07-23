@@ -37,6 +37,7 @@ minimumReleaseAgeExclude:
 packages:
   - artifacts/*
   - ledgerlm/artifacts/*
+  - ledgerlm/ledgerlm
   - lib/*
   - lib/integrations/*
   - scripts
