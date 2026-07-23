@@ -122,8 +122,14 @@ function downloadXLSX(data: Array<Record<string, string | number>>, title: strin
 function downloadCSV(data: Array<Record<string, string | number>>, title: string) {
   if (!data.length) return;
   const headers = Object.keys(data[0]);
-  const escape = (v: string) =>
-    v.includes(',') || v.includes('"') || v.includes('\n') ? `"${v.replace(/"/g, '""')}"` : v;
+  const escape = (v: string) => {
+    // Guard against CSV formula injection: prefix dangerous lead chars with a single quote
+    // so Excel/LibreOffice treat the cell as text rather than executing it as a formula.
+    const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+    return safe.includes(',') || safe.includes('"') || safe.includes('\n')
+      ? `"${safe.replace(/"/g, '""')}"`
+      : safe;
+  };
   const rows = data.map((row) => headers.map((h) => escape(String(row[h] ?? ''))));
   const csv = [headers, ...rows].map((r) => r.join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
