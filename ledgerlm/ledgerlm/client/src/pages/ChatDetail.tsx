@@ -40,6 +40,8 @@ import {
   FolderOpen,
   Layers,
   Square,
+  Copy,
+  Check,
 } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -440,6 +442,7 @@ export default function ChatDetail() {
   const [streamingContent, setStreamingContent] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const streamControllerRef = useRef<AbortController | null>(null);
 
   // Get current auth user reactively - updates on login/logout
@@ -1468,13 +1471,28 @@ export default function ChatDetail() {
                                   )}
                                 </span>
                               </div>
-                              <div className="bg-primary/10 rounded-xl p-5 w-full shadow-sm">
+                              <div className="relative group bg-primary/10 rounded-xl p-5 w-full shadow-sm">
                                 <div
                                   className="text-sm whitespace-pre-wrap text-foreground leading-relaxed"
                                   data-testid={`text-message-content-${message.id}`}
                                 >
                                   {message.content}
                                 </div>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(message.content);
+                                    setCopiedMessageId(message.id);
+                                    setTimeout(() => setCopiedMessageId(null), 2000);
+                                  }}
+                                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-foreground"
+                                  title="Copy question"
+                                >
+                                  {copiedMessageId === message.id ? (
+                                    <Check className="h-3.5 w-3.5 text-green-500" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
                               </div>
                             </div>
                           </div>
