@@ -1459,7 +1459,7 @@ export default function ChatDetail() {
                           </div>
                         ) : (
                           <div className="flex gap-3 max-w-[75%]">
-                            <div className="flex flex-col gap-1.5 w-full">
+                            <div className="group flex flex-col gap-1.5 w-full">
                               <div className="flex items-center gap-2 justify-end">
                                 <span className="text-sm font-semibold text-foreground">
                                   {firstName} (You)
@@ -1471,7 +1471,7 @@ export default function ChatDetail() {
                                   )}
                                 </span>
                               </div>
-                              <div className="group/bubble bg-primary/10 rounded-xl p-5 w-full shadow-sm">
+                              <div className="bg-primary/10 rounded-xl p-5 w-full shadow-sm">
                                 <div
                                   className="text-sm whitespace-pre-wrap text-foreground leading-relaxed"
                                   data-testid={`text-message-content-${message.id}`}
