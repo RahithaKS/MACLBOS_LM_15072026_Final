@@ -5895,6 +5895,33 @@ Return a JSON object with:
                     })
                     logger.info(f"_build_kpi_intent_fast: org filter {_org_col} = {_org_val}")
 
+        # Hierarchy breakdown: "by BU", "by section", "by dept", "by group"
+        # Distinct from the filter above (which requires a specific code like "BU AR").
+        # This detects grouping intent: show metric broken down across BU/Section/Dept/Group.
+        _HIER_BREAKDOWN_COLS = [
+            ('proj_bu',      r'\bby\s+(?:proj(?:ect)?\s+)?bu\b|\bacross\s+(?:proj(?:ect)?\s+)?bus?\b'),
+            ('proj_section', r'\bby\s+(?:proj(?:ect)?\s+)?sections?\b|\bacross\s+(?:proj(?:ect)?\s+)?sections?\b'),
+            ('proj_dept',    r'\bby\s+(?:proj(?:ect)?\s+)?dep(?:t|artment)s?\b|\bacross\s+(?:proj(?:ect)?\s+)?dep'),
+            ('proj_group',   r'\bby\s+(?:proj(?:ect)?\s+)?groups?\b|\bacross\s+(?:proj(?:ect)?\s+)?groups?\b'),
+        ]
+        for _hier_col, _hier_pat in _HIER_BREAKDOWN_COLS:
+            if re.search(_hier_pat, query_lower):
+                intent['groupby_dimension'] = _hier_col
+                if 'group_by' not in intent:
+                    intent['group_by'] = ['region_entity']
+                if _hier_col not in intent['group_by']:
+                    # Insert after region_entity (so entity stays the primary label col)
+                    try:
+                        _re_idx = intent['group_by'].index('region_entity')
+                        intent['group_by'].insert(_re_idx + 1, _hier_col)
+                    except ValueError:
+                        intent['group_by'].append(_hier_col)
+                logger.info(
+                    f"_build_kpi_intent_fast: hierarchy breakdown — groupby_dimension={_hier_col}, "
+                    f"group_by={intent['group_by']}"
+                )
+                break
+
         # Merge entity filters from pre-detection
         if entity_filters:
             for ef in entity_filters:
@@ -12294,7 +12321,7 @@ Return a JSON object with:
                 GROUP BY {_ent_str}, year, month
             )
             SELECT
-                r.{_entity_col}, r.year, r.month,
+                {', '.join(f'r.{c}' for c in _entity_cols)}, r.year, r.month,
                 ROUND(r.revenue_millions::numeric, {rounding}) AS revenue_millions,
                 ROUND(COALESCE(o.offshore_avg_cap, 0)::numeric, {rounding}) AS avg_offshore_cap,
                 ROUND(COALESCE(ou.outsourcing_avg_cap, 0)::numeric, {rounding}) AS avg_outsourcing_cap,
@@ -12305,9 +12332,9 @@ Return a JSON object with:
                     {rounding}
                 ) AS budget_per_avg_capacity
             FROM revenue r
-            LEFT JOIN offshore_avg o ON r.{_entity_col} = o.{_entity_col}
+            LEFT JOIN offshore_avg o ON {' AND '.join(f'r.{c} = o.{c}' for c in _entity_cols)}
                 AND r.year::int = o.year::int AND r.month::int = o.month_count
-            LEFT JOIN outsourcing_avg ou ON r.{_entity_col} = ou.{_entity_col}
+            LEFT JOIN outsourcing_avg ou ON {' AND '.join(f'r.{c} = ou.{c}' for c in _entity_cols)}
                 AND r.year::int = ou.year::int AND r.month::int = ou.month_count
             ORDER BY r.year, r.month, budget_per_avg_capacity DESC
             """
@@ -12377,6 +12404,16 @@ Return a JSON object with:
         entity_col = next(
             (c for c in _group_cols if c not in _time_cols), 'region_entity'
         )
+        # Multi-col entity support: when hierarchy cols (proj_bu, proj_section, etc.) are
+        # added to group_by, all entity cols must be included in SELECT, PARTITION BY, and
+        # JOIN conditions so results are correctly scoped per (entity, proj_bu) combination.
+        # When only region_entity is present (normal case), these collapse to the same
+        # single-col expressions — zero regression.
+        _all_entity_cols = [c for c in _group_cols if c not in _time_cols]
+        _ent_str_all  = ', '.join(_all_entity_cols) if _all_entity_cols else 'region_entity'
+        _r_select_all = ', '.join(f'r.{c}' for c in _all_entity_cols)
+        _join_cond_o  = ' AND '.join(f'r.{c} = o.{c}'  for c in _all_entity_cols)
+        _join_cond_ou = ' AND '.join(f'r.{c} = ou.{c}' for c in _all_entity_cols)
         # Multi-month comparison: "compare Jan and Feb" → month is in group_by.
         # Requires window-function YTD capacity so each month gets its own
         # correct cumulative sum (Jan→SUM(Jan)/1, Feb→SUM(Jan+Feb)/2) rather
@@ -12387,8 +12424,11 @@ Return a JSON object with:
         is_multi_year = 'year' in _group_cols
         year_join = " AND r.year = o.year AND r.year = ou.year" if is_multi_year else ""
         year_partition = ", year" if is_multi_year else ""
+        # Per-table year JOIN conditions (used in multi-col entity JOINs below)
+        _year_join_o  = ' AND r.year = o.year'  if is_multi_year else ''
+        _year_join_ou = ' AND r.year = ou.year' if is_multi_year else ''
         logger.info(
-            f"Budget Entity: entity_col={entity_col}, group_by={group_by_clause}, is_multi_month={is_multi_month}"
+            f"Budget Entity: entity_cols={_all_entity_cols}, group_by={group_by_clause}, is_multi_month={is_multi_month}"
         )
 
         if is_multi_month:
@@ -12439,11 +12479,11 @@ Return a JSON object with:
             ),
             offshore_avg AS (
                 SELECT
-                    {entity_col},
+                    {_ent_str_all},
                     {'year,' if is_multi_year else ''}
                     month,
                     SUM(cap_sum) OVER (
-                        PARTITION BY {entity_col}{year_partition}
+                        PARTITION BY {_ent_str_all}{year_partition}
                         ORDER BY month::int
                         ROWS UNBOUNDED PRECEDING
                     ) / NULLIF(month::int, 0) as offshore_avg_cap,
@@ -12465,11 +12505,11 @@ Return a JSON object with:
             ),
             outsourcing_avg AS (
                 SELECT
-                    {entity_col},
+                    {_ent_str_all},
                     {'year,' if is_multi_year else ''}
                     month,
                     SUM(cap_sum) OVER (
-                        PARTITION BY {entity_col}{year_partition}
+                        PARTITION BY {_ent_str_all}{year_partition}
                         ORDER BY month::int
                         ROWS UNBOUNDED PRECEDING
                     ) / NULLIF(month::int, 0) as outsourcing_avg_cap,
@@ -12486,7 +12526,7 @@ Return a JSON object with:
                 GROUP BY {group_by_clause}
             )
             SELECT
-                r.{entity_col},
+                {_r_select_all},
                 {'r.year,' if is_multi_year else ''}
                 r.month,
                 ROUND(r.revenue_millions::numeric, {rounding}) as revenue_millions,
@@ -12500,9 +12540,9 @@ Return a JSON object with:
                 ) as budget_per_avg_capacity
             FROM revenue r
             LEFT JOIN offshore_avg o
-                ON r.{entity_col} = o.{entity_col} AND r.month::int = o.month_count{year_join.replace(' AND r.year = ou.year', '')}
+                ON {_join_cond_o} AND r.month::int = o.month_count{_year_join_o}
             LEFT JOIN outsourcing_avg ou
-                ON r.{entity_col} = ou.{entity_col} AND r.month::int = ou.month_count{' AND r.year = ou.year' if is_multi_year else ''}
+                ON {_join_cond_ou} AND r.month::int = ou.month_count{_year_join_ou}
             ORDER BY r.month::int ASC, budget_per_avg_capacity DESC
         """
             logger.info(
@@ -12554,7 +12594,7 @@ Return a JSON object with:
                 GROUP BY {group_by_clause}
             )
             SELECT 
-                r.{entity_col},
+                {_r_select_all},
                 ROUND(r.revenue_millions::numeric, {rounding}) as revenue_millions,
                 ROUND(COALESCE(o.offshore_avg_cap, 0)::numeric, {rounding}) as avg_offshore_cap,
                 ROUND(COALESCE(ou.outsourcing_avg_cap, 0)::numeric, {rounding}) as avg_outsourcing_cap,
@@ -12565,8 +12605,8 @@ Return a JSON object with:
                     {rounding}
                 ) as budget_per_avg_capacity
             FROM revenue r
-            LEFT JOIN offshore_avg o ON r.{entity_col} = o.{entity_col}{' AND r.year = o.year' if is_multi_year else ''}
-            LEFT JOIN outsourcing_avg ou ON r.{entity_col} = ou.{entity_col}{' AND r.year = ou.year' if is_multi_year else ''}
+            LEFT JOIN offshore_avg o ON {_join_cond_o}{_year_join_o}
+            LEFT JOIN outsourcing_avg ou ON {_join_cond_ou}{_year_join_ou}
             ORDER BY budget_per_avg_capacity DESC
         """
             logger.info(

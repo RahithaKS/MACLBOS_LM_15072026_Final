@@ -561,6 +561,12 @@ export class EvidenceBroker {
       "salary_level",
       "region_entity",
       "entity",
+      // Project hierarchy levels — after entity so region_entity stays the primary label
+      // when both are present, but picked up when only a hierarchy col is returned
+      "proj_bu",
+      "proj_section",
+      "proj_dept",
+      "proj_group",
       "sector",
       "category",
       "cost_category",
@@ -608,6 +614,13 @@ export class EvidenceBroker {
       "month",
       "year",
       "months_used",
+      // Project hierarchy levels — treated as dimension labels, never as metrics
+      "proj_bu",
+      "proj_section",
+      "proj_dept",
+      "proj_group",
+      "proj_top_bu",
+      "proj_top_section",
     ]);
 
     const valueColumns = columns.filter((col) => {
@@ -780,6 +793,13 @@ export class EvidenceBroker {
         "project_gb",
         "salary_level",
         "salary_band",
+        // Project hierarchy levels
+        "proj_bu",
+        "proj_section",
+        "proj_dept",
+        "proj_group",
+        "proj_top_bu",
+        "proj_top_section",
       ]);
       const dimCols = columns.filter((c) => PIVOT_DIM_ALLOWLIST.has(c));
 
@@ -1138,6 +1158,13 @@ export class EvidenceBroker {
         "project_gb",
         "salary_level",
         "salary_band",
+        // Project hierarchy levels
+        "proj_bu",
+        "proj_section",
+        "proj_dept",
+        "proj_group",
+        "proj_top_bu",
+        "proj_top_section",
       ]);
       const xDimCols = columns.filter((c) => X_PIVOT_DIM_ALLOWLIST.has(c));
 
@@ -1523,6 +1550,13 @@ export class EvidenceBroker {
     > = {
       region_entity: { label: "Entity", type: "dimension" },
       bill_to_party_legal_entity_full_name: { label: "Customer", type: "dimension" },
+      // Project hierarchy levels
+      proj_bu: { label: "Project BU", type: "dimension" },
+      proj_section: { label: "Project Section", type: "dimension" },
+      proj_dept: { label: "Project Dept", type: "dimension" },
+      proj_group: { label: "Project Group", type: "dimension" },
+      proj_top_bu: { label: "Project Top BU", type: "dimension" },
+      proj_top_section: { label: "Project Top Section", type: "dimension" },
       revenue_inr: { label: "Revenue", type: "monetary" },
       rank: { label: "Rank", type: "dimension" },
       sub_cost_category: { label: "Sub-Cost Category", type: "dimension" },
