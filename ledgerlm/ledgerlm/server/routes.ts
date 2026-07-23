@@ -1334,8 +1334,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let domainAiConfig: DomainAiConfig | undefined;
           try {
             const currentUser = await storage.getUser(userId);
-            if (currentUser?.username) {
-              const domainUser = await storage.getDomainUserByEmail(currentUser.username);
+            if (currentUser?.email) {
+              const domainUser = await storage.getDomainUserByEmail(currentUser.email);
               if (domainUser?.domainId) {
                 const domain = await storage.getDomain(domainUser.domainId);
                 if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && domain.aiApiKey) {
@@ -1525,8 +1525,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let vaultAiConfig: Record<string, string> | null = null;
       try {
         const currentUser = await storage.getUser(userId);
-        if (currentUser?.username) {
-          const domainUser = await storage.getDomainUserByEmail(currentUser.username);
+        if (currentUser?.email) {
+          const domainUser = await storage.getDomainUserByEmail(currentUser.email);
           if (domainUser?.domainId) {
             const domain = await storage.getDomain(domainUser.domainId);
             if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && domain.aiApiKey) {
@@ -2202,8 +2202,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let processAiConfig: Record<string, string> | null = null;
       try {
         const currentUser = await storage.getUser(userId);
-        if (currentUser?.username) {
-          const domainUser = await storage.getDomainUserByEmail(currentUser.username);
+        if (currentUser?.email) {
+          const domainUser = await storage.getDomainUserByEmail(currentUser.email);
           if (domainUser?.domainId) {
             const domain = await storage.getDomain(domainUser.domainId);
             if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && domain.aiApiKey) {
