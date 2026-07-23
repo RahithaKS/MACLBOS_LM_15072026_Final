@@ -42,7 +42,7 @@ export function TermsAndConditionsModal({ open: controlledOpen, onClose }: Terms
   return (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
-        className="max-w-[600px] w-full p-0 gap-0 overflow-hidden rounded-2xl"
+        className="max-w-[600px] w-full p-0 gap-0 overflow-hidden rounded-2xl [&>button.absolute]:hidden"
         onPointerDownOutside={(e) => { if (!isViewOnly) e.preventDefault(); }}
         onInteractOutside={(e) => { if (!isViewOnly) e.preventDefault(); }}
         onEscapeKeyDown={(e) => { if (!isViewOnly) e.preventDefault(); else handleAccept(); }}
@@ -228,20 +228,19 @@ export function TermsAndConditionsModal({ open: controlledOpen, onClose }: Terms
 
         {/* Footer: acknowledgement checkbox + button */}
         <div className="px-8 py-5 border-t bg-muted/30 space-y-4">
-          {/* Acknowledgement checkbox — only shown in accept mode */}
-          {!isViewOnly && (
-            <label className="flex items-start gap-3 cursor-pointer group">
-              <Checkbox
-                id="tnc-acknowledge"
-                checked={acknowledged}
-                onCheckedChange={(v) => setAcknowledged(!!v)}
-                className="mt-0.5 shrink-0"
-              />
-              <span className="text-xs text-muted-foreground leading-relaxed group-hover:text-foreground transition-colors">
-                By accessing or using the LedgerLM Application, I acknowledge that I have read, understood, and agreed to be bound by these Terms and Conditions.
-              </span>
-            </label>
-          )}
+          {/* Acknowledgement checkbox — interactive in accept mode, read-only in view-only */}
+          <label className={`flex items-start gap-3 ${isViewOnly ? 'cursor-default opacity-70' : 'cursor-pointer group'}`}>
+            <Checkbox
+              id="tnc-acknowledge"
+              checked={isViewOnly ? true : acknowledged}
+              onCheckedChange={isViewOnly ? undefined : (v) => setAcknowledged(!!v)}
+              disabled={isViewOnly}
+              className="mt-0.5 shrink-0"
+            />
+            <span className="text-xs text-muted-foreground leading-relaxed group-hover:text-foreground transition-colors">
+              By accessing or using the LedgerLM Application, I acknowledge that I have read, understood, and agreed to be bound by these Terms and Conditions.
+            </span>
+          </label>
 
           <Button
             onClick={handleAccept}
