@@ -1481,6 +1481,8 @@ export class EvidenceBroker {
     const c = col.toLowerCase();
     return (
       c.includes("capacity") ||
+      c.endsWith("_cap") ||        // avg_offshore_cap, avg_outsourcing_cap — headcount, not monetary
+      c === "months_used" ||       // months elapsed integer in budget/avg-cap result
       c === "headcount" ||
       c === "total_hours" ||
       c === "billable_hours" ||
