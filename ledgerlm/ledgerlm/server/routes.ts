@@ -2888,12 +2888,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ error: "No files uploaded" });
         }
 
+        // Gate 3 — magic-byte validation for every file; reject and delete any that fail
+        const validFiles: Express.Multer.File[] = [];
+        const rejectedNames: string[] = [];
+        for (const file of files) {
+          const magicOk = await validateFileMagicBytes(file.path, file.mimetype);
+          if (!magicOk) {
+            await fs.unlink(file.path).catch(() => {});
+            rejectedNames.push(file.originalname);
+          } else {
+            validFiles.push(file);
+          }
+        }
+        if (rejectedNames.length > 0 && validFiles.length === 0) {
+          return res.status(400).json({
+            error: "All uploaded files were rejected — content does not match declared type.",
+            rejected: rejectedNames,
+          });
+        }
+
         const documents = await Promise.all(
-          files.map((file) =>
+          validFiles.map((file) =>
             storage.createEnterpriseDocument({
               companyId: req.params.companyId,
               uploadedBy: userId,
-              name: file.originalname,
+              name: sanitiseFilename(file.originalname),
               filePath: file.filename,
               fileSize: file.size.toString(),
               fileType: file.mimetype,
@@ -4390,13 +4409,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
 
+        // Gate 3 — magic-byte validation for every file; reject and delete any that fail
+        const validFiles: Express.Multer.File[] = [];
+        const rejectedNames: string[] = [];
+        for (const file of files) {
+          const magicOk = await validateFileMagicBytes(file.path, file.mimetype);
+          if (!magicOk) {
+            await fs.unlink(file.path).catch(() => {});
+            rejectedNames.push(file.originalname);
+          } else {
+            validFiles.push(file);
+          }
+        }
+        if (rejectedNames.length > 0 && validFiles.length === 0) {
+          return res.status(400).json({
+            error: "All uploaded files were rejected — content does not match declared type.",
+            rejected: rejectedNames,
+          });
+        }
+
         const documents = await Promise.all(
-          files.map((file) =>
+          validFiles.map((file) =>
             storage.createEnterpriseDocument({
               companyId: company!.id,
               domainId: domainId,
               uploadedBy: user.id,
-              name: file.originalname,
+              name: sanitiseFilename(file.originalname),
               filePath: file.filename,
               fileSize: file.size.toString(),
               fileType: file.mimetype,
