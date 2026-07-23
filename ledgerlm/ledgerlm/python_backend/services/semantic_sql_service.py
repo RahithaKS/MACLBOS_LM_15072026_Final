@@ -6573,6 +6573,15 @@ Return a JSON object with:
             _group_by.append('region_entity')
         if any(p in query_lower for p in ['by sector', 'sector wise', 'sector-wise']):
             _group_by.append('sector')
+        # "by Project GB" grouping — only when no specific value follows (those become filters)
+        if any(p in query_lower for p in ['by project gb', 'by gb', 'project gb wise', 'gb wise']) \
+                and not _PROJECT_GB_RE.search(query):
+            _group_by.append('project_gb')
+            logger.info("_build_gb_pl_cost_breakdown_intent: GB grouping — GROUP BY project_gb")
+        # "by Planning GB" grouping — only when no specific value follows
+        if 'by planning gb' in query_lower and not _PLANNING_GB_RE.search(query):
+            _group_by.append('planning_gb')
+            logger.info("_build_gb_pl_cost_breakdown_intent: GB grouping — GROUP BY planning_gb")
         if any(p in query_lower for p in ['by month', 'monthly', 'month wise', 'month-wise', 'monthwise']):
             _group_by.append('month')
         if any(p in query_lower for p in ['by year', 'yearly', 'year wise', 'year-wise', 'annual']):
