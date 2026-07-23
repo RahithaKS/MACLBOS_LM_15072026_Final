@@ -1471,26 +1471,28 @@ export default function ChatDetail() {
                                   )}
                                 </span>
                               </div>
-                              <div className="relative group bg-primary/10 rounded-xl p-5 w-full shadow-sm">
+                              <div className="group/bubble bg-primary/10 rounded-xl p-5 w-full shadow-sm">
                                 <div
                                   className="text-sm whitespace-pre-wrap text-foreground leading-relaxed"
                                   data-testid={`text-message-content-${message.id}`}
                                 >
                                   {message.content}
                                 </div>
+                              </div>
+                              <div className="flex justify-end mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button
                                   onClick={() => {
                                     navigator.clipboard.writeText(message.content);
                                     setCopiedMessageId(message.id);
                                     setTimeout(() => setCopiedMessageId(null), 2000);
                                   }}
-                                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-foreground"
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
                                   title="Copy question"
                                 >
                                   {copiedMessageId === message.id ? (
-                                    <Check className="h-3.5 w-3.5 text-green-500" />
+                                    <><Check className="h-3 w-3 text-green-500" /><span className="text-green-500">Copied</span></>
                                   ) : (
-                                    <Copy className="h-3.5 w-3.5" />
+                                    <><Copy className="h-3 w-3" /><span>Copy</span></>
                                   )}
                                 </button>
                               </div>
