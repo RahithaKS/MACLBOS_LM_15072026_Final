@@ -1334,8 +1334,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let domainAiConfig: DomainAiConfig | undefined;
           try {
             const currentUser = await storage.getUser(userId);
-            if (currentUser?.email) {
-              const domainUser = await storage.getDomainUserByEmail(currentUser.email);
+            const emailToLookup = currentUser?.email || currentUser?.username;
+            if (emailToLookup) {
+              const domainUser = await storage.getDomainUserByEmail(emailToLookup);
               if (domainUser?.domainId) {
                 const domain = await storage.getDomain(domainUser.domainId);
                 if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && domain.aiApiKey) {
@@ -1525,8 +1526,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let vaultAiConfig: Record<string, string> | null = null;
       try {
         const currentUser = await storage.getUser(userId);
-        if (currentUser?.email) {
-          const domainUser = await storage.getDomainUserByEmail(currentUser.email);
+        const emailToLookupVault = currentUser?.email || currentUser?.username;
+        if (emailToLookupVault) {
+          const domainUser = await storage.getDomainUserByEmail(emailToLookupVault);
           if (domainUser?.domainId) {
             const domain = await storage.getDomain(domainUser.domainId);
             if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && domain.aiApiKey) {
@@ -2202,8 +2204,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let processAiConfig: Record<string, string> | null = null;
       try {
         const currentUser = await storage.getUser(userId);
-        if (currentUser?.email) {
-          const domainUser = await storage.getDomainUserByEmail(currentUser.email);
+        const emailToLookupProc = currentUser?.email || currentUser?.username;
+        if (emailToLookupProc) {
+          const domainUser = await storage.getDomainUserByEmail(emailToLookupProc);
           if (domainUser?.domainId) {
             const domain = await storage.getDomain(domainUser.domainId);
             if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && domain.aiApiKey) {
