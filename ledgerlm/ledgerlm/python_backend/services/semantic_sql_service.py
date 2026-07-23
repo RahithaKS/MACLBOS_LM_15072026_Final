@@ -5922,6 +5922,25 @@ Return a JSON object with:
                 )
                 break
 
+        # GB column grouping: "by Project GB" / "by Planning GB" (no specific value)
+        # Guard: only fires when the value-specific filter regex does NOT match —
+        # if a value like "MA" is present, that query is a filter, not a grouping.
+        if re.search(r'\bby\s+project\s+gb\b', query, re.IGNORECASE) \
+                and not _PROJECT_GB_RE.search(query):
+            intent.setdefault('group_by', ['region_entity'])
+            if 'project_gb' not in intent['group_by']:
+                intent['group_by'].append('project_gb')
+            intent['groupby_dimension'] = 'project_gb'
+            logger.info("_build_kpi_intent_fast: GB grouping — GROUP BY project_gb")
+
+        if re.search(r'\bby\s+planning\s+gb\b', query, re.IGNORECASE) \
+                and not _PLANNING_GB_RE.search(query):
+            intent.setdefault('group_by', ['region_entity'])
+            if 'planning_gb' not in intent['group_by']:
+                intent['group_by'].append('planning_gb')
+            intent['groupby_dimension'] = 'planning_gb'
+            logger.info("_build_kpi_intent_fast: GB grouping — GROUP BY planning_gb")
+
         # Merge entity filters from pre-detection
         if entity_filters:
             for ef in entity_filters:

@@ -567,6 +567,8 @@ export class EvidenceBroker {
       "proj_section",
       "proj_dept",
       "proj_group",
+      "project_gb",
+      "planning_gb",
       "sector",
       "category",
       "cost_category",
@@ -621,6 +623,7 @@ export class EvidenceBroker {
       "proj_group",
       "proj_top_bu",
       "proj_top_section",
+      "planning_gb",
     ]);
 
     const valueColumns = columns.filter((col) => {
@@ -791,6 +794,7 @@ export class EvidenceBroker {
         "entity_sub_category",
         "cost_sub_category",
         "project_gb",
+        "planning_gb",
         "salary_level",
         "salary_band",
         // Project hierarchy levels
@@ -1156,6 +1160,7 @@ export class EvidenceBroker {
         "entity_sub_category",
         "cost_sub_category",
         "project_gb",
+        "planning_gb",
         "salary_level",
         "salary_band",
         // Project hierarchy levels
@@ -1567,6 +1572,7 @@ export class EvidenceBroker {
       sector: { label: "Sector", type: "dimension" },
       new_service_area: { label: "Service Area", type: "dimension" },
       project_gb: { label: "Project GB", type: "dimension" },
+      planning_gb: { label: "Planning GB", type: "dimension" },
       salary_level: { label: "Salary Level", type: "dimension" },
       resource_type: { label: "Resource Type", type: "dimension" },
       month: { label: "Period", type: "dimension" },
