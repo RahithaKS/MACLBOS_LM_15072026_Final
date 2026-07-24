@@ -336,8 +336,14 @@ export class EvidenceBroker {
 
     for (const year of years) {
       const months = byYear.get(year)!;
+      const minMonth = Math.min(...Array.from(months));
       const maxMonth = Math.max(...Array.from(months));
-      for (let m = 1; m <= maxMonth; m++) {
+      // Check only within the queried range (min → max found).
+      // This avoids false "missing" flags when a Q2 query legitimately
+      // starts at April — Jan/Feb/Mar were never expected in that context.
+      // Real gaps (e.g. Feb absent when Jan and Mar are both present for a
+      // YTD average) are still caught because Feb falls inside the min→max range.
+      for (let m = minMonth; m <= maxMonth; m++) {
         if (months.has(m)) {
           found.push({ month: m, year });
         } else {
