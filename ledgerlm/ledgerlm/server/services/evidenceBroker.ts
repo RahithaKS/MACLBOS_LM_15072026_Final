@@ -559,6 +559,7 @@ export class EvidenceBroker {
       "cost_sub_category",
       "salary_band",
       "salary_level",
+      "bill_to_party_legal_entity_full_name", // customer name beats entity when present
       "region_entity",
       "entity",
       // Project hierarchy levels — after entity so region_entity stays the primary label
@@ -1050,6 +1051,13 @@ export class EvidenceBroker {
               !Object.values(dims).some((v) => v.toUpperCase() === "TOTAL"),
           );
           if (entityRows.length > 0) {
+            // Derive a friendly X-axis label from the actual dimension column(s) used.
+            const _dimFriendly = (col: string) =>
+              col === "bill_to_party_legal_entity_full_name" ? "Customer"
+              : col.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                  .replace("Sub Category", "Breakdown").replace("Region Entity", "Entity");
+            const _xLblPath2 = dimCols.length > 0 ? _dimFriendly(dimCols[0]) : "Entity";
+
             if (!isTrend) {
               // Grouped bar: label = entity, one bar per period
               const chartData = entityRows.map(({ dims, byPeriod }) => {
@@ -1070,7 +1078,7 @@ export class EvidenceBroker {
                 config: {
                   xKey: "label",
                   yKey: "value",
-                  xLabel: "Entity",
+                  xLabel: _xLblPath2,
                   yLabel: yLbl,
                   periods: monthHeaders,
                   periodMode: "grouped-bar",
@@ -1078,7 +1086,7 @@ export class EvidenceBroker {
               };
               pivotResult +=
                 "\n\n```chart\n" + JSON.stringify(cSpec, null, 2) + "\n```\n";
-            } else if (this.wantsLineChart(userQuery)) {
+            } else if (this.wantsLineChart(userQuery) || /\b(trend|mom|month.?over.?month|monthly|over\s+time|growth|spike|highlights?)\b/i.test(userQuery)) {
               // Line chart: X-axis = period, one keyed series per entity
               // Only generated when user explicitly requests a line chart.
               const allEnts = entityRows.map(
@@ -1152,6 +1160,7 @@ export class EvidenceBroker {
 
       // Same positive allowlist as the month-column pivot path
       const X_PIVOT_DIM_ALLOWLIST = new Set([
+        "bill_to_party_legal_entity_full_name", // customer revenue comparison charts
         "region_entity",
         "entity",
         "sector",
@@ -1340,6 +1349,13 @@ export class EvidenceBroker {
               !Object.values(dims).some((v) => v.toUpperCase() === "TOTAL"),
           );
           if (xEntityRows.length > 0) {
+            // Derive a friendly X-axis label from the actual dimension column(s) used.
+            const _xDimFriendly = (col: string) =>
+              col === "bill_to_party_legal_entity_full_name" ? "Customer"
+              : col.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                  .replace("Sub Category", "Breakdown").replace("Region Entity", "Entity");
+            const _xLblPath3 = xDimCols.length > 0 ? _xDimFriendly(xDimCols[0]) : "Entity";
+
             if (!isTrend) {
               // Grouped bar: label = entity, keyed by period label
               const chartData = xEntityRows.map(([key, dims]) => {
@@ -1359,7 +1375,7 @@ export class EvidenceBroker {
                 config: {
                   xKey: "label",
                   yKey: "value",
-                  xLabel: "Entity",
+                  xLabel: _xLblPath3,
                   yLabel: yLbl,
                   periods: periodLabels,
                   periodMode: "grouped-bar",
@@ -1367,7 +1383,7 @@ export class EvidenceBroker {
               };
               xPivotResult +=
                 "\n\n```chart\n" + JSON.stringify(cSpec, null, 2) + "\n```\n";
-            } else if (this.wantsLineChart(userQuery)) {
+            } else if (this.wantsLineChart(userQuery) || /\b(trend|mom|month.?over.?month|monthly|over\s+time|growth|spike|highlights?)\b/i.test(userQuery)) {
               // Line chart: X-axis = period, one keyed series per entity
               // Only generated when user explicitly requests a line chart.
               const allEnts = xEntityRows.map(
@@ -1780,6 +1796,13 @@ export class EvidenceBroker {
       "bill_to_party_legal_entity_full_name", // customer name beats entity when present
       "region_entity",
       "entity",
+      // Project hierarchy — picked up for investment/CapEx/PMO queries
+      "proj_bu",
+      "proj_section",
+      "proj_dept",
+      "proj_group",
+      "project_gb",
+      "planning_gb",
       "sector",
       "category",
       "cost_category",
