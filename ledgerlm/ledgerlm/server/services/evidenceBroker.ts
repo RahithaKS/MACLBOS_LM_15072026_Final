@@ -311,9 +311,15 @@ export class EvidenceBroker {
 
     for (const sql of sqlResults) {
       if (!sql.results?.length) continue;
+
+      // Year may live in the WHERE clause but not in SELECT columns (e.g. "year = 2025 AND month IN (1,2,3)").
+      // Attempt to extract it from the human-readable timeFilterApplied label ("January 2025" → 2025).
+      const yearMatch = sql.timeFilterApplied?.match(/\b(20\d{2})\b/);
+      const fallbackYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
+
       for (const row of sql.results) {
         const m = row.month !== undefined && row.month !== null ? Number(row.month) : null;
-        const y = row.year  !== undefined && row.year  !== null ? Number(row.year)  : null;
+        const y = row.year  !== undefined && row.year  !== null ? Number(row.year)  : fallbackYear;
         if (m && y && m >= 1 && m <= 12) {
           if (!byYear.has(y)) byYear.set(y, new Set());
           byYear.get(y)!.add(m);
@@ -2131,6 +2137,17 @@ export class EvidenceBroker {
     }
 
     // ── Single-series path (existing behaviour, unchanged) ──────────────────
+    const _ssMnNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    // When the label column is raw month numbers, format them as "Jan", "Feb", etc.
+    // Year context comes from the chart title (timeFilterApplied) so just the abbreviation is enough.
+    const _formatSeriesLabel = (row: Record<string, unknown>): string => {
+      if (labelCol === 'month') {
+        const m = Number(row['month']);
+        if (m >= 1 && m <= 12) return _ssMnNames[m - 1];
+      }
+      return String(row[labelCol!] ?? '-');
+    };
+
     const chartData = rows
       .filter((row) => {
         const v = row[valueCol!];
@@ -2145,7 +2162,7 @@ export class EvidenceBroker {
             ? (row[valueCol!] as number)
             : parseFloat(String(row[valueCol!])) || 0;
         return {
-          label: String(row[labelCol!] ?? "-"),
+          label: _formatSeriesLabel(row),
           value:
             scaleFactor > 1 ? parseFloat((raw / scaleFactor).toFixed(2)) : raw,
         };
