@@ -2981,11 +2981,21 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
         kpi_protected_terms = {
             'internal': [
                 'internal capacity mix', 'internal mix', 'internal capacity',
-                'internal utilization', 'internal headcount'
+                'internal utilization', 'internal headcount',
+                # SDS split phrases — "internal" here means Bosch-internal, NOT resource type
+                'split internal', 'revenue split internal', 'internal split',
+                'breakdown internal', 'internal breakdown',
+                'split by internal', 'breakdown by internal',
+                'bosch internal', 'internal bosch',
             ],
             'external': [
                 'external capacity mix', 'external mix', 'external capacity',
-                'outsourcing capacity', 'outsourcing mix', 'outsourcing ratio'
+                'outsourcing capacity', 'outsourcing mix', 'outsourcing ratio',
+                # SDS split phrases — "external" here means SDS-external, NOT resource type
+                'split external', 'revenue split external', 'external split',
+                'breakdown external', 'external breakdown',
+                'split by external', 'breakdown by external',
+                'sds external', 'external sds',
             ],
             'offshore': [
                 'offshore capacity', 'offshore avg', 'offshore end',
@@ -5890,7 +5900,7 @@ Return a JSON object with:
             (['itrams', 'mobility solution external', 'mobility external',
               'connected mobility', 'mobility solution', 'split by itrams',
               'breakdown by itrams', 'split itrams', 'revenue split itrams',
-              'itrams split'],                                                     'Connected Mobility Solutions'),
+              'itrams split'],                                                     'Mobility Solutions External'),
         ]
         for _skws, _sval in _sds_value_map:
             if any(kw in query_lower for kw in _skws):
@@ -8765,7 +8775,12 @@ Return a JSON object with:
                     or 2)
 
             # ── P&L BARE-TERM FALLBACKS ──────────────────────────────────────
-            elif 'p&l revenue' in calc_name_lower or 'pl revenue' in calc_name_lower:
+            # When split_itrams_sds is in group_by, bypass all P&L revenue builders
+            # (which generate scalar SQL with no GROUP BY) and fall through to
+            # _build_revenue_sql which supports arbitrary group_by dimensions.
+            elif ('p&l revenue' in calc_name_lower or 'pl revenue' in calc_name_lower) \
+                    and 'split_itrams_sds' not in intent.get('group_by', []) \
+                    and not intent.get('revenue_type_split'):
                 logger.info("Bare 'P&L revenue' → defaulting to GB P&L revenue")
                 return self._build_gb_pl_revenue_sql(
                     where_parts, params, select_cols, group_by_clause, rounding
@@ -8810,22 +8825,26 @@ Return a JSON object with:
                     or 0, cube_id, amt_col)
 
             # GB P&L Revenue (YTD, with order_reason + GL account exclusions)
-            # Must be checked BEFORE the generic 'revenue' catch-all below
+            # Must be checked BEFORE the generic 'revenue' catch-all below.
+            # Bypass when split_itrams_sds is in group_by — that builder ignores group_by.
             elif any(kw in calc_name_lower for kw in [
                     'gb p&l revenue', 'gb pl revenue', 'gb p&l rev',
                     'gb wise p&l revenue', 'gb p and l revenue'
-            ]):
+            ]) and 'split_itrams_sds' not in intent.get('group_by', []) \
+                and not intent.get('revenue_type_split'):
                 return self._build_gb_pl_revenue_sql(
                     where_parts, params, select_cols, group_by_clause,
                     rounding or 2, amt_col)
 
             # Entity P&L Revenue (YTD, with order_reason + GL account exclusions)
-            # Must be checked BEFORE the generic 'revenue' catch-all below
+            # Must be checked BEFORE the generic 'revenue' catch-all below.
+            # Bypass when split_itrams_sds is in group_by — that builder ignores group_by.
             elif any(kw in calc_name_lower for kw in [
                     'entity p&l revenue', 'entity pl revenue',
                     'entity p&l rev', 'o&l revenue', 'entity p and l revenue',
                     'entity revenue p&l', 'entity revenue pl'
-            ]):
+            ]) and 'split_itrams_sds' not in intent.get('group_by', []) \
+                and not intent.get('revenue_type_split'):
                 return self._build_entity_pl_revenue_sql(
                     where_parts, params, select_cols, group_by_clause,
                     rounding or 2, amt_col)
@@ -14456,7 +14475,7 @@ Return a JSON object with:
                           'sds only', 'only sds'],                            'SDS'),
                         (['itrams', 'mobility solution external', 'mobility external',
                           'mobility solution', 'mobility_solution',
-                          'connected mobility'],           'Connected Mobility Solutions'),
+                          'connected mobility'],           'Mobility Solutions External'),
                     ]
                     for _skws, _sval in _split_map:
                         if any(kw in _q_lower_cr for kw in _skws):
@@ -14657,7 +14676,7 @@ Return a JSON object with:
                           'split by itrams', 'breakdown by itrams',
                           'split itrams', 'revenue split itrams',
                           'itrams split'],
-                         'Connected Mobility Solutions'),
+                         'Mobility Solutions External'),
                     ]
                     for _skws2, _sval2 in _sds_val_map2:
                         if any(kw in _q_lower for kw in _skws2):
