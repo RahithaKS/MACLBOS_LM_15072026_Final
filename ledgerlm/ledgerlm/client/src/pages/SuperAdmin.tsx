@@ -11,17 +11,35 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { getAuthUser } from '@/lib/auth';
-import { Trash2, Plus, Users, Globe, Key, Edit, Shield, Lock, Cpu, ClipboardList, HardDrive, Timer } from 'lucide-react';
+import { Trash2, Plus, Users, Globe, Key, Edit, Shield, Lock, Cpu, ClipboardList, HardDrive, Timer, MoreHorizontal, AlertTriangle, CheckCircle2, Mail, Bot } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { useLocation } from 'wouter';
 import AuditLogTab from '@/components/admin/AuditLogTab';
 import BackupTab from '@/components/admin/BackupTab';
 import RetentionTab from '@/components/admin/RetentionTab';
 import SsoAuditTab from '@/components/admin/SsoAuditTab';
+import { Badge } from '@/components/ui/badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 interface SsoGroupMapping {
   groupId: string;
   role: string;
+}
+
+// Lightweight types for cross-tab health queries (full types live in child tabs)
+interface _SystemStatusSummary {
+  python: { status: string };
+  lastBackup: { status: string; filename: string; sizeBytes: number; createdAt: string } | null;
+}
+interface _AuditStatsSummary {
+  breakdown: { action: string; status: string; cnt: string }[];
+  total: number;
+}
+interface _RetentionPolicySummary {
+  id: string; enabled: boolean; lastRun: string | null;
+}
+interface _BackupSummary {
+  id: string; createdAt: string;
 }
 
 interface Domain {
@@ -122,6 +140,24 @@ export default function SuperAdmin() {
   const { data: domainUsers = [], isLoading: usersLoading } = useQuery<DomainUser[]>({
     queryKey: ['/api/super-admin/domains', selectedDomain?.id, 'users'],
     enabled: !!selectedDomain,
+  });
+
+  // Cross-tab health queries — share cache with child components
+  const { data: _systemStatus } = useQuery<_SystemStatusSummary>({
+    queryKey: ['/api/super-admin/system-status'],
+    refetchInterval: 30_000,
+  });
+  const { data: _allBackups = [] } = useQuery<_BackupSummary[]>({
+    queryKey: ['/api/super-admin/backups'],
+    refetchInterval: 30_000,
+  });
+  const { data: _auditStats } = useQuery<_AuditStatsSummary>({
+    queryKey: ['/api/super-admin/audit-logs/stats'],
+    refetchInterval: 60_000,
+  });
+  const { data: _retentionPolicies = [] } = useQuery<_RetentionPolicySummary[]>({
+    queryKey: ['/api/super-admin/retention-policies'],
+    refetchInterval: 60_000,
   });
 
   const createDomainMutation = useMutation({
@@ -287,6 +323,22 @@ export default function SuperAdmin() {
     setIsUsersDialogOpen(true);
   };
 
+  // ── Health / badge computations ─────────────────────────────────────────
+  const OK_STATUSES = new Set(['healthy', 'connected', 'ok', 'success']);
+  const aiUnhealthy = !!_systemStatus && !OK_STATUSES.has(_systemStatus.python.status ?? '');
+  const lastBackupDate = _systemStatus?.lastBackup?.createdAt ? new Date(_systemStatus.lastBackup.createdAt) : null;
+  const noRecentBackup = !lastBackupDate || (Date.now() - lastBackupDate.getTime()) > 7 * 24 * 3600 * 1000;
+  const healthAlerts: string[] = [];
+  if (aiUnhealthy) healthAlerts.push(`AI Processing Engine is unreachable (status: ${_systemStatus?.python.status})`);
+  if (_allBackups.length === 0) healthAlerts.push('No database backup has been taken yet');
+  else if (noRecentBackup) healthAlerts.push('Last database backup is more than 7 days old');
+
+  const auditFailCount = _auditStats?.breakdown
+    .filter(b => b.status === 'failed')
+    .reduce((a, b) => a + Number(b.cnt), 0) ?? 0;
+  const backupTabAlert = _allBackups.length === 0 || noRecentBackup;
+  const retentionTabAlert = _retentionPolicies.some(p => p.enabled && p.lastRun === null);
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-primary/10">
       <div className="flex-1 overflow-auto p-6">
@@ -301,14 +353,48 @@ export default function SuperAdmin() {
             </div>
           </div>
 
+          {healthAlerts.length > 0 && (
+            <div className="mx-6 lg:mx-8 mt-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 flex items-start gap-3">
+              <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-red-800">System attention required</p>
+                <ul className="mt-1 space-y-0.5">
+                  {healthAlerts.map((alert, i) => (
+                    <li key={i} className="text-xs text-red-700">· {alert}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
           <Tabs defaultValue="domains" className="flex-1 flex flex-col overflow-hidden">
             <div className="px-6 lg:px-8 pt-4 pb-0 border-b flex-shrink-0">
               <TabsList className="h-9 mb-0">
-                <TabsTrigger value="domains" className="text-xs gap-1.5"><Globe className="h-3.5 w-3.5" />Domains</TabsTrigger>
-                <TabsTrigger value="audit" className="text-xs gap-1.5"><ClipboardList className="h-3.5 w-3.5" />Audit Log</TabsTrigger>
-                <TabsTrigger value="sso-audit" className="text-xs gap-1.5"><Shield className="h-3.5 w-3.5" />SSO Audit</TabsTrigger>
-                <TabsTrigger value="backup" className="text-xs gap-1.5"><HardDrive className="h-3.5 w-3.5" />Backup & Recovery</TabsTrigger>
-                <TabsTrigger value="retention" className="text-xs gap-1.5"><Timer className="h-3.5 w-3.5" />Retention</TabsTrigger>
+                <TabsTrigger value="domains" className="text-xs gap-1.5">
+                  <Globe className="h-3.5 w-3.5" />Domains
+                </TabsTrigger>
+                <TabsTrigger value="audit" className="text-xs gap-1.5">
+                  <ClipboardList className="h-3.5 w-3.5" />Audit Log
+                  {auditFailCount > 0 && (
+                    <span className="ml-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none px-1.5 py-0.5 min-w-[18px] text-center">
+                      {auditFailCount > 99 ? '99+' : auditFailCount}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="sso-audit" className="text-xs gap-1.5">
+                  <Shield className="h-3.5 w-3.5" />SSO Audit
+                </TabsTrigger>
+                <TabsTrigger value="backup" className="text-xs gap-1.5">
+                  <HardDrive className="h-3.5 w-3.5" />Backup & Recovery
+                  {backupTabAlert && (
+                    <span className="ml-1 inline-block w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="retention" className="text-xs gap-1.5">
+                  <Timer className="h-3.5 w-3.5" />Retention
+                  {retentionTabAlert && (
+                    <span className="ml-1 inline-block w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                  )}
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -726,10 +812,11 @@ export default function SuperAdmin() {
                       <TableRow>
                         <TableHead>Domain</TableHead>
                         <TableHead>Admin Email</TableHead>
-                        <TableHead>Auth Method</TableHead>
+                        <TableHead>Auth</TableHead>
+                        <TableHead>Config</TableHead>
                         <TableHead>Users</TableHead>
                         <TableHead>Created</TableHead>
-                        <TableHead>Actions</TableHead>
+                        <TableHead className="w-10"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -741,59 +828,84 @@ export default function SuperAdmin() {
                               {domain.name}
                             </div>
                           </TableCell>
-                          <TableCell>{domain.adminEmail}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{domain.adminEmail}</TableCell>
                           <TableCell>
                             {domain.authMethod === 'microsoft_sso' ? (
-                              <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
-                                <Lock className="h-3 w-3" />
-                                Microsoft SSO
-                              </span>
+                              <Badge variant="outline" className="gap-1 text-xs border-blue-300 text-blue-700 bg-blue-50">
+                                <Lock className="h-3 w-3" /> Microsoft SSO
+                              </Badge>
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground">
-                                <Key className="h-3 w-3" />
-                                {domain.defaultOtp ? `OTP: ${domain.defaultOtp}` : 'Email OTP'}
-                              </span>
+                              <Badge variant="outline" className="gap-1 text-xs border-gray-300 text-gray-600 bg-gray-50">
+                                <Mail className="h-3 w-3" /> Email OTP
+                              </Badge>
                             )}
                           </TableCell>
                           <TableCell>
-                            <Button
-                              size="sm"
-                              variant="ghost"
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {domain.authMethod === 'microsoft_sso' && domain.ssoTenantId ? (
+                                <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200" title="SSO configured">
+                                  <Lock className="h-2.5 w-2.5" /> SSO
+                                </span>
+                              ) : null}
+                              {domain.emailProvider && domain.emailProvider !== 'default' && domain.emailSmtpUser ? (
+                                <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-green-50 text-green-700 border border-green-200" title="Custom email configured">
+                                  <Mail className="h-2.5 w-2.5" /> Email
+                                </span>
+                              ) : null}
+                              {domain.aiProvider === 'azure_openai' && domain.aiEndpoint ? (
+                                <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-violet-50 text-violet-700 border border-violet-200" title="Azure OpenAI configured">
+                                  <Bot className="h-2.5 w-2.5" /> AI
+                                </span>
+                              ) : null}
+                              {!(domain.authMethod === 'microsoft_sso' && domain.ssoTenantId) &&
+                               !(domain.emailProvider && domain.emailProvider !== 'default' && domain.emailSmtpUser) &&
+                               !(domain.aiProvider === 'azure_openai' && domain.aiEndpoint) && (
+                                <span className="text-xs text-muted-foreground">Default</span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <button
+                              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                               onClick={() => openUsersDialog(domain)}
-                              className="gap-1"
                               data-testid={`button-view-users-${domain.id}`}
                             >
                               <Users className="h-3 w-3" />
                               {domain.userCount}
-                            </Button>
+                            </button>
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="text-xs text-muted-foreground">
                             {new Date(domain.createdAt).toLocaleDateString()}
                           </TableCell>
                           <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openEditDialog(domain)}
-                                data-testid={`button-edit-domain-${domain.id}`}
-                              >
-                                <Edit className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => {
-                                  if (confirm(`Delete domain "${domain.name}"? This will also delete all users in this domain.`)) {
-                                    deleteDomainMutation.mutate(domain.id);
-                                  }
-                                }}
-                                disabled={deleteDomainMutation.isPending}
-                                data-testid={`button-delete-domain-${domain.id}`}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button size="icon" variant="ghost" className="h-7 w-7" data-testid={`button-actions-${domain.id}`}>
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuItem onClick={() => openEditDialog(domain)} data-testid={`button-edit-domain-${domain.id}`}>
+                                  <Edit className="h-3.5 w-3.5 mr-2" /> Edit settings
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openUsersDialog(domain)}>
+                                  <Users className="h-3.5 w-3.5 mr-2" /> View users
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  disabled={deleteDomainMutation.isPending}
+                                  data-testid={`button-delete-domain-${domain.id}`}
+                                  onClick={() => {
+                                    if (confirm(`Delete domain "${domain.name}"? This will also delete all users in this domain.`)) {
+                                      deleteDomainMutation.mutate(domain.id);
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete domain
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       ))}

@@ -7,9 +7,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { PlayCircle, RefreshCw, Clock, Trash2, CheckCircle2 } from 'lucide-react';
+import { PlayCircle, RefreshCw, Clock, Trash2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface RetentionPolicy {
   id: string;
@@ -34,6 +35,7 @@ export default function RetentionTab() {
   const { toast } = useToast();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDays, setEditDays] = useState<number>(90);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const { data: policies = [], isLoading, refetch } = useQuery<RetentionPolicy[]>({
     queryKey: ['/api/super-admin/retention-policies'],
@@ -79,7 +81,7 @@ export default function RetentionTab() {
             <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => refetch()}>
               <RefreshCw className="h-3.5 w-3.5" /> Refresh
             </Button>
-            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => runMutation.mutate()} disabled={runMutation.isPending || enabledCount === 0}>
+            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setConfirmOpen(true)} disabled={runMutation.isPending || enabledCount === 0}>
               <PlayCircle className="h-3.5 w-3.5" />
               {runMutation.isPending ? 'Running…' : 'Run Now'}
             </Button>
@@ -192,6 +194,45 @@ export default function RetentionTab() {
         All retention purges are recorded in the <strong>Audit Log</strong> tab with the number of rows deleted per table.
         Automated purges run at 02:00 UTC. You can also trigger a manual run above.
       </p>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-orange-500" />
+              Confirm Retention Run
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <p className="text-sm text-muted-foreground">
+              This will permanently delete records beyond the retention period for{' '}
+              <strong>{enabledCount}</strong> active {enabledCount === 1 ? 'policy' : 'policies'}:
+            </p>
+            <ul className="space-y-1.5 pl-1">
+              {policies.filter(p => p.enabled).map(p => (
+                <li key={p.id} className="text-xs flex items-center gap-1.5">
+                  <Trash2 className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                  <span><strong>{p.label}</strong> — records older than {p.retainDays} days</span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-red-600 font-medium">
+              ⚠ This action cannot be undone. Ensure you have a recent backup before proceeding.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => { setConfirmOpen(false); runMutation.mutate(); }}
+              disabled={runMutation.isPending}
+            >
+              <PlayCircle className="h-4 w-4 mr-1.5" />
+              {runMutation.isPending ? 'Running…' : 'Delete & run policies'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

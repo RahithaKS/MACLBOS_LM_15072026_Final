@@ -46,6 +46,30 @@ const ACTION_OPTIONS = [
   { value: 'DATA_EXPORT', label: 'Data Export' },
 ];
 
+const ACTION_LABELS: Record<string, string> = {
+  LOGIN: 'Login',
+  LOGIN_FAILED: 'Login Failed',
+  LOGOUT: 'Logout',
+  SSO_LOGIN: 'SSO Login',
+  FILE_UPLOAD: 'File Upload',
+  FILE_DELETE: 'File Delete',
+  ADMIN_CUBE_CREATE: 'Cube Created',
+  ADMIN_CUBE_DELETE: 'Cube Deleted',
+  ADMIN_USER_INVITE: 'User Invited',
+  ADMIN_USER_REMOVE: 'User Removed',
+  ADMIN_DOMAIN_CREATE: 'Domain Created',
+  ADMIN_DOMAIN_UPDATE: 'Domain Updated',
+  ADMIN_DOMAIN_DELETE: 'Domain Deleted',
+  BACKUP_TRIGGERED: 'Backup',
+  RETENTION_PURGE: 'Retention Purge',
+  DATA_EXPORT: 'Data Export',
+};
+
+const HIGH_SEVERITY_ACTIONS = new Set([
+  'LOGIN_FAILED', 'ADMIN_DOMAIN_DELETE', 'ADMIN_USER_REMOVE',
+  'FILE_DELETE', 'ADMIN_CUBE_DELETE', 'RETENTION_PURGE',
+]);
+
 const ACTION_ICONS: Record<string, JSX.Element> = {
   LOGIN:               <LogIn className="h-3.5 w-3.5 text-blue-500" />,
   LOGIN_FAILED:        <LogIn className="h-3.5 w-3.5 text-red-500" />,
@@ -224,14 +248,16 @@ export default function AuditLogTab() {
               <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">Loading audit logs…</TableCell></TableRow>
             ) : !data?.logs.length ? (
               <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">No audit events found</TableCell></TableRow>
-            ) : data.logs.map((log) => (
-              <TableRow key={log.id} className="text-xs">
+            ) : data.logs.map((log) => {
+              const isSeverity = log.status === 'failed' || HIGH_SEVERITY_ACTIONS.has(log.action);
+              return (
+              <TableRow key={log.id} className={`text-xs ${isSeverity ? 'bg-red-50/60 border-l-2 border-l-red-300' : ''}`}>
                 <TableCell className="font-mono text-xs whitespace-nowrap">{fmtDate(log.created_at)}</TableCell>
                 <TableCell className="max-w-[160px] truncate">{log.user_id || <span className="text-muted-foreground italic">system</span>}</TableCell>
                 <TableCell>
                   <span className="flex items-center gap-1.5">
                     {ACTION_ICONS[log.action] ?? <ShieldCheck className="h-3.5 w-3.5 text-gray-400" />}
-                    <span className="font-mono">{log.action}</span>
+                    <span>{ACTION_LABELS[log.action] ?? log.action}</span>
                   </span>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
@@ -251,7 +277,8 @@ export default function AuditLogTab() {
                   ) : '—'}
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
       </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   HardDrive, RefreshCw, PlayCircle, CheckCircle2, XCircle, Database, Cpu, Clock,
   Cloud, CloudOff, Settings2, Loader2, AlertTriangle, ChevronDown, ChevronRight,
-  CalendarClock, RotateCcw,
+  CalendarClock, RotateCcw, Download,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
@@ -109,6 +109,9 @@ function JobStatusBadge({ status }: { status: SchedulerLog['status'] }) {
 export default function BackupTab() {
   const { toast } = useToast();
 
+  // Live countdown for running jobs
+  const [countdown, setCountdown] = useState(15);
+
   // Blob config form state
   const [blobConnStr, setBlobConnStr] = useState('');
   const [blobContainer, setBlobContainer] = useState('ledgerlm-backups');
@@ -199,6 +202,17 @@ export default function BackupTab() {
     refetchStatus(); refetchBackups(); refetchSettings(); refetchLogs();
   };
 
+  const hasRunningJob = schedulerLogs.some(l => l.status === 'running');
+  useEffect(() => {
+    if (!hasRunningJob) return;
+    setCountdown(15);
+    const iv = setInterval(() => setCountdown(c => {
+      if (c <= 1) { refetchLogs(); return 15; }
+      return c - 1;
+    }), 1000);
+    return () => clearInterval(iv);
+  }, [hasRunningJob]);
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -232,7 +246,7 @@ export default function BackupTab() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className={(!statusLoading && status && !['healthy','connected','ok','success'].includes(status.python.status)) ? 'border-red-300 bg-red-50/40' : ''}>
             <CardHeader className="pb-1 pt-3 px-4">
               <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                 <Cpu className="h-3.5 w-3.5" /> AI Processing Engine
@@ -245,6 +259,9 @@ export default function BackupTab() {
                     <StatusDot status={status?.python.status ?? ''} />{status?.python.status ?? '—'}
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">Document & query processor</p>
+                  {!statusLoading && status && !['healthy','connected','ok','success'].includes(status.python.status) && (
+                    <p className="text-xs text-red-600 mt-1 font-medium">Check that the Python service is running</p>
+                  )}
                 </>
               )}
             </CardContent>
@@ -266,7 +283,7 @@ export default function BackupTab() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className={!statusLoading && !status?.lastBackup ? 'border-amber-300 bg-amber-50/40' : ''}>
             <CardHeader className="pb-1 pt-3 px-4">
               <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                 <HardDrive className="h-3.5 w-3.5" /> Last Backup
@@ -282,7 +299,16 @@ export default function BackupTab() {
                   <p className="text-xs text-muted-foreground">{fmtBytes(status.lastBackup.sizeBytes)}</p>
                 </>
               ) : (
-                <p className="text-sm text-muted-foreground">No backups yet</p>
+                <div>
+                  <p className="text-sm text-amber-700 font-medium">No backups yet</p>
+                  <button
+                    onClick={() => triggerBackupMutation.mutate()}
+                    disabled={triggerBackupMutation.isPending}
+                    className="mt-1.5 text-xs text-amber-700 underline hover:text-amber-900 disabled:opacity-50"
+                  >
+                    {triggerBackupMutation.isPending ? 'Starting…' : '⚡ Take first backup'}
+                  </button>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -531,6 +557,12 @@ export default function BackupTab() {
             </TableBody>
           </Table>
         </div>
+        {hasRunningJob && (
+          <p className="mt-2 text-xs text-blue-600 flex items-center gap-1.5">
+            <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+            Auto-refreshing in {countdown}s
+          </p>
+        )}
       </div>
 
       {/* ── Backup History ────────────────────────────────────────────────── */}
@@ -561,9 +593,20 @@ export default function BackupTab() {
                   <TableCell>{b.triggeredBy}</TableCell>
                   <TableCell>
                     {b.blobUrl ? (
-                      <Badge variant="outline" className="text-xs gap-1 text-green-700 border-green-300">
-                        <CheckCircle2 className="h-3 w-3" /> Azure Blob
-                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="outline" className="text-xs gap-1 text-green-700 border-green-300">
+                          <CheckCircle2 className="h-3 w-3" /> Azure Blob
+                        </Badge>
+                        <a
+                          href={b.blobUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                          title="Download backup"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
                     ) : (
                       <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
                         Local only
