@@ -5876,6 +5876,29 @@ Return a JSON object with:
             intent['revenue_type_split'] = True
             logger.info('_build_kpi_intent_fast: revenue_type_split=True — order_reason CASE WHEN will be applied')
 
+        # Specific revenue type filter: when the user names a particular type,
+        # filter to only that type in the CASE WHEN result.
+        _rev_type_names = [
+            ('asset sales',          'Asset Sales'),
+            ('reimbursement',        'Reimbursement'),
+            ('sale of scrap',        'Sale of Scrap'),
+            ('scrap',                'Sale of Scrap'),
+            ('volume discount',      'Volume Discount'),
+            ('interlocation stock',  'InterLocation Stock'),
+            ('inter-location stock', 'InterLocation Stock'),
+            ('inter location stock', 'InterLocation Stock'),
+            ('interlocation',        'InterLocation Stock'),
+        ]
+        for _kw, _type_val in _rev_type_names:
+            if _kw in query_lower:
+                intent['revenue_type_split'] = True          # also set split flag
+                intent['revenue_type_filter'] = _type_val
+                logger.info(
+                    f"_build_kpi_intent_fast: revenue_type_filter='{_type_val}' "
+                    f"(matched keyword '{_kw}')"
+                )
+                break
+
         # Org hierarchy filter: "BU AR", "section X", "dept Y", "group Z"
         # Patterns: (label, column, regex)
         _org_patterns = [
@@ -8416,7 +8439,8 @@ Return a JSON object with:
                     if intent.get('revenue_type_split'):
                         return self._build_revenue_type_sql(
                             where_parts, params, select_cols,
-                            group_by_clause, rounding or 0, amt_col)
+                            group_by_clause, rounding or 0, amt_col,
+                            revenue_type_filter=intent.get('revenue_type_filter'))
                     return self._build_revenue_sql(where_parts, params,
                                                    select_cols,
                                                    group_by_clause, rounding
@@ -8778,7 +8802,8 @@ Return a JSON object with:
                     )
                     return self._build_revenue_type_sql(
                         where_parts, params, select_cols,
-                        group_by_clause, rounding or 0, amt_col)
+                        group_by_clause, rounding or 0, amt_col,
+                        revenue_type_filter=intent.get('revenue_type_filter'))
                 return self._build_revenue_sql(where_parts, params,
                                                select_cols, group_by_clause,
                                                rounding or 0, amt_col,
@@ -12691,7 +12716,8 @@ Return a JSON object with:
             select_cols: str,
             group_by_clause: str,
             rounding: int,
-            amt_col: str = 'amount_usd') -> Dict[str, Any]:
+            amt_col: str = 'amount_usd',
+            revenue_type_filter: str = None) -> Dict[str, Any]:
         """Revenue split by revenue type, derived from order_reason + gl_account.
 
         Revenue type labels (Bosch mapping):
@@ -12704,6 +12730,9 @@ Return a JSON object with:
 
         Groups by revenue_type (and any other dims already in group_by_clause).
         Applies to _build_revenue_sql scope only (cost_category = 'Revenue Summary').
+
+        revenue_type_filter: when set, adds HAVING to return only that specific type
+        (e.g. 'Asset Sales', 'Reimbursement', 'Sale of Scrap', 'Volume Discount').
         """
         where_clause_with_values = self._embed_params_in_where(where_parts, params)
 
@@ -12726,6 +12755,12 @@ Return a JSON object with:
 
         col_alias = 'revenue_inr' if amt_col == 'amount_inr' else 'revenue'
 
+        # Optional HAVING clause to filter to a single named revenue type
+        _having = ""
+        if revenue_type_filter:
+            _safe = revenue_type_filter.replace("'", "''")
+            _having = f"\n            HAVING revenue_type = '{_safe}'"
+
         sql = f"""
             SELECT
                 {_sel_with_type},
@@ -12738,12 +12773,14 @@ Return a JSON object with:
                 WHERE {where_clause_with_values}
                   AND cost_category = 'Revenue Summary'
             ) _typed
-            GROUP BY {_gb_with_type}
+            GROUP BY {_gb_with_type}{_having}
             ORDER BY {col_alias} DESC
         """
         sql = sql.replace('%', '%%')
         logger.info(
-            f"Generated Revenue Type SQL (order_reason CASE WHEN, col={amt_col})"
+            f"Generated Revenue Type SQL (order_reason CASE WHEN, col={amt_col}"
+            + (f", filter='{revenue_type_filter}'" if revenue_type_filter else "")
+            + ")"
         )
         return {
             'success': True,
@@ -14508,6 +14545,24 @@ Return a JSON object with:
                     ]
                     if any(t in _q_lower for t in _rev_type_triggers):
                         intent['revenue_type_split'] = True
+
+                    # Specific revenue type filter (also sets split flag)
+                    _rev_type_names2 = [
+                        ('asset sales',          'Asset Sales'),
+                        ('reimbursement',        'Reimbursement'),
+                        ('sale of scrap',        'Sale of Scrap'),
+                        ('scrap',                'Sale of Scrap'),
+                        ('volume discount',      'Volume Discount'),
+                        ('interlocation stock',  'InterLocation Stock'),
+                        ('inter-location stock', 'InterLocation Stock'),
+                        ('inter location stock', 'InterLocation Stock'),
+                        ('interlocation',        'InterLocation Stock'),
+                    ]
+                    for _kw2, _type_val2 in _rev_type_names2:
+                        if _kw2 in _q_lower:
+                            intent['revenue_type_split'] = True
+                            intent['revenue_type_filter'] = _type_val2
+                            break
 
                     # 5. SDS split: group_by split_itrams_sds
                     _rev_sds_triggers = [
