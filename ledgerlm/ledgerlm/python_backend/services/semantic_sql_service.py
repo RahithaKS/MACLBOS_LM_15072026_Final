@@ -5880,12 +5880,17 @@ Return a JSON object with:
         # Specific SDS value filter — narrow to one category (DB values: Bosch / SDS / Connected Mobility Solutions)
         _sds_value_map = [
             (['bosch internal', 'internal bosch', 'bosch - internal', 'internal only',
-              'bosch only', 'split by bosch', 'breakdown by bosch'],             'Bosch'),
+              'bosch only', 'split by bosch', 'breakdown by bosch',
+              'split internal', 'revenue split internal', 'internal split',
+              'breakdown internal', 'external internal'],                         'Bosch'),
             (['sds external', 'sds - external', 'sds only', 'only sds',
-              'split by sds', 'breakdown by sds'],                               'SDS'),
+              'split by sds', 'breakdown by sds',
+              'split external', 'revenue split external', 'external split',
+              'breakdown external', 'split of external'],                         'SDS'),
             (['itrams', 'mobility solution external', 'mobility external',
               'connected mobility', 'mobility solution', 'split by itrams',
-              'breakdown by itrams'],                                             'Connected Mobility Solutions'),
+              'breakdown by itrams', 'split itrams', 'revenue split itrams',
+              'itrams split'],                                                     'Connected Mobility Solutions'),
         ]
         for _skws, _sval in _sds_value_map:
             if any(kw in query_lower for kw in _skws):
@@ -14639,12 +14644,19 @@ Return a JSON object with:
                     _sds_val_map2 = [
                         (['bosch internal', 'internal bosch', 'bosch - internal',
                           'internal only', 'bosch only', 'split by bosch',
-                          'breakdown by bosch'],                               'Bosch'),
+                          'breakdown by bosch', 'split internal',
+                          'revenue split internal', 'internal split',
+                          'breakdown internal'],                               'Bosch'),
                         (['sds external', 'sds - external', 'sds only', 'only sds',
-                          'split by sds', 'breakdown by sds'],                'SDS'),
+                          'split by sds', 'breakdown by sds',
+                          'split external', 'revenue split external',
+                          'external split', 'breakdown external',
+                          'split of external'],                                'SDS'),
                         (['itrams', 'mobility solution external', 'mobility external',
                           'connected mobility', 'mobility solution',
-                          'split by itrams', 'breakdown by itrams'],
+                          'split by itrams', 'breakdown by itrams',
+                          'split itrams', 'revenue split itrams',
+                          'itrams split'],
                          'Connected Mobility Solutions'),
                     ]
                     for _skws2, _sval2 in _sds_val_map2:
