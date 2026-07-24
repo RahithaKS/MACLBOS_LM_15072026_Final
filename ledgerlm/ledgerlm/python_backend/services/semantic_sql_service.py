@@ -5295,6 +5295,50 @@ Return a JSON object with:
                 'view_type': detected_view_type
             }
 
+        # ================================================================
+        # AVG+END CAPACITY COMBO — must fire BEFORE any single-metric fast path
+        # or LLM call.  "outsourcing avg and end capacity" → two metrics.
+        # Catches phrasings like:
+        #   "outsourcing avg and end capacity"
+        #   "outsourcing average and end capacity"
+        #   "end and avg outsourcing capacity"
+        # ================================================================
+        _pqi_q_lower = query.lower()
+        _pqi_avg_end = bool(re.search(
+            r'\b(?:avg|average)\b.{0,40}\bend\b'
+            r'|\bend\b.{0,40}\b(?:avg|average)\b',
+            _pqi_q_lower
+        ))
+        if _pqi_avg_end and 'capacity' in _pqi_q_lower:
+            _pqi_calcs: list[str] | None = None
+            if any(kw in _pqi_q_lower for kw in ('outsourcing', 'external cap')):
+                _pqi_calcs = ['Outsourcing Capacity Avg', 'Outsourcing Capacity End']
+            elif 'offshore' in _pqi_q_lower:
+                _pqi_calcs = ['Offshore Capacity Avg', 'Offshore Capacity End']
+            elif 'total' in _pqi_q_lower:
+                _pqi_calcs = ['Total Capacity Avg', 'Total Capacity End']
+            if _pqi_calcs:
+                logger.info(
+                    f"parse_query_intent: avg+end capacity combo detected → "
+                    f"multi_metric_calcs={_pqi_calcs}")
+                _pqi_mm_intent = self._build_kpi_intent_fast(
+                    query, _pqi_calcs[0], entity_filters,
+                    group_by_hint=_gb_group_by_hint)
+                _pqi_time_scope = detect_time_scope_from_query(query)
+                _pqi_mm_intent = self.apply_default_time_filters(
+                    _pqi_mm_intent, cube_id, _pqi_time_scope)
+                _pqi_mm_intent['multi_metric_calcs'] = _pqi_calcs
+                _pqi_mm_intent['original_query'] = query
+                return {
+                    'success': True,
+                    'intent': _pqi_mm_intent,
+                    'raw_query': query,
+                    'matched_calculation': None,
+                    'business_logic': business_logic,
+                    'time_scope': _pqi_time_scope,
+                    'view_type': detected_view_type
+                }
+
         # FAST PATH: Skip OpenAI if we've already matched a KPI calculation
         # This avoids token limit issues (429 errors) for known KPI queries
         # Any matched calculation from get_matching_calculation (DB or trigger dict) is trusted
