@@ -5849,15 +5849,63 @@ Return a JSON object with:
             logger.info('_build_kpi_intent_fast: onsite_offshore group_by injected')
 
         # SDS split: group_by split_itrams_sds
+        # Specific phrases always trigger the split dimension
         _sds_triggers = [
             'by sds', 'sds split', 'bosch sds', 'itrams split',
             'split by sds', 'revenue split by sds', 'split of itrams',
             'by itrams', 'sds wise', 'itrams sds',
+            # Extended — internal/bosch-specific phrases
+            'split by internal', 'breakdown by internal', 'internal split',
+            'bosch internal', 'internal bosch', 'bosch split',
+            'split by bosch', 'breakdown by bosch',
         ]
-        if any(t in query_lower for t in _sds_triggers):
+        # Broad "revenue split" / "revenue breakdown" fire only when NOT a revenue-type query
+        _is_rev_type_ctx = any(t in query_lower for t in [
+            'by type', 'by order', 'order reason', 'revenue type', 'asset sales',
+            'reimbursement', 'volume discount', 'sale of scrap',
+        ])
+        _broad_sds_triggers = [
+            'revenue split', 'revenue breakdown',
+            'split by revenue', 'breakdown of revenue',
+        ]
+        _sds_fired = (
+            any(t in query_lower for t in _sds_triggers) or
+            (any(t in query_lower for t in _broad_sds_triggers) and not _is_rev_type_ctx)
+        )
+        if _sds_fired:
             if 'split_itrams_sds' not in intent.get('group_by', []):
                 intent['group_by'] = intent.get('group_by', []) + ['split_itrams_sds']
             logger.info('_build_kpi_intent_fast: split_itrams_sds group_by injected')
+
+        # Specific SDS value filter — narrow to one category (DB values: Bosch / SDS / Connected Mobility Solutions)
+        _sds_value_map = [
+            (['bosch internal', 'internal bosch', 'bosch - internal', 'internal only',
+              'bosch only', 'split by bosch', 'breakdown by bosch'],             'Bosch'),
+            (['sds external', 'sds - external', 'sds only', 'only sds',
+              'split by sds', 'breakdown by sds'],                               'SDS'),
+            (['itrams', 'mobility solution external', 'mobility external',
+              'connected mobility', 'mobility solution', 'split by itrams',
+              'breakdown by itrams'],                                             'Connected Mobility Solutions'),
+        ]
+        for _skws, _sval in _sds_value_map:
+            if any(kw in query_lower for kw in _skws):
+                # Ensure split is activated and add a WHERE filter for the specific value
+                if 'split_itrams_sds' not in intent.get('group_by', []):
+                    intent['group_by'] = intent.get('group_by', []) + ['split_itrams_sds']
+                # Remove any existing split_itrams_sds filter then add the specific one
+                intent['filters'] = [
+                    f for f in intent.get('filters', [])
+                    if f.get('column') != 'split_itrams_sds'
+                ]
+                intent['filters'].append({
+                    'column': 'split_itrams_sds',
+                    'operator': '=',
+                    'value': _sval,
+                })
+                logger.info(
+                    f"_build_kpi_intent_fast: split_itrams_sds filter = '{_sval}'"
+                )
+                break
 
         # Revenue type split: CASE WHEN on order_reason → Reimbursement / Sale of Scrap /
         # Asset Sales / Volume Discount / InterLocation Stock / Revenue.
@@ -14398,12 +14446,12 @@ Return a JSON object with:
                     # Split_of_iTraMs/SDS filter
                     _split_map = [
                         (['bosch internal', 'internal bosch', 'bosch - internal',
-                          'bosch_internal'], 'Bosch - Internal'),
-                        (['sds external', 'sds - external', 'sds_external'],
-                         'SDS - External'),
+                          'bosch_internal', 'internal only', 'bosch only'],   'Bosch'),
+                        (['sds external', 'sds - external', 'sds_external',
+                          'sds only', 'only sds'],                            'SDS'),
                         (['itrams', 'mobility solution external', 'mobility external',
-                          'mobility solution', 'mobility_solution'],
-                         'Mobility Solution External - Itrams'),
+                          'mobility solution', 'mobility_solution',
+                          'connected mobility'],           'Connected Mobility Solutions'),
                     ]
                     for _skws, _sval in _split_map:
                         if any(kw in _q_lower_cr for kw in _skws):
@@ -14564,15 +14612,55 @@ Return a JSON object with:
                             intent['revenue_type_filter'] = _type_val2
                             break
 
-                    # 5. SDS split: group_by split_itrams_sds
+                    # 5. SDS split: group_by split_itrams_sds (+ optional value filter)
                     _rev_sds_triggers = [
                         'by sds', 'sds split', 'bosch sds', 'itrams split',
                         'split by sds', 'revenue split by sds', 'split of itrams',
                         'by itrams', 'sds wise', 'itrams sds',
+                        'split by internal', 'breakdown by internal', 'internal split',
+                        'bosch internal', 'internal bosch', 'bosch split',
+                        'split by bosch', 'breakdown by bosch',
                     ]
-                    if any(t in _q_lower for t in _rev_sds_triggers):
+                    _is_rev_type_ctx2 = any(t in _q_lower for t in [
+                        'by type', 'by order', 'order reason', 'revenue type',
+                        'asset sales', 'reimbursement', 'volume discount', 'sale of scrap',
+                    ])
+                    _broad_sds2 = ['revenue split', 'revenue breakdown',
+                                   'split by revenue', 'breakdown of revenue']
+                    _sds_fired2 = (
+                        any(t in _q_lower for t in _rev_sds_triggers) or
+                        (any(t in _q_lower for t in _broad_sds2) and not _is_rev_type_ctx2)
+                    )
+                    if _sds_fired2:
                         if 'split_itrams_sds' not in intent['group_by']:
                             intent['group_by'] = intent['group_by'] + ['split_itrams_sds']
+
+                    # Specific SDS value filter
+                    _sds_val_map2 = [
+                        (['bosch internal', 'internal bosch', 'bosch - internal',
+                          'internal only', 'bosch only', 'split by bosch',
+                          'breakdown by bosch'],                               'Bosch'),
+                        (['sds external', 'sds - external', 'sds only', 'only sds',
+                          'split by sds', 'breakdown by sds'],                'SDS'),
+                        (['itrams', 'mobility solution external', 'mobility external',
+                          'connected mobility', 'mobility solution',
+                          'split by itrams', 'breakdown by itrams'],
+                         'Connected Mobility Solutions'),
+                    ]
+                    for _skws2, _sval2 in _sds_val_map2:
+                        if any(kw in _q_lower for kw in _skws2):
+                            if 'split_itrams_sds' not in intent['group_by']:
+                                intent['group_by'] = intent['group_by'] + ['split_itrams_sds']
+                            intent['filters'] = [
+                                f for f in intent.get('filters', [])
+                                if f.get('column') != 'split_itrams_sds'
+                            ]
+                            intent['filters'].append({
+                                'column': 'split_itrams_sds',
+                                'operator': '=',
+                                'value': _sval2,
+                            })
+                            break
 
                     # 6. Org hierarchy filter: "BU AR", "section X", etc.
                     _rev_org_patterns = [
