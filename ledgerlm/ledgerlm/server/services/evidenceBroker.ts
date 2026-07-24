@@ -228,7 +228,10 @@ export class EvidenceBroker {
     // side-by-side grouped-bar from buildPreBuiltSections would be redundant.
     const hasEntityChart = chartBlock.includes('"entities"');
     const hasSingleSeriesMonthData = !hasEntityChart && chartBlock.includes('"monthData"');
-    const suppressComparisonCharts = hasEntityChart || hasSingleSeriesMonthData;
+    // Also suppress when buildChartBlock already generated ANY chart (e.g. a plain
+    // month-axis bar chart for a single-entity multi-period query) — the Period
+    // Comparison chart from buildPreBuiltSections would be fully redundant.
+    const suppressComparisonCharts = hasEntityChart || hasSingleSeriesMonthData || chartBlock.length > 2;
 
     const primaryEvidence =
       primarySqlResults.find((s) => !s.isComparisonData) ||
@@ -2782,9 +2785,10 @@ export class EvidenceBroker {
       );
       const yearLabel = sortedYears.join(", ");
 
-      notices.push(
-        `- Data available for: ${monthLabels.join(", ")} ${yearLabel}`,
-      );
+      // Note: we intentionally do NOT emit a generic "Data available for: Jan Feb Mar"
+      // notice here — it has no actionable meaning when all requested months are present,
+      // and the LLM tends to parrot it verbatim as its first sentence, confusing users.
+      // Only emit a notice when there is an actual DATA GAP (missing months).
 
       if (sortedMonths.length > 0) {
         const maxMonth = Math.max(...sortedMonths);
