@@ -14327,6 +14327,48 @@ Return a JSON object with:
             # AND 'Direct Cost' for the same query, producing a merged table with
             # incorrect Travel Cost rows from _build_direct_cost_sql.
             # ================================================================
+            # EARLY AVG+END CAPACITY OVERRIDE
+            # "outsourcing avg and end capacity" may arrive with use_calculation
+            # already set to a single metric by the Node.js intent parser, which
+            # would bypass the multi-metric combo detection below.  Detect the
+            # pattern here — before the use_calculation guard — and promote it
+            # to multi-metric so the correct side-by-side table is returned.
+            # ================================================================
+            _early_orig_q = intent.get('original_query', '')
+            if _early_orig_q and not intent.get('multi_metric_calcs'):
+                _eoq_l = _early_orig_q.lower()
+                _early_combo = bool(re.search(
+                    r'\b(?:avg|average)\b.{0,40}\bend\b'
+                    r'|\bend\b.{0,40}\b(?:avg|average)\b',
+                    _eoq_l
+                ))
+                if _early_combo and 'capacity' in _eoq_l:
+                    if any(kw in _eoq_l for kw in ['outsourcing', 'external cap']):
+                        intent['multi_metric_calcs'] = [
+                            'outsourcing_capacity_avg',
+                            'outsourcing_capacity_end']
+                        intent.pop('use_calculation', None)
+                        logger.info(
+                            "compile_sql: early avg+end override → "
+                            "outsourcing multi-metric")
+                    elif 'offshore' in _eoq_l:
+                        intent['multi_metric_calcs'] = [
+                            'offshore_capacity_avg',
+                            'offshore_capacity_end']
+                        intent.pop('use_calculation', None)
+                        logger.info(
+                            "compile_sql: early avg+end override → "
+                            "offshore multi-metric")
+                    elif 'total' in _eoq_l:
+                        intent['multi_metric_calcs'] = [
+                            'total_capacity_avg',
+                            'total_capacity_end']
+                        intent.pop('use_calculation', None)
+                        logger.info(
+                            "compile_sql: early avg+end override → "
+                            "total capacity multi-metric")
+
+            # ================================================================
             _multi_calcs = intent.get('multi_metric_calcs', [])
             _pre_calc_for_multi = intent.get('use_calculation', '')
             if not _multi_calcs and not _pre_calc_for_multi:
