@@ -559,6 +559,7 @@ export class EvidenceBroker {
       "cost_sub_category",
       "salary_band",
       "salary_level",
+      "revenue_type",                          // revenue type split — beats entity
       "bill_to_party_legal_entity_full_name", // customer name beats entity when present
       "region_entity",
       "entity",
@@ -1161,6 +1162,7 @@ export class EvidenceBroker {
       // Same positive allowlist as the month-column pivot path
       const X_PIVOT_DIM_ALLOWLIST = new Set([
         "bill_to_party_legal_entity_full_name", // customer revenue comparison charts
+        "revenue_type",                          // revenue type split charts
         "region_entity",
         "entity",
         "sector",
@@ -1793,6 +1795,7 @@ export class EvidenceBroker {
       "cost_sub_category",
       "salary_band",
       "salary_level",
+      "revenue_type",                          // revenue type split — beats entity so bars show type names
       "bill_to_party_legal_entity_full_name", // customer name beats entity when present
       "region_entity",
       "entity",
@@ -1846,6 +1849,7 @@ export class EvidenceBroker {
       "rank",                              // customer_revenue rank — never chart as value
       "bill_to_party_legal_entity_full_name", // dimension, not metric
       "region_entity",                     // dimension, not metric
+      "revenue_type",                      // dimension, not metric
     ]);
 
     // Preferred value columns — exact names first, then _usd_sum/_inr_sum suffix variants
@@ -1937,6 +1941,7 @@ export class EvidenceBroker {
       "cost_sub_category",
       "salary_band",
       "salary_level",
+      "revenue_type",   // revenue type split — pivot when entity also present
     ]);
     const entityDimCol = columns.includes("region_entity")
       ? "region_entity"
