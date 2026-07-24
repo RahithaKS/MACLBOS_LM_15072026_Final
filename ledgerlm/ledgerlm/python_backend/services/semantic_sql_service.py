@@ -8114,7 +8114,10 @@ Return a JSON object with:
             # Revenue type split (order_reason CASE WHEN) must use _build_revenue_type_sql.
             # Skip the DB lookup entirely so no sql_template can intercept it before
             # the METRIC_CATALOG branch for catalog_key='revenue' is reached.
-            if intent.get('revenue_type_split') and calculation_name == 'revenue':
+            # calculation_name can be 'revenue' (LLM path) OR 'Revenue Summary' (fast path)
+            # — both must be normalised to 'revenue' so catalog_key resolves correctly.
+            if intent.get('revenue_type_split') and calculation_name.lower() in (
+                    'revenue', 'revenue summary', 'kpi revenue', 'revenue kpi'):
                 # Revenue type split must use _build_revenue_type_sql (CASE WHEN on
                 # order_reason).  Skip the DB lookup so no sql_template or
                 # partial-name match (e.g. "GB P&L Revenue") can intercept it.
@@ -8766,6 +8769,16 @@ Return a JSON object with:
 
             # Revenue (MTD or Summary) — cost_category driven by intent['_time_agg']
             elif 'revenue' in calc_name_lower:
+                # Revenue type split must win here too (safety net for any edge case
+                # where calc_name_lower was not normalised to 'revenue' by Bug Fix 1).
+                if intent.get('revenue_type_split'):
+                    logger.info(
+                        "[LEGACY] revenue_type_split=True — routing to _build_revenue_type_sql "
+                        f"(calc_name_lower='{calc_name_lower}')"
+                    )
+                    return self._build_revenue_type_sql(
+                        where_parts, params, select_cols,
+                        group_by_clause, rounding or 0, amt_col)
                 return self._build_revenue_sql(where_parts, params,
                                                select_cols, group_by_clause,
                                                rounding or 0, amt_col,
