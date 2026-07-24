@@ -1265,14 +1265,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             fullResponse += context.chartBlock;
           }
 
+          const nonStreamMeta: Record<string, unknown> = {};
+          if (context.citations.length > 0) nonStreamMeta.citations = context.citations;
+          if (context.dataCoverage) nonStreamMeta.dataCoverage = context.dataCoverage;
           const assistantMessage = await storage.createMessage({
             chatId: req.params.chatId,
             content: fullResponse,
             role: "assistant",
-            metadata:
-              context.citations.length > 0
-                ? { citations: context.citations }
-                : null,
+            metadata: Object.keys(nonStreamMeta).length > 0 ? nonStreamMeta : null,
           });
 
           return res.status(201).json([message, assistantMessage]);
@@ -1486,6 +1486,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (citations.length > 0) msgMeta.citations = citations;
           if (context.tableData) msgMeta.tableData = context.tableData;
           if (context.tableSections) msgMeta.tableSections = context.tableSections;
+          if (context.dataCoverage) msgMeta.dataCoverage = context.dataCoverage;
           if (orchestratorResult.queryContext) msgMeta.queryContext = orchestratorResult.queryContext;
           const assistantMessage = await storage.createMessage({
             chatId: req.params.chatId,

@@ -42,6 +42,8 @@ import {
   Square,
   Copy,
   Check,
+  AlertTriangle,
+  ChevronDown,
 } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -58,6 +60,80 @@ import { InteractiveDataTable } from "@/components/InteractiveDataTable";
 import { exportChatToPDF, exportChatToWord } from "@/lib/chatExport";
 import { preprocessMarkdown } from "@/lib/markdownPreprocessor";
 import html2canvas from 'html2canvas';
+
+// ── Data Coverage types (mirrors server DataCoverage interface) ──────────
+interface DataCoverage {
+  found: { month: number; year: number }[];
+  missing: { month: number; year: number }[];
+  years: number[];
+  isComplete: boolean;
+  label: string;
+}
+
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// Self-contained pill + expandable month grid.
+// Renders the button AND the dropdown panel — no external state needed.
+function DataCoveragePill({ coverage }: { coverage: DataCoverage }) {
+  const [open, setOpen] = useState(false);
+  const complete = coverage.isComplete;
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setOpen(v => !v)}
+        title={complete ? 'All months loaded — click to inspect' : 'Some months are missing — click for details'}
+        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+          complete
+            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/15'
+            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/15'
+        }`}
+      >
+        {complete
+          ? <CheckCircle2 className="w-3 h-3 shrink-0" />
+          : <AlertTriangle className="w-3 h-3 shrink-0" />}
+        <span>
+          {complete
+            ? coverage.label
+            : `${coverage.missing.length} month${coverage.missing.length !== 1 ? 's' : ''} missing · ${coverage.label}`}
+        </span>
+        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="mt-1.5 bg-card border border-border rounded-lg shadow-sm p-3 max-w-[300px]">
+          <div className="text-xs font-semibold text-foreground mb-2">
+            Data Coverage — {coverage.years.join(', ')}
+          </div>
+          <div className="grid grid-cols-6 gap-1">
+            {MONTH_NAMES.map((name, i) => {
+              const m = i + 1;
+              const isFound   = coverage.found.some(f => f.month === m);
+              const isMissing = coverage.missing.some(f => f.month === m);
+              return (
+                <div
+                  key={m}
+                  className={`text-center py-1 rounded text-xs font-medium ${
+                    isFound   ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' :
+                    isMissing ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' :
+                                'text-muted-foreground/25'
+                  }`}
+                >
+                  {name}
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex gap-4 text-xs text-muted-foreground">
+            <span><span className="text-emerald-600 dark:text-emerald-400">●</span> Loaded</span>
+            {!complete && <span><span className="text-amber-600 dark:text-amber-400">●</span> Missing</span>}
+            <span className="opacity-40">· Not queried</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function InsightsSection({ keyFindingsText, keyObservationsText, mdComponents }: {
   keyFindingsText: string;
@@ -1231,6 +1307,7 @@ export default function ChatDetail() {
                                       citations?: string[];
                                       tableData?: { headers: string[]; rows: string[][] };
                                       tableSections?: { title: string; headers: string[]; rows: string[][] }[];
+                                      dataCoverage?: DataCoverage;
                                     } | null;
                                     const citationsArray =
                                       metadata?.citations || [];
@@ -1388,6 +1465,11 @@ export default function ChatDetail() {
 
                                     return (
                                       <>
+                                        {/* Data coverage pill — system-generated, not LLM narration */}
+                                        {metadata?.dataCoverage && (
+                                          <DataCoveragePill coverage={metadata.dataCoverage} />
+                                        )}
+
                                         {/* Summary only — always visible */}
                                         <ReactMarkdown
                                           remarkPlugins={[remarkGfm]}

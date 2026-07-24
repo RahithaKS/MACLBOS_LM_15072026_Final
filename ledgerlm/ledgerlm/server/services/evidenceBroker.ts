@@ -21,6 +21,14 @@ export interface TableSection {
   rows: string[][];
 }
 
+export interface DataCoverage {
+  found: { month: number; year: number }[];   // sorted asc — months present in the data
+  missing: { month: number; year: number }[]; // gaps between month 1 and max found month
+  years: number[];
+  isComplete: boolean;  // true when no gaps exist
+  label: string;        // e.g. "Jan · Feb · Mar 2025"
+}
+
 export interface EvidenceContext {
   text: string;
   citations: string[];
@@ -31,6 +39,7 @@ export interface EvidenceContext {
   dataRowCount?: number; // number of data rows returned — used to tailor Key Observations
   tableData?: { headers: string[]; rows: string[][] }; // first table (backward compat)
   tableSections?: TableSection[]; // all extracted tables in order
+  dataCoverage?: DataCoverage;   // structured month coverage — rendered as pill in UI
 }
 
 const SOURCE_WEIGHTS: Record<string, number> = {
@@ -290,7 +299,50 @@ export class EvidenceBroker {
         primaryEvidence?.rowCount ?? primaryEvidence?.results?.length ?? 0,
       tableData,
       tableSections,
+      dataCoverage: this.buildDataCoverage(primarySqlResults),
     };
+  }
+
+  // ── Build structured data-coverage object from SQL results ────────────
+  // Used by the frontend to render the DataCoveragePill without relying on
+  // the LLM to narrate coverage information.
+  private buildDataCoverage(sqlResults: SemanticSQLEvidence[]): DataCoverage | undefined {
+    const byYear = new Map<number, Set<number>>();
+
+    for (const sql of sqlResults) {
+      if (!sql.results?.length) continue;
+      for (const row of sql.results) {
+        const m = row.month !== undefined && row.month !== null ? Number(row.month) : null;
+        const y = row.year  !== undefined && row.year  !== null ? Number(row.year)  : null;
+        if (m && y && m >= 1 && m <= 12) {
+          if (!byYear.has(y)) byYear.set(y, new Set());
+          byYear.get(y)!.add(m);
+        }
+      }
+    }
+
+    if (byYear.size === 0) return undefined;
+
+    const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const found: { month: number; year: number }[] = [];
+    const missing: { month: number; year: number }[] = [];
+    const years = Array.from(byYear.keys()).sort((a, b) => a - b);
+
+    for (const year of years) {
+      const months = byYear.get(year)!;
+      const maxMonth = Math.max(...Array.from(months));
+      for (let m = 1; m <= maxMonth; m++) {
+        if (months.has(m)) {
+          found.push({ month: m, year });
+        } else {
+          missing.push({ month: m, year });
+        }
+      }
+    }
+
+    const label = found.map(f => MONTH_NAMES[f.month - 1]).join(' · ') + ' ' + years.join(', ');
+
+    return { found, missing, years, isComplete: missing.length === 0, label };
   }
 
   // ── Extract ALL markdown tables with their section titles ──────────────
