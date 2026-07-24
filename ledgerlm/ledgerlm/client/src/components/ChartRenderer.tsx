@@ -357,7 +357,8 @@ export function ChartRenderer({ spec }: ChartRendererProps) {
     : undefined;
 
   // ── Multi-entity bar chart (with pivot support) ────────────────────────────
-  if (spec.type === 'bar' && spec.config.entities && spec.config.entities.length >= 2) {
+  // Allow single-entity pivot charts too — user can still use Swap button to reframe.
+  if (spec.type === 'bar' && spec.config.entities && spec.config.entities.length >= 1) {
     const entities = spec.config.entities;
     const xDimName = spec.config.xLabel || 'X Dimension';
     const measureName = spec.config.yLabel || 'Value';

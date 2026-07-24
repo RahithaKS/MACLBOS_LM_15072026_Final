@@ -1975,9 +1975,9 @@ export class EvidenceBroker {
         ),
       ].slice(0, 8);
 
-      if (allEntities.length < 2) {
-        // Only one entity — fall through to single-series path below.
-      } else {
+      if (allEntities.length >= 1) {
+        // Always use the pivot path so the Swap button is available even for
+        // a single entity — user can still reframe the chart if they wish.
         // Collect unique sub-category labels (preserve order from SQL).
         const subCatOrder: string[] = [];
         const seen = new Set<string>();
