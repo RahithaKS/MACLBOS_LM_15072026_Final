@@ -1777,6 +1777,7 @@ export class EvidenceBroker {
       "cost_sub_category",
       "salary_band",
       "salary_level",
+      "bill_to_party_legal_entity_full_name", // customer name beats entity when present
       "region_entity",
       "entity",
       "sector",
@@ -1790,6 +1791,7 @@ export class EvidenceBroker {
       "cube_id",
       "company_id",
       "cost_category",
+      "rank", // customer_revenue rank column — never use as label
     ]);
 
     // Single-value guard: prefer a column that has more than one distinct value.
@@ -1818,6 +1820,9 @@ export class EvidenceBroker {
       "cube_id",
       "company_id",
       "cost_category",
+      "rank",                              // customer_revenue rank — never chart as value
+      "bill_to_party_legal_entity_full_name", // dimension, not metric
+      "region_entity",                     // dimension, not metric
     ]);
 
     // Preferred value columns — exact names first, then _usd_sum/_inr_sum suffix variants
@@ -1885,11 +1890,13 @@ export class EvidenceBroker {
       : valueCol.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
     // Friendly X-axis label with title-case.
-    const xLabelFriendly = labelCol
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (c) => c.toUpperCase())
-      .replace("Sub Category", "Breakdown")
-      .replace("Region Entity", "Entity");
+    const xLabelFriendly = labelCol === "bill_to_party_legal_entity_full_name"
+      ? "Customer"
+      : labelCol
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (c) => c.toUpperCase())
+          .replace("Sub Category", "Breakdown")
+          .replace("Region Entity", "Entity");
 
     const timeInfo = primary.timeFilterApplied
       ? ` (${primary.timeFilterApplied})`
@@ -1899,7 +1906,8 @@ export class EvidenceBroker {
     // ── Multi-dimension path ────────────────────────────────────────────────
     // When the result has both a sub-category dimension AND region_entity,
     // pivot the data so X-axis = sub-category, with one keyed entry per entity.
-    // The frontend renders a dropdown to filter by entity.
+    // The frontend renders a dropdown to filter by entity, plus a Swap button
+    // to flip X-axis and dropdown (gives "entity on X-axis, customer in dropdown").
     const subCatCols = new Set([
       "entity_sub_category",
       "sub_cost_category",
@@ -1919,7 +1927,17 @@ export class EvidenceBroker {
       entityDimCol !== null &&
       entityDimCol !== labelCol;
 
-    if (isMultiDim) {
+    // Customer-revenue multi-dim: bill_to_party is the X-axis (customer names),
+    // region_entity becomes the entity dropdown series.
+    // The existing Swap button on the chart lets users flip to
+    // "X-axis = entity, dropdown = customer" without any extra work.
+    const isCustomerRevMultiDim =
+      !isTimeSeries &&
+      labelCol === "bill_to_party_legal_entity_full_name" &&
+      entityDimCol !== null &&
+      entityDimCol !== labelCol;
+
+    if (isMultiDim || isCustomerRevMultiDim) {
       // Collect all unique entities (cap at 8 to keep the chart readable).
       const allEntities = [
         ...new Set(
