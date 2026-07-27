@@ -18,9 +18,12 @@ export default function Dashboard() {
     if (chatsLoading) return;
     // Guard against running twice (StrictMode double-invoke / fast navigation)
     if (redirected.current) return;
-    redirected.current = true;
 
     const doRedirect = async () => {
+      // Re-check inside the timeout in case a concurrent effect already ran
+      if (redirected.current) return;
+      redirected.current = true;
+
       try {
         // ── Case 1: No chats at all → create a fresh blank one ──────────────
         if (!chats || chats.length === 0) {
@@ -33,12 +36,23 @@ export default function Dashboard() {
         }
 
         // ── Case 2: Check if the most recent chat is still blank ─────────────
-        // chats are ordered by createdAt DESC so index 0 is the newest
+        // chats are ordered by createdAt DESC so index 0 is the newest.
+        // If the has-messages check fails (e.g. chat is still being committed
+        // by a concurrent sidebar mutation), fall through conservatively and
+        // reuse the chat — avoids the workspace error on rapid "New Analysis" clicks.
         const mostRecent = chats[0];
-        const { hasMessages } = await apiRequest<{
-          hasMessages: boolean;
-          messageCount: number;
-        }>("GET", `/api/chats/${mostRecent.id}/has-messages`);
+        let hasMessages = false;
+        try {
+          const result = await apiRequest<{
+            hasMessages: boolean;
+            messageCount: number;
+          }>("GET", `/api/chats/${mostRecent.id}/has-messages`);
+          hasMessages = result.hasMessages;
+        } catch {
+          // Check failed — reuse the most recent chat conservatively
+          setLocation(`/chat/${mostRecent.id}`);
+          return;
+        }
 
         if (!hasMessages) {
           // Reuse it — no new sidebar entry created
@@ -59,7 +73,12 @@ export default function Dashboard() {
       }
     };
 
-    doRedirect();
+    // 300 ms settle debounce: lets any in-flight sidebar chat-creation mutations
+    // finish committing before Dashboard decides which chat to open.
+    // The cleanup cancels the timer if chats data updates again within that window,
+    // so the redirect always uses the freshest chats snapshot.
+    const timer = setTimeout(doRedirect, 300);
+    return () => clearTimeout(timer);
   }, [chats, chatsLoading, setLocation]);
 
   // ── Error state ────────────────────────────────────────────────────────────

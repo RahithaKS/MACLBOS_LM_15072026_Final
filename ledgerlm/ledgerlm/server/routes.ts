@@ -634,6 +634,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ── End Microsoft SSO routes ──────────────────────────────────────────────
 
+  // Destroy the server-side session so the HttpOnly cookie becomes invalid.
+  // Must be called on logout — client-only clearAuthUser() is not sufficient
+  // because the session cookie persists and /api/auth/me would re-authenticate.
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        console.error("[auth] session.destroy error on logout:", err);
+      }
+      // Clear the session cookie regardless of destroy outcome
+      res.clearCookie("connect.sid", { path: "/" });
+      res.json({ success: true });
+    });
+  });
+
   // Return current session user — used by SSO flow to sync localStorage after callback
   app.get("/api/auth/me", async (req, res) => {
     const userId = (req.session as any)?.userId;

@@ -158,11 +158,21 @@ export function AppSidebar() {
     .toUpperCase()
     .slice(0, 2);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Destroy the server-side session first so the HttpOnly cookie is invalidated.
+    // Without this, navigating directly to a protected route after logout would
+    // re-authenticate via /api/auth/me (session cookie still valid).
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      // Best-effort — proceed with client-side cleanup regardless
+    }
     clearAuthUser();
     queryClient.clear();
     setLocation("/");
   };
+
+  const isCreatingAnalysisRef = useRef(false);
 
   const createChatMutation = useMutation({
     mutationFn: async () => {
@@ -238,25 +248,32 @@ export function AppSidebar() {
   });
 
   const handleNewAnalysis = async () => {
-    // Check if the most recent chat is empty (has 0 messages)
-    if (chats && chats.length > 0) {
-      const latestChat = chats[0];
-      try {
-        const data = await apiRequest<{ hasMessages: boolean; messageCount: number }>(
-          "GET",
-          `/api/chats/${latestChat.id}/has-messages`
-        );
-        if (!data.hasMessages) {
-          // Reuse the existing empty chat
-          setLocation(`/chat/${latestChat.id}?openDataSources=true`);
-          return;
+    // Concurrency guard: prevent duplicate chat creation from rapid clicks
+    if (isCreatingAnalysisRef.current || createChatMutation.isPending) return;
+    isCreatingAnalysisRef.current = true;
+    try {
+      // Check if the most recent chat is empty (has 0 messages)
+      if (chats && chats.length > 0) {
+        const latestChat = chats[0];
+        try {
+          const data = await apiRequest<{ hasMessages: boolean; messageCount: number }>(
+            "GET",
+            `/api/chats/${latestChat.id}/has-messages`
+          );
+          if (!data.hasMessages) {
+            // Reuse the existing empty chat
+            setLocation(`/chat/${latestChat.id}?openDataSources=true`);
+            return;
+          }
+        } catch (error) {
+          console.error("Failed to check chat messages:", error);
         }
-      } catch (error) {
-        console.error("Failed to check chat messages:", error);
       }
+      // Create a new chat
+      createChatMutation.mutate();
+    } finally {
+      isCreatingAnalysisRef.current = false;
     }
-    // Create a new chat
-    createChatMutation.mutate();
   };
 
   const handleRenameChat = (chat: Chat) => {
@@ -685,6 +702,7 @@ export function AppSidebar() {
               <TooltipTrigger asChild>
                 <Button
                   onClick={handleNewAnalysis}
+                  disabled={createChatMutation.isPending}
                   size="icon"
                   className="bg-primary hover:bg-primary/90 text-primary-foreground"
                   data-testid="button-new-analysis"
@@ -746,10 +764,11 @@ export function AppSidebar() {
           <>
             <Button
               onClick={handleNewAnalysis}
+              disabled={createChatMutation.isPending}
               className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
               data-testid="button-new-analysis"
             >
-              New Analysis
+              {createChatMutation.isPending ? "Creating…" : "New Analysis"}
               <Plus className="w-4 h-4 mr-2" />
             </Button>
 
