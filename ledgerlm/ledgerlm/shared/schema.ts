@@ -452,6 +452,7 @@ export const domains = pgTable("domains", {
   aiEmbeddingModel: text("ai_embedding_model"), // Azure deployment name for embeddings
   aiEmbeddingApiVersion: text("ai_embedding_api_version"), // e.g. 2024-02-01
   aiSystemPrompt: text("ai_system_prompt"),     // Custom system prompt (null = use default LedgerLM prompt)
+  aiAuthMethod: varchar("ai_auth_method", { length: 20 }).default('api_key'), // 'api_key' | 'entra_id' | 'private_endpoint'
   createdBy: varchar("created_by").notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => ({

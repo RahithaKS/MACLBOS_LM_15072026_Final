@@ -100,6 +100,7 @@ const createDomainSchema = z.object({
   emailFromAddress:   z.string().email().optional().nullable(),
   emailFromName:      z.string().max(100).optional().nullable(),
   aiProvider:         z.string().max(50).optional(),
+  aiAuthMethod:       z.enum(['api_key', 'entra_id', 'private_endpoint']).optional(),
   aiEndpoint:         z.string().url().optional().nullable(),
   aiApiKey:           z.string().max(500).optional().nullable(),
   aiChatModel:        z.string().max(100).optional().nullable(),
@@ -1430,11 +1431,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const domainUser = await storage.getDomainUserByEmail(emailToLookup);
               if (domainUser?.domainId) {
                 const domain = await storage.getDomain(domainUser.domainId);
-                if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && domain.aiApiKey) {
+                const isAzureKeyless1 = domain?.aiAuthMethod === 'entra_id' || domain?.aiAuthMethod === 'private_endpoint';
+                if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && (isAzureKeyless1 || domain.aiApiKey)) {
                   domainAiConfig = {
                     provider: 'azure_openai',
                     endpoint: domain.aiEndpoint,
-                    apiKey: decryptValue(domain.aiApiKey),
+                    apiKey: domain.aiApiKey ? decryptValue(domain.aiApiKey) : undefined,
                     chatModel: domain.aiChatModel || undefined,
                     chatApiVersion: domain.aiChatApiVersion || undefined,
                     systemPrompt: domain.aiSystemPrompt || undefined,
@@ -1623,11 +1625,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const domainUser = await storage.getDomainUserByEmail(emailToLookupVault);
           if (domainUser?.domainId) {
             const domain = await storage.getDomain(domainUser.domainId);
-            if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && domain.aiApiKey) {
+            const isAzureKeylessVault = domain?.aiAuthMethod === 'entra_id' || domain?.aiAuthMethod === 'private_endpoint';
+            if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && (isAzureKeylessVault || domain.aiApiKey)) {
               vaultAiConfig = {
                 provider: 'azure_openai',
+                auth_method: domain.aiAuthMethod || 'api_key',
                 endpoint: domain.aiEndpoint,
-                api_key: decryptValue(domain.aiApiKey),
+                ...(domain.aiApiKey ? { api_key: decryptValue(domain.aiApiKey) } : {}),
                 chat_model: domain.aiChatModel || '',
                 chat_api_version: domain.aiChatApiVersion || '2024-12-01-preview',
                 embedding_model: domain.aiEmbeddingModel || '',
@@ -2313,11 +2317,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const domainUser = await storage.getDomainUserByEmail(emailToLookupProc);
           if (domainUser?.domainId) {
             const domain = await storage.getDomain(domainUser.domainId);
-            if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && domain.aiApiKey) {
+            const isAzureKeylessProc = domain?.aiAuthMethod === 'entra_id' || domain?.aiAuthMethod === 'private_endpoint';
+            if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && (isAzureKeylessProc || domain.aiApiKey)) {
               processAiConfig = {
                 provider: 'azure_openai',
+                auth_method: domain.aiAuthMethod || 'api_key',
                 endpoint: domain.aiEndpoint,
-                api_key: decryptValue(domain.aiApiKey),
+                ...(domain.aiApiKey ? { api_key: decryptValue(domain.aiApiKey) } : {}),
                 chat_model: domain.aiChatModel || '',
                 chat_api_version: domain.aiChatApiVersion || '2024-12-01-preview',
                 embedding_model: domain.aiEmbeddingModel || '',
@@ -3774,7 +3780,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { name, adminEmail, defaultOtp, authMethod, ssoTenantId, ssoClientId, ssoClientSecret,
               ssoGroupId, ssoDefaultRole,
               emailProvider, emailSmtpUser, emailSmtpPass, emailFromAddress, emailFromName,
-              aiProvider, aiEndpoint, aiApiKey, aiChatModel, aiChatApiVersion,
+              aiProvider, aiAuthMethod, aiEndpoint, aiApiKey, aiChatModel, aiChatApiVersion,
               aiEmbeddingModel, aiEmbeddingApiVersion, aiSystemPrompt } = parsed.data;
 
       if (!name || !adminEmail) {
@@ -3828,8 +3834,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const resolvedAiProvider = aiProvider || 'ollama';
       createPayload.aiProvider = resolvedAiProvider;
       if (resolvedAiProvider === 'azure_openai') {
+        const resolvedAiAuthMethod = aiAuthMethod || 'api_key';
+        createPayload.aiAuthMethod = resolvedAiAuthMethod;
         createPayload.aiEndpoint = aiEndpoint || null;
-        createPayload.aiApiKey = aiApiKey ? encryptValue(aiApiKey) : null;
+        // Only store API key for key-based auth; keyless modes need no stored key
+        createPayload.aiApiKey = resolvedAiAuthMethod === 'api_key' && aiApiKey ? encryptValue(aiApiKey) : null;
         createPayload.aiChatModel = aiChatModel || null;
         createPayload.aiChatApiVersion = aiChatApiVersion || null;
         createPayload.aiEmbeddingModel = aiEmbeddingModel || null;
@@ -3893,7 +3902,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { adminEmail, defaultOtp, authMethod, ssoTenantId, ssoClientId, ssoClientSecret,
                 ssoGroupId, ssoDefaultRole,
                 emailProvider, emailSmtpUser, emailSmtpPass, emailFromAddress, emailFromName,
-                aiProvider, aiEndpoint, aiApiKey, aiChatModel, aiChatApiVersion,
+                aiProvider, aiAuthMethod, aiEndpoint, aiApiKey, aiChatModel, aiChatApiVersion,
                 aiEmbeddingModel, aiEmbeddingApiVersion, aiSystemPrompt } = req.body;
 
         const domain = await storage.getDomain(id);
@@ -3954,20 +3963,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const resolvedAiProvider = aiProvider || 'ollama';
         updatePayload.aiProvider = resolvedAiProvider;
         if (resolvedAiProvider === 'azure_openai') {
+          const resolvedAiAuthMethod = aiAuthMethod || 'api_key';
+          updatePayload.aiAuthMethod = resolvedAiAuthMethod;
           if (aiEndpoint !== undefined) updatePayload.aiEndpoint = aiEndpoint || null;
           if (aiChatModel !== undefined) updatePayload.aiChatModel = aiChatModel || null;
           if (aiChatApiVersion !== undefined) updatePayload.aiChatApiVersion = aiChatApiVersion || null;
           if (aiEmbeddingModel !== undefined) updatePayload.aiEmbeddingModel = aiEmbeddingModel || null;
           if (aiEmbeddingApiVersion !== undefined) updatePayload.aiEmbeddingApiVersion = aiEmbeddingApiVersion || null;
           if (aiSystemPrompt !== undefined) updatePayload.aiSystemPrompt = aiSystemPrompt || null;
-          // Only re-encrypt if a new non-placeholder key is provided
-          if (aiApiKey && aiApiKey !== '********') {
-            updatePayload.aiApiKey = encryptValue(aiApiKey);
+          if (resolvedAiAuthMethod === 'api_key') {
+            // Key-based: re-encrypt only if a new non-placeholder key is provided
+            if (aiApiKey && aiApiKey !== '********') {
+              updatePayload.aiApiKey = encryptValue(aiApiKey);
+            }
+          } else {
+            // Keyless (entra_id / private_endpoint): clear any stored key
+            updatePayload.aiApiKey = null;
           }
         } else {
           // Clearing AI config when switching back to ollama
           updatePayload.aiEndpoint = null;
           updatePayload.aiApiKey = null;
+          updatePayload.aiAuthMethod = 'api_key';
           updatePayload.aiChatModel = null;
           updatePayload.aiChatApiVersion = null;
           updatePayload.aiEmbeddingModel = null;
@@ -4477,11 +4494,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
               );
 
               // Build ai_config for domain-specific AI providers
-              const domainAiConfig = (domain.aiProvider === 'azure_openai' && domain.aiEndpoint && domain.aiApiKey)
+              const isAzureKeylessAuto = domain.aiAuthMethod === 'entra_id' || domain.aiAuthMethod === 'private_endpoint';
+              const domainAiConfig = (domain.aiProvider === 'azure_openai' && domain.aiEndpoint && (isAzureKeylessAuto || domain.aiApiKey))
                 ? {
                     provider: 'azure_openai',
+                    auth_method: domain.aiAuthMethod || 'api_key',
                     endpoint: domain.aiEndpoint,
-                    api_key: decryptValue(domain.aiApiKey!),
+                    ...(domain.aiApiKey ? { api_key: decryptValue(domain.aiApiKey!) } : {}),
                     chat_model: domain.aiChatModel || '',
                     chat_api_version: domain.aiChatApiVersion || '2024-12-01-preview',
                     embedding_model: domain.aiEmbeddingModel || '',
@@ -4555,11 +4574,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Look up domain AI config for this document
         const docDomain = document.domainId ? await storage.getDomain(document.domainId) : null;
-        const domainAiConfig = (docDomain?.aiProvider === 'azure_openai' && docDomain.aiEndpoint && docDomain.aiApiKey)
+        const isAzureKeylessDoc = docDomain?.aiAuthMethod === 'entra_id' || docDomain?.aiAuthMethod === 'private_endpoint';
+        const domainAiConfig = (docDomain?.aiProvider === 'azure_openai' && docDomain.aiEndpoint && (isAzureKeylessDoc || docDomain.aiApiKey))
           ? {
               provider: 'azure_openai',
+              auth_method: docDomain.aiAuthMethod || 'api_key',
               endpoint: docDomain.aiEndpoint,
-              api_key: decryptValue(docDomain.aiApiKey!),
+              ...(docDomain.aiApiKey ? { api_key: decryptValue(docDomain.aiApiKey!) } : {}),
               chat_model: docDomain.aiChatModel || '',
               chat_api_version: docDomain.aiChatApiVersion || '2024-12-01-preview',
               embedding_model: docDomain.aiEmbeddingModel || '',

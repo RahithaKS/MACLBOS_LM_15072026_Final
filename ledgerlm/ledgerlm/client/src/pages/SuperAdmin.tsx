@@ -60,6 +60,7 @@ interface Domain {
   emailFromAddress: string | null;
   emailFromName: string | null;
   aiProvider: string | null;
+  aiAuthMethod: string | null;
   aiEndpoint: string | null;
   aiApiKey: string | null;
   aiChatModel: string | null;
@@ -84,6 +85,7 @@ const defaultSsoFields = { ssoTenantId: '', ssoClientId: '', ssoClientSecret: ''
 const defaultEmailFields = { emailProvider: 'default', emailSmtpUser: '', emailSmtpPass: '', emailFromAddress: '', emailFromName: '' };
 const defaultAiFields = {
   aiProvider: 'ollama',
+  aiAuthMethod: 'api_key',
   aiEndpoint: '',
   aiApiKey: '',
   aiChatModel: '',
@@ -307,6 +309,7 @@ export default function SuperAdmin() {
       emailFromAddress: domain.emailFromAddress || '',
       emailFromName: domain.emailFromName || '',
       aiProvider: domain.aiProvider || 'ollama',
+      aiAuthMethod: domain.aiAuthMethod || 'api_key',
       aiEndpoint: domain.aiEndpoint || '',
       aiApiKey: domain.aiApiKey === '********' ? '********' : '',
       aiChatModel: domain.aiChatModel || '',
@@ -698,6 +701,37 @@ export default function SuperAdmin() {
                         <Cpu className="h-4 w-4" />
                         Azure OpenAI Configuration
                       </p>
+                      {/* Auth Method Selector */}
+                      <div className="space-y-2">
+                        <Label>Authentication Method</Label>
+                        <div className="flex gap-1 rounded-md border bg-muted/30 p-1">
+                          {(['api_key', 'entra_id', 'private_endpoint'] as const).map((method) => {
+                            const labels: Record<string, string> = { api_key: 'API Key', entra_id: 'Entra ID', private_endpoint: 'Private Endpoint' };
+                            return (
+                              <button
+                                key={method}
+                                type="button"
+                                onClick={() => setNewDomain({ ...newDomain, aiAuthMethod: method })}
+                                className={`flex-1 rounded px-2 py-1.5 text-xs font-medium transition-colors ${newDomain.aiAuthMethod === method ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                              >
+                                {labels[method]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {newDomain.aiAuthMethod === 'entra_id' && (
+                          <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800 space-y-0.5">
+                            <p className="font-medium">Keyless — no API key stored</p>
+                            <p>App Service uses its Managed Identity to authenticate via Azure RBAC. Requires: System-assigned Identity enabled on App Service + <strong>Cognitive Services OpenAI User</strong> role assigned in Azure IAM.</p>
+                          </div>
+                        )}
+                        {newDomain.aiAuthMethod === 'private_endpoint' && (
+                          <div className="rounded-md bg-purple-50 border border-purple-200 px-3 py-2 text-xs text-purple-800 space-y-0.5">
+                            <p className="font-medium">Entra ID + Private Network</p>
+                            <p>Traffic stays on the Microsoft backbone — no public internet. Requires: Private Endpoint configured in Azure VNet + VNet Integration on App Service + Managed Identity role assigned.</p>
+                          </div>
+                        )}
+                      </div>
                       <div className="space-y-2">
                         <Label htmlFor="ai-endpoint">Azure Endpoint</Label>
                         <Input
@@ -707,7 +741,11 @@ export default function SuperAdmin() {
                           onChange={(e) => setNewDomain({ ...newDomain, aiEndpoint: e.target.value })}
                           data-testid="input-ai-endpoint"
                         />
+                        {newDomain.aiAuthMethod === 'private_endpoint' && (
+                          <p className="text-xs text-muted-foreground">Use your private DNS hostname (resolves to a private IP inside the VNet).</p>
+                        )}
                       </div>
+                      {newDomain.aiAuthMethod === 'api_key' && (
                       <div className="space-y-2">
                         <Label htmlFor="ai-api-key">API Key</Label>
                         <Input
@@ -719,6 +757,7 @@ export default function SuperAdmin() {
                           data-testid="input-ai-api-key"
                         />
                       </div>
+                      )}
                       <div className="grid grid-cols-2 gap-2">
                         <div className="space-y-2">
                           <Label htmlFor="ai-chat-model">Chat Deployment</Label>
@@ -1234,6 +1273,37 @@ export default function SuperAdmin() {
                   <Cpu className="h-4 w-4" />
                   Azure OpenAI Configuration
                 </p>
+                {/* Auth Method Selector */}
+                <div className="space-y-2">
+                  <Label>Authentication Method</Label>
+                  <div className="flex gap-1 rounded-md border bg-muted/30 p-1">
+                    {(['api_key', 'entra_id', 'private_endpoint'] as const).map((method) => {
+                      const labels: Record<string, string> = { api_key: 'API Key', entra_id: 'Entra ID', private_endpoint: 'Private Endpoint' };
+                      return (
+                        <button
+                          key={method}
+                          type="button"
+                          onClick={() => setEditDomain({ ...editDomain, aiAuthMethod: method })}
+                          className={`flex-1 rounded px-2 py-1.5 text-xs font-medium transition-colors ${editDomain.aiAuthMethod === method ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                        >
+                          {labels[method]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {editDomain.aiAuthMethod === 'entra_id' && (
+                    <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800 space-y-0.5">
+                      <p className="font-medium">Keyless — no API key stored</p>
+                      <p>App Service uses its Managed Identity to authenticate via Azure RBAC. Requires: System-assigned Identity enabled on App Service + <strong>Cognitive Services OpenAI User</strong> role assigned in Azure IAM.</p>
+                    </div>
+                  )}
+                  {editDomain.aiAuthMethod === 'private_endpoint' && (
+                    <div className="rounded-md bg-purple-50 border border-purple-200 px-3 py-2 text-xs text-purple-800 space-y-0.5">
+                      <p className="font-medium">Entra ID + Private Network</p>
+                      <p>Traffic stays on the Microsoft backbone — no public internet. Requires: Private Endpoint configured in Azure VNet + VNet Integration on App Service + Managed Identity role assigned.</p>
+                    </div>
+                  )}
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit-ai-endpoint">Azure Endpoint</Label>
                   <Input
@@ -1243,7 +1313,11 @@ export default function SuperAdmin() {
                     onChange={(e) => setEditDomain({ ...editDomain, aiEndpoint: e.target.value })}
                     data-testid="input-edit-ai-endpoint"
                   />
+                  {editDomain.aiAuthMethod === 'private_endpoint' && (
+                    <p className="text-xs text-muted-foreground">Use your private DNS hostname (resolves to a private IP inside the VNet).</p>
+                  )}
                 </div>
+                {editDomain.aiAuthMethod === 'api_key' && (
                 <div className="space-y-2">
                   <Label htmlFor="edit-ai-api-key">API Key</Label>
                   <Input
@@ -1260,6 +1334,7 @@ export default function SuperAdmin() {
                     </p>
                   )}
                 </div>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-2">
                     <Label htmlFor="edit-ai-chat-model">Chat Deployment</Label>

@@ -338,23 +338,35 @@ def get_embeddings(texts, ai_config=None):
     processed_texts = [t.replace("\n", " ") for t in raw_strings]
     all_embeddings = []
 
+    emb_auth_method = ai_config.get("auth_method", "api_key") if ai_config else "api_key"
+    emb_is_keyless = emb_auth_method in ("entra_id", "private_endpoint")
+
     use_azure = (
         ai_config is not None
         and ai_config.get("provider") == "azure_openai"
         and ai_config.get("endpoint")
-        and ai_config.get("api_key")
         and ai_config.get("embedding_model")
+        and (emb_is_keyless or ai_config.get("api_key"))
     )
 
     if use_azure:
         endpoint = ai_config["endpoint"].rstrip("/")
-        api_key = ai_config["api_key"]
         deployment = ai_config["embedding_model"]
         api_version = ai_config.get("embedding_api_version", "2024-02-01")
         url = f"{endpoint}/openai/deployments/{deployment}/embeddings?api-version={api_version}"
         expected_dims = 3072  # text-embedding-3-large default
 
-        logger.info(f"[Azure Embeddings] Using deployment '{deployment}' at {endpoint}")
+        # Build auth header once for all embedding calls
+        if emb_is_keyless:
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            _emb_token_provider = get_bearer_token_provider(
+                DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
+            )
+            emb_azure_headers = {"Content-Type": "application/json", "Authorization": f"Bearer {_emb_token_provider()}"}
+        else:
+            emb_azure_headers = {"Content-Type": "application/json", "api-key": ai_config["api_key"]}
+
+        logger.info(f"[Azure Embeddings] Using deployment '{deployment}' at {endpoint} (auth: {emb_auth_method})")
 
         for text in processed_texts:
             max_retries = 3
@@ -363,7 +375,7 @@ def get_embeddings(texts, ai_config=None):
                     response = requests.post(
                         url,
                         json={"input": text},
-                        headers={"Content-Type": "application/json", "api-key": api_key},
+                        headers=emb_azure_headers,
                         timeout=60,
                         verify=True
                     )

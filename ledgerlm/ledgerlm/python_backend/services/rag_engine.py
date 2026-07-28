@@ -20,22 +20,34 @@ def get_ai_completion(prompt: str, system_prompt: str = None, ai_config: dict = 
         }
     When ai_config is None or provider != "azure_openai", falls back to Ollama.
     """
+    auth_method = ai_config.get("auth_method", "api_key") if ai_config else "api_key"
+    is_keyless = auth_method in ("entra_id", "private_endpoint")
+
     use_azure = (
         ai_config is not None
         and ai_config.get("provider") == "azure_openai"
         and ai_config.get("endpoint")
-        and ai_config.get("api_key")
         and ai_config.get("chat_model")
+        and (is_keyless or ai_config.get("api_key"))
     )
 
     if use_azure:
         endpoint = ai_config["endpoint"].rstrip("/")
-        api_key = ai_config["api_key"]
         deployment = ai_config["chat_model"]
         api_version = ai_config.get("chat_api_version", "2024-12-01-preview")
         # Use domain-level system prompt override if provided
         effective_system = ai_config.get("system_prompt") or system_prompt
         url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+
+        # Build auth header: Entra ID / Private Endpoint use Managed Identity token; API Key uses static key
+        if is_keyless:
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            _token_provider = get_bearer_token_provider(
+                DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
+            )
+            azure_headers = {"Content-Type": "application/json", "Authorization": f"Bearer {_token_provider()}"}
+        else:
+            azure_headers = {"Content-Type": "application/json", "api-key": ai_config["api_key"]}
 
         messages = []
         if effective_system:
@@ -45,7 +57,7 @@ def get_ai_completion(prompt: str, system_prompt: str = None, ai_config: dict = 
         response = requests.post(
             url,
             json={"messages": messages, "max_completion_tokens": 4096},
-            headers={"Content-Type": "application/json", "api-key": api_key},
+            headers=azure_headers,
             timeout=120,
             verify=True
         )
