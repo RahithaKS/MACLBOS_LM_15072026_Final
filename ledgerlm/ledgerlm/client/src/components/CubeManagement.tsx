@@ -148,7 +148,8 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
   const [azureContainerName, setAzureContainerName] = useState('');
   const [azureEndpointSuffix, setAzureEndpointSuffix] = useState('core.windows.net');
   const [azureBlobPrefix, setAzureBlobPrefix] = useState('');
-  
+  const [blobOptionsOpen, setBlobOptionsOpen] = useState(false);
+
   // Form state for edit
   const [editCubeName, setEditCubeName] = useState('');
   const [editCubeDescription, setEditCubeDescription] = useState('');
@@ -894,132 +895,202 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
 
       {/* Create Cube Wizard Dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={(open) => {
-        if (!open) resetCreateForm();
+        if (!open) { resetCreateForm(); setBlobOptionsOpen(false); }
         setIsCreateDialogOpen(open);
       }}>
-        <DialogContent className="max-w-lg flex flex-col max-h-[90vh]">
-          <DialogHeader className="flex-shrink-0">
-            <DialogTitle>Create New Cube</DialogTitle>
-            <DialogDescription>
-              {wizardStep === 'basics' && 'Step 1: Enter cube name and description'}
-              {wizardStep === 'source' && 'Step 2: Configure data source'}
-              {wizardStep === 'access' && 'Step 3: Select users who can access this cube'}
-            </DialogDescription>
+        <DialogContent className="max-w-xl flex flex-col max-h-[90vh]">
+
+          {/* Header */}
+          <DialogHeader className="flex-shrink-0 pb-0">
+            <DialogTitle className="text-lg">Create New Cube</DialogTitle>
           </DialogHeader>
 
-          {/* Progress indicator — pinned, never scrolls */}
-          <div className="flex items-center justify-center gap-2 py-2 flex-shrink-0">
-            {['basics', 'source', 'access'].map((step, idx) => (
-              <div key={step} className="flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                  wizardStep === step 
-                    ? 'bg-primary text-primary-foreground' 
-                    : idx < ['basics', 'source', 'access'].indexOf(wizardStep)
-                      ? 'bg-primary/20 text-primary'
-                      : 'bg-muted text-muted-foreground'
-                }`}>
-                  {idx < ['basics', 'source', 'access'].indexOf(wizardStep) ? <Check className="h-4 w-4" /> : idx + 1}
-                </div>
-                {idx < 2 && <div className="w-8 h-0.5 bg-muted" />}
+          {/* Step indicator — pinned, never scrolls */}
+          {(() => {
+            const steps = [
+              { key: 'basics', label: 'Basics' },
+              { key: 'source', label: 'Source' },
+              { key: 'access', label: 'Access' },
+            ];
+            const currentIdx = steps.findIndex(s => s.key === wizardStep);
+            return (
+              <div className="flex items-center gap-0 py-3 flex-shrink-0">
+                {steps.map((step, idx) => {
+                  const done = idx < currentIdx;
+                  const active = idx === currentIdx;
+                  return (
+                    <div key={step.key} className="flex items-center flex-1 last:flex-none">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 transition-colors ${
+                          done ? 'bg-primary text-primary-foreground' :
+                          active ? 'bg-primary text-primary-foreground ring-4 ring-primary/20' :
+                          'bg-muted text-muted-foreground'
+                        }`}>
+                          {done ? <Check className="h-3.5 w-3.5" /> : idx + 1}
+                        </div>
+                        <span className={`text-xs font-medium whitespace-nowrap ${active ? 'text-foreground' : done ? 'text-primary' : 'text-muted-foreground'}`}>
+                          {step.label}
+                        </span>
+                      </div>
+                      {idx < steps.length - 1 && (
+                        <div className={`flex-1 h-px mx-3 ${idx < currentIdx ? 'bg-primary' : 'bg-border'}`} />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            );
+          })()}
 
           {/* Scrollable step content */}
-          <div className="flex-1 overflow-y-auto min-h-0 px-0.5">
+          <div className="flex-1 overflow-y-auto min-h-0 pr-1">
 
-          {/* Step 1: Basics */}
+          {/* ── Step 1: Basics ── */}
           {wizardStep === 'basics' && (
-            <div className="space-y-4">
+            <div className="space-y-5 pb-1">
               <div>
-                <Label htmlFor="cube-name">Cube Name *</Label>
+                <Label htmlFor="cube-name" className="text-sm font-medium">Cube Name <span className="text-destructive">*</span></Label>
                 <Input
                   id="cube-name"
+                  className="mt-1.5"
                   placeholder="e.g., KPI Metrics, P&L Reports"
                   value={newCubeName}
                   onChange={(e) => setNewCubeName(e.target.value)}
                   data-testid="input-cube-name"
                 />
               </div>
+
               <div>
-                <Label htmlFor="cube-description">Description (optional)</Label>
+                <Label htmlFor="cube-description" className="text-sm font-medium">
+                  Description <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
                 <Textarea
                   id="cube-description"
+                  className="mt-1.5 resize-none"
+                  rows={2}
                   placeholder="Describe what data this cube contains..."
                   value={newCubeDescription}
                   onChange={(e) => setNewCubeDescription(e.target.value)}
                   data-testid="input-cube-description"
                 />
               </div>
+
               <div>
-                <Label className="mb-2 block">Schema Type *</Label>
+                <Label className="text-sm font-medium block mb-2">
+                  Schema Type <span className="text-destructive">*</span>
+                </Label>
                 <RadioGroup
                   value={newCubeSchemaType}
                   onValueChange={(v) => setNewCubeSchemaType(v as 'kpi' | 'investment_capex_pmo')}
-                  className="space-y-2"
+                  className="grid grid-cols-2 gap-3"
                   data-testid="radio-schema-type"
                 >
+                  {/* KPI card */}
                   <div
-                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${newCubeSchemaType === 'kpi' ? 'border-primary bg-primary/5' : 'hover:bg-muted/30'}`}
+                    className={`relative flex flex-col gap-2 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      newCubeSchemaType === 'kpi'
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-primary/40 hover:bg-muted/30'
+                    }`}
                     onClick={() => setNewCubeSchemaType('kpi')}
                   >
-                    <RadioGroupItem value="kpi" id="schema-kpi" className="mt-0.5" />
-                    <div className="flex-1">
-                      <Label htmlFor="schema-kpi" className="cursor-pointer font-medium">KPI — Capacity &amp; Revenue</Label>
-                      <p className="text-xs text-muted-foreground mt-0.5">Workforce, billing utilisation, headcount and revenue data (MV_GB_INSIGHTS format)</p>
+                    <RadioGroupItem value="kpi" id="schema-kpi" className="sr-only" />
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${newCubeSchemaType === 'kpi' ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                      <Database className="h-4.5 w-4.5" />
                     </div>
+                    <div>
+                      <Label htmlFor="schema-kpi" className="cursor-pointer font-semibold text-sm leading-tight">KPI — Capacity &amp; Revenue</Label>
+                      <p className="text-xs text-muted-foreground mt-1 leading-snug">Workforce, billing utilisation, headcount &amp; revenue data</p>
+                    </div>
+                    {newCubeSchemaType === 'kpi' && (
+                      <div className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+                        <Check className="h-2.5 w-2.5 text-primary-foreground" />
+                      </div>
+                    )}
                   </div>
+
+                  {/* Investment / CAPEX card */}
                   <div
-                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${newCubeSchemaType === 'investment_capex_pmo' ? 'border-primary bg-primary/5' : 'hover:bg-muted/30'}`}
+                    className={`relative flex flex-col gap-2 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      newCubeSchemaType === 'investment_capex_pmo'
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-primary/40 hover:bg-muted/30'
+                    }`}
                     onClick={() => setNewCubeSchemaType('investment_capex_pmo')}
                   >
-                    <RadioGroupItem value="investment_capex_pmo" id="schema-investment" className="mt-0.5" />
-                    <div className="flex-1">
-                      <Label htmlFor="schema-investment" className="cursor-pointer font-medium">Investment / CAPEX / PMO</Label>
-                      <p className="text-xs text-muted-foreground mt-0.5">Project budgets, capital expenditure tracking and PMO approved vs actual (Investment Tracker format)</p>
+                    <RadioGroupItem value="investment_capex_pmo" id="schema-investment" className="sr-only" />
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${newCubeSchemaType === 'investment_capex_pmo' ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                      <Layers className="h-4.5 w-4.5" />
                     </div>
+                    <div>
+                      <Label htmlFor="schema-investment" className="cursor-pointer font-semibold text-sm leading-tight">Investment / CAPEX / PMO</Label>
+                      <p className="text-xs text-muted-foreground mt-1 leading-snug">Project budgets, CAPEX tracking &amp; PMO approved vs actual</p>
+                    </div>
+                    {newCubeSchemaType === 'investment_capex_pmo' && (
+                      <div className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+                        <Check className="h-2.5 w-2.5 text-primary-foreground" />
+                      </div>
+                    )}
                   </div>
                 </RadioGroup>
               </div>
             </div>
           )}
 
-          {/* Step 2: Source Configuration */}
+          {/* ── Step 2: Source Configuration ── */}
           {wizardStep === 'source' && (
-            <div className="space-y-4">
+            <div className="space-y-5 pb-1">
+
+              {/* Source type — 2×2 icon tile grid */}
               <div>
-                <Label>Data Source</Label>
-                <RadioGroup value={newCubeSourceType} onValueChange={setNewCubeSourceType} className="mt-2">
+                <Label className="text-sm font-medium block mb-2">Data Source</Label>
+                <div className="grid grid-cols-2 gap-3">
                   {SOURCE_TYPE_OPTIONS.map(opt => {
                     const Icon = opt.icon;
+                    const active = newCubeSourceType === opt.value;
                     return (
-                      <div key={opt.value} className="flex items-start gap-3 p-3 rounded-lg border hover-elevate cursor-pointer" onClick={() => setNewCubeSourceType(opt.value)}>
-                        <RadioGroupItem value={opt.value} id={`source-${opt.value}`} className="mt-1" />
-                        <div className="flex-1">
-                          <Label htmlFor={`source-${opt.value}`} className="flex items-center gap-2 cursor-pointer font-medium">
-                            <Icon className="h-4 w-4" />
-                            {opt.label}
-                          </Label>
-                          <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setNewCubeSourceType(opt.value)}
+                        className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 cursor-pointer transition-all text-center ${
+                          active
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border hover:border-primary/40 hover:bg-muted/20'
+                        }`}
+                      >
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                          <Icon className="h-5 w-5" />
                         </div>
-                      </div>
+                        <div>
+                          <p className={`text-xs font-semibold ${active ? 'text-foreground' : 'text-muted-foreground'}`}>{opt.label}</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{opt.description}</p>
+                        </div>
+                        {active && (
+                          <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+                            <Check className="h-2.5 w-2.5 text-primary-foreground" />
+                          </div>
+                        )}
+                      </button>
                     );
                   })}
-                </RadioGroup>
+                </div>
               </div>
 
-              {/* Anaplan Configuration */}
+              {/* ── Anaplan Configuration ── */}
               {newCubeSourceType === 'anaplan' && (
-                <div className="space-y-4 pt-2 border-t">
-                  <div>
-                    <Label className="text-sm font-medium">Anaplan Configuration</Label>
-                    <p className="text-xs text-muted-foreground mb-3">Enter your Anaplan workspace details</p>
+                <div className="space-y-4 pt-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="h-px flex-1 bg-border" />
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Connection</span>
+                    <div className="h-px flex-1 bg-border" />
                   </div>
                   <div className="grid grid-cols-1 gap-3">
                     <div>
-                      <Label htmlFor="anaplan-workspace">Workspace ID *</Label>
+                      <Label htmlFor="anaplan-workspace" className="text-xs font-medium">Workspace ID <span className="text-destructive">*</span></Label>
                       <Input
                         id="anaplan-workspace"
+                        className="mt-1"
                         placeholder="e.g., 8a868cdc7e5feca9017e8e4afdd57430"
                         value={anaplanWorkspaceId}
                         onChange={(e) => setAnaplanWorkspaceId(e.target.value)}
@@ -1027,9 +1098,10 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                       />
                     </div>
                     <div>
-                      <Label htmlFor="anaplan-model">Model ID *</Label>
+                      <Label htmlFor="anaplan-model" className="text-xs font-medium">Model ID <span className="text-destructive">*</span></Label>
                       <Input
                         id="anaplan-model"
+                        className="mt-1"
                         placeholder="e.g., BE462879B50444F498A0DA70F40FABA2"
                         value={anaplanModelId}
                         onChange={(e) => setAnaplanModelId(e.target.value)}
@@ -1037,19 +1109,28 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                       />
                     </div>
                     <div>
-                      <Label htmlFor="anaplan-process">Export Process ID *</Label>
+                      <Label htmlFor="anaplan-process" className="text-xs font-medium">Export Process ID <span className="text-destructive">*</span></Label>
                       <Input
                         id="anaplan-process"
+                        className="mt-1"
                         placeholder="e.g., 118000000093"
                         value={anaplanProcessId}
                         onChange={(e) => setAnaplanProcessId(e.target.value)}
                         data-testid="input-anaplan-process"
                       />
                     </div>
+                  </div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="h-px flex-1 bg-border" />
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Credentials</span>
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+                  <div className="grid grid-cols-1 gap-3">
                     <div>
-                      <Label htmlFor="anaplan-username">Username (Email) *</Label>
+                      <Label htmlFor="anaplan-username" className="text-xs font-medium">Username (Email) <span className="text-destructive">*</span></Label>
                       <Input
                         id="anaplan-username"
+                        className="mt-1"
                         type="email"
                         placeholder="user@company.com"
                         value={anaplanUsername}
@@ -1058,9 +1139,10 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                       />
                     </div>
                     <div>
-                      <Label htmlFor="anaplan-password">Password *</Label>
+                      <Label htmlFor="anaplan-password" className="text-xs font-medium">Password <span className="text-destructive">*</span></Label>
                       <Input
                         id="anaplan-password"
+                        className="mt-1"
                         type="password"
                         placeholder="Enter Anaplan password"
                         value={anaplanPassword}
@@ -1072,30 +1154,53 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                 </div>
               )}
 
-              {/* Azure Blob Configuration */}
+              {/* ── Azure Blob Configuration ── */}
               {newCubeSourceType === 'azure_blob' && (
-                <div className="space-y-4 pt-2 border-t">
-                  <div>
-                    <Label className="text-sm font-medium">Azure Blob Storage Configuration</Label>
-                    <p className="text-xs text-muted-foreground mb-3">Enter your Azure storage account details</p>
+                <div className="space-y-4 pt-1">
+
+                  {/* CONNECTION section */}
+                  <div className="flex items-center gap-2">
+                    <div className="h-px flex-1 bg-border" />
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Connection</span>
+                    <div className="h-px flex-1 bg-border" />
                   </div>
                   <div className="grid grid-cols-1 gap-3">
                     <div>
-                      <Label htmlFor="azure-account">Storage Account Name *</Label>
+                      <Label htmlFor="azure-account" className="text-xs font-medium">Storage Account Name <span className="text-destructive">*</span></Label>
                       <Input
                         id="azure-account"
+                        className="mt-1"
                         placeholder="e.g., mystorageaccount"
                         value={azureAccountName}
                         onChange={(e) => setAzureAccountName(e.target.value)}
                         data-testid="input-azure-account"
                       />
                     </div>
-                    {/* Auth mode toggle */}
+                    <div>
+                      <Label htmlFor="azure-container" className="text-xs font-medium">Container Name <span className="text-destructive">*</span></Label>
+                      <Input
+                        id="azure-container"
+                        className="mt-1"
+                        placeholder="e.g., documents"
+                        value={azureContainerName}
+                        onChange={(e) => setAzureContainerName(e.target.value)}
+                        data-testid="input-azure-container"
+                      />
+                    </div>
+                  </div>
+
+                  {/* AUTHENTICATION section */}
+                  <div className="flex items-center gap-2">
+                    <div className="h-px flex-1 bg-border" />
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Authentication</span>
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+                  <div className="space-y-3">
                     <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => setAzureAuthType('account_key')}
-                        className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${azureAuthType === 'account_key' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
+                        className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${azureAuthType === 'account_key' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted/30'}`}
                         data-testid="button-auth-account-key"
                       >
                         Account Key
@@ -1103,7 +1208,7 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                       <button
                         type="button"
                         onClick={() => setAzureAuthType('sas_token')}
-                        className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${azureAuthType === 'sas_token' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
+                        className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${azureAuthType === 'sas_token' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted/30'}`}
                         data-testid="button-auth-sas-token"
                       >
                         SAS Token
@@ -1111,17 +1216,19 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                       <button
                         type="button"
                         onClick={() => setAzureAuthType('azure_ad')}
-                        className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${azureAuthType === 'azure_ad' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
+                        className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${azureAuthType === 'azure_ad' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted/30'}`}
                         data-testid="button-auth-azure-ad"
                       >
                         Azure AD
                       </button>
                     </div>
+
                     {azureAuthType === 'account_key' && (
                       <div>
-                        <Label htmlFor="azure-key">Account Key *</Label>
+                        <Label htmlFor="azure-key" className="text-xs font-medium">Account Key <span className="text-destructive">*</span></Label>
                         <Input
                           id="azure-key"
+                          className="mt-1"
                           type="password"
                           placeholder="Enter storage account key"
                           value={azureAccountKey}
@@ -1132,25 +1239,27 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                     )}
                     {azureAuthType === 'sas_token' && (
                       <div>
-                        <Label htmlFor="azure-sas">SAS Token *</Label>
+                        <Label htmlFor="azure-sas" className="text-xs font-medium">SAS Token <span className="text-destructive">*</span></Label>
                         <Input
                           id="azure-sas"
+                          className="mt-1"
                           type="password"
                           placeholder="sv=2023-01-03&ss=b&srt=co&..."
                           value={azureSasToken}
                           onChange={(e) => setAzureSasToken(e.target.value)}
                           data-testid="input-azure-sas"
                         />
-                        <p className="text-xs text-muted-foreground mt-1">Account-SAS token. Note: also blocked when "Allow shared key access" is disabled on the account — use Azure AD in that case.</p>
+                        <p className="text-xs text-muted-foreground mt-1">Account-SAS token. Also blocked when "Allow shared key access" is disabled — use Azure AD in that case.</p>
                       </div>
                     )}
                     {azureAuthType === 'azure_ad' && (
-                      <div className="space-y-2">
+                      <div className="space-y-2.5">
                         <p className="text-xs text-muted-foreground">Works even when Shared Key access is disabled. Register an app in Entra ID and assign it Storage Blob Data Reader on the container.</p>
                         <div>
-                          <Label htmlFor="azure-tenant">Tenant ID *</Label>
+                          <Label htmlFor="azure-tenant" className="text-xs font-medium">Tenant ID <span className="text-destructive">*</span></Label>
                           <Input
                             id="azure-tenant"
+                            className="mt-1"
                             placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                             value={azureTenantId}
                             onChange={(e) => setAzureTenantId(e.target.value)}
@@ -1158,9 +1267,10 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                           />
                         </div>
                         <div>
-                          <Label htmlFor="azure-client-id">Application (Client) ID *</Label>
+                          <Label htmlFor="azure-client-id" className="text-xs font-medium">Application (Client) ID <span className="text-destructive">*</span></Label>
                           <Input
                             id="azure-client-id"
+                            className="mt-1"
                             placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                             value={azureClientId}
                             onChange={(e) => setAzureClientId(e.target.value)}
@@ -1168,9 +1278,10 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                           />
                         </div>
                         <div>
-                          <Label htmlFor="azure-client-secret">Client Secret *</Label>
+                          <Label htmlFor="azure-client-secret" className="text-xs font-medium">Client Secret <span className="text-destructive">*</span></Label>
                           <Input
                             id="azure-client-secret"
+                            className="mt-1"
                             type="password"
                             placeholder="Enter client secret value"
                             value={azureClientSecret}
@@ -1180,45 +1291,55 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                         </div>
                       </div>
                     )}
-                    <div>
-                      <Label htmlFor="azure-container">Container Name *</Label>
-                      <Input
-                        id="azure-container"
-                        placeholder="e.g., documents"
-                        value={azureContainerName}
-                        onChange={(e) => setAzureContainerName(e.target.value)}
-                        data-testid="input-azure-container"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="azure-endpoint">Endpoint Suffix</Label>
-                      <Input
-                        id="azure-endpoint"
-                        placeholder="core.windows.net"
-                        value={azureEndpointSuffix}
-                        onChange={(e) => setAzureEndpointSuffix(e.target.value)}
-                        data-testid="input-azure-endpoint"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">Leave as default unless using a private Azure endpoint</p>
-                    </div>
-                    <div>
-                      <Label htmlFor="azure-prefix">Folder Prefix Filter</Label>
-                      <Input
-                        id="azure-prefix"
-                        placeholder="e.g., 2025/ or bosch/pl-data/"
-                        value={azureBlobPrefix}
-                        onChange={(e) => setAzureBlobPrefix(e.target.value)}
-                        data-testid="input-azure-prefix"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">Only sync files inside this folder. Leave blank to sync everything in the container.</p>
-                    </div>
                   </div>
+
+                  {/* OPTIONS section — collapsible */}
+                  <button
+                    type="button"
+                    onClick={() => setBlobOptionsOpen(o => !o)}
+                    className="flex items-center gap-2 w-full group"
+                  >
+                    <div className="h-px flex-1 bg-border group-hover:bg-primary/30 transition-colors" />
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground group-hover:text-foreground px-1 flex items-center gap-1 transition-colors">
+                      Options
+                      {blobOptionsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    </span>
+                    <div className="h-px flex-1 bg-border group-hover:bg-primary/30 transition-colors" />
+                  </button>
+                  {blobOptionsOpen && (
+                    <div className="space-y-3">
+                      <div>
+                        <Label htmlFor="azure-endpoint" className="text-xs font-medium">Endpoint Suffix</Label>
+                        <Input
+                          id="azure-endpoint"
+                          className="mt-1"
+                          placeholder="core.windows.net"
+                          value={azureEndpointSuffix}
+                          onChange={(e) => setAzureEndpointSuffix(e.target.value)}
+                          data-testid="input-azure-endpoint"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">Leave as default unless using a private Azure endpoint</p>
+                      </div>
+                      <div>
+                        <Label htmlFor="azure-prefix" className="text-xs font-medium">Folder Prefix Filter</Label>
+                        <Input
+                          id="azure-prefix"
+                          className="mt-1"
+                          placeholder="e.g., 2025/ or bosch/pl-data/"
+                          value={azureBlobPrefix}
+                          onChange={(e) => setAzureBlobPrefix(e.target.value)}
+                          data-testid="input-azure-prefix"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">Only sync files inside this folder. Leave blank to sync everything.</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Schedule config - shown for Anaplan and Azure Blob */}
+              {/* Schedule config — shown for Anaplan and Azure Blob */}
               {(newCubeSourceType === 'anaplan' || newCubeSourceType === 'azure_blob') && (
-                <div className="space-y-3 pt-2 border-t">
+                <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
                   <div className="flex items-center gap-2">
                     <Checkbox 
                       id="schedule-enabled" 
@@ -1226,17 +1347,18 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                       onCheckedChange={(checked) => setNewCubeScheduleEnabled(checked === true)}
                       data-testid="checkbox-schedule-enabled"
                     />
-                    <Label htmlFor="schedule-enabled" className="flex items-center gap-1 cursor-pointer">
-                      <Clock className="h-4 w-4" />
+                    <Label htmlFor="schedule-enabled" className="flex items-center gap-1.5 cursor-pointer text-sm font-medium">
+                      <Clock className="h-3.5 w-3.5 text-muted-foreground" />
                       Enable automatic sync schedule
                     </Label>
                   </div>
                   {newCubeScheduleEnabled && (
                     <div className="grid grid-cols-2 gap-3 pl-6">
                       <div>
-                        <Label htmlFor="schedule-time">Sync Time</Label>
+                        <Label htmlFor="schedule-time" className="text-xs font-medium">Sync Time</Label>
                         <Input
                           id="schedule-time"
+                          className="mt-1"
                           type="time"
                           value={newCubeScheduleTime}
                           onChange={(e) => setNewCubeScheduleTime(e.target.value)}
@@ -1244,9 +1366,9 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                         />
                       </div>
                       <div>
-                        <Label htmlFor="schedule-timezone">Timezone</Label>
+                        <Label htmlFor="schedule-timezone" className="text-xs font-medium">Timezone</Label>
                         <Select value={newCubeScheduleTimezone} onValueChange={setNewCubeScheduleTimezone}>
-                          <SelectTrigger data-testid="select-schedule-timezone">
+                          <SelectTrigger className="mt-1" data-testid="select-schedule-timezone">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -1263,37 +1385,62 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                       </div>
                     </div>
                   )}
-                  <p className="text-xs text-muted-foreground pl-6">
-                    Configure when data syncs to this cube automatically
-                  </p>
+                  {!newCubeScheduleEnabled && (
+                    <p className="text-xs text-muted-foreground pl-6">Configure when data syncs to this cube automatically</p>
+                  )}
                 </div>
               )}
             </div>
           )}
 
-          {/* Step 3: User Access */}
+          {/* ── Step 3: User Access ── */}
           {wizardStep === 'access' && (
-            <div className="space-y-4">
+            <div className="space-y-4 pb-1">
               <div>
-                <Label>Grant Access to Users</Label>
-                <p className="text-xs text-muted-foreground mb-2">Select which domain users can access documents in this cube</p>
+                <p className="text-sm text-muted-foreground">Select which domain users can access documents in this cube.</p>
               </div>
               {usersLoading ? (
-                <div className="text-muted-foreground text-sm">Loading users...</div>
+                <div className="flex items-center gap-2 text-muted-foreground text-sm py-4">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading users...
+                </div>
               ) : domainUsers.length === 0 ? (
-                <div className="text-center py-4 text-muted-foreground text-sm">
+                <div className="text-center py-8 text-muted-foreground text-sm border rounded-lg bg-muted/20">
                   No users in this domain. You can add users later via User Management.
                 </div>
               ) : (
                 <>
-                  <ScrollArea className="h-48 border rounded-md p-2">
-                    <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-muted-foreground">Grant access</span>
+                      {selectedUsersForCreate.size > 0 && (
+                        <Badge variant="secondary" className="text-xs h-5 px-1.5">
+                          {selectedUsersForCreate.size} selected
+                        </Badge>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline"
+                      onClick={() => {
+                        if (selectedUsersForCreate.size === domainUsers.length) {
+                          setSelectedUsersForCreate(new Set());
+                        } else {
+                          setSelectedUsersForCreate(new Set(domainUsers.map(u => u.email.toLowerCase())));
+                        }
+                      }}
+                    >
+                      {selectedUsersForCreate.size === domainUsers.length ? 'Deselect all' : 'Select all'}
+                    </button>
+                  </div>
+                  <ScrollArea className="h-52 border rounded-lg">
+                    <div className="p-1.5 space-y-0.5">
                       {domainUsers.map((user) => {
                         const isSelected = selectedUsersForCreate.has(user.email.toLowerCase());
                         return (
                           <div 
                             key={user.id} 
-                            className="flex items-center gap-3 p-2 rounded hover-elevate cursor-pointer"
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors ${isSelected ? 'bg-primary/5' : 'hover:bg-muted/40'}`}
                             onClick={() => toggleUserSelection(user.email, true)}
                           >
                             <Checkbox 
@@ -1302,15 +1449,14 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
                               onCheckedChange={() => toggleUserSelection(user.email, true)} 
                             />
                             <span className="text-sm flex-1">{user.email}</span>
-                            {user.role === 'admin' && <Badge variant="outline" className="text-xs">Admin</Badge>}
+                            {user.role === 'admin' && (
+                              <Badge variant="outline" className="text-xs h-5 px-1.5">Admin</Badge>
+                            )}
                           </div>
                         );
                       })}
                     </div>
                   </ScrollArea>
-                  <p className="text-xs text-muted-foreground">
-                    {selectedUsersForCreate.size} user{selectedUsersForCreate.size !== 1 ? 's' : ''} selected
-                  </p>
                 </>
               )}
             </div>
@@ -1318,24 +1464,37 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
 
           </div>{/* end scrollable step content */}
 
-          {/* Navigation buttons — pinned at bottom, never scrolls */}
-          <div className="flex justify-between gap-2 pt-2 flex-shrink-0 border-t">
+          {/* Navigation footer — pinned at bottom, never scrolls */}
+          <div className="flex items-center justify-between gap-2 pt-3 flex-shrink-0 border-t">
             <Button 
-              variant="outline" 
+              variant="ghost"
+              size="sm"
               onClick={wizardStep === 'basics' ? () => setIsCreateDialogOpen(false) : handlePrevStep}
+              className="text-muted-foreground"
             >
               {wizardStep === 'basics' ? 'Cancel' : <><ChevronLeft className="h-4 w-4 mr-1" /> Back</>}
             </Button>
+
+            <span className="text-xs text-muted-foreground">
+              Step {['basics','source','access'].indexOf(wizardStep) + 1} of 3
+            </span>
+
             {wizardStep === 'access' ? (
               <Button 
+                size="sm"
                 onClick={() => createCubeMutation.mutate()}
                 disabled={createCubeMutation.isPending}
                 data-testid="button-confirm-create-cube"
               >
-                {createCubeMutation.isPending ? 'Creating...' : 'Create Cube'}
+                {createCubeMutation.isPending ? (
+                  <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Creating...</>
+                ) : (
+                  <><Check className="h-3.5 w-3.5 mr-1.5" /> Create Cube</>
+                )}
               </Button>
             ) : (
               <Button 
+                size="sm"
                 onClick={handleNextStep}
                 disabled={!canProceedToNextStep()}
               >
