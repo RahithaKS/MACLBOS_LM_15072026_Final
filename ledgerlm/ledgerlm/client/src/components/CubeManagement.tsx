@@ -897,8 +897,8 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
         if (!open) resetCreateForm();
         setIsCreateDialogOpen(open);
       }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="max-w-lg flex flex-col max-h-[90vh]">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>Create New Cube</DialogTitle>
             <DialogDescription>
               {wizardStep === 'basics' && 'Step 1: Enter cube name and description'}
@@ -907,8 +907,8 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
             </DialogDescription>
           </DialogHeader>
 
-          {/* Progress indicator */}
-          <div className="flex items-center justify-center gap-2 py-2">
+          {/* Progress indicator — pinned, never scrolls */}
+          <div className="flex items-center justify-center gap-2 py-2 flex-shrink-0">
             {['basics', 'source', 'access'].map((step, idx) => (
               <div key={step} className="flex items-center gap-2">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
@@ -924,6 +924,9 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
               </div>
             ))}
           </div>
+
+          {/* Scrollable step content */}
+          <div className="flex-1 overflow-y-auto min-h-0 px-0.5">
 
           {/* Step 1: Basics */}
           {wizardStep === 'basics' && (
@@ -1313,8 +1316,10 @@ export function CubeManagement({ domainId, domainName, isSuperAdmin }: CubeManag
             </div>
           )}
 
-          {/* Navigation buttons */}
-          <div className="flex justify-between gap-2 pt-2">
+          </div>{/* end scrollable step content */}
+
+          {/* Navigation buttons — pinned at bottom, never scrolls */}
+          <div className="flex justify-between gap-2 pt-2 flex-shrink-0 border-t">
             <Button 
               variant="outline" 
               onClick={wizardStep === 'basics' ? () => setIsCreateDialogOpen(false) : handlePrevStep}
