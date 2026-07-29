@@ -1,7 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { db } from "./db";
+import { db, dbAuthMode } from "./db";
+import { getTokenStatus } from "./utils/entraToken";
 import { generateAuthUrl, exchangeCodeForUser, validateEmailDomain, buildRedirectUri, resolveGroupRole, hasSsoGroupMappings } from "./services/ssoService";
 import { encryptValue, decryptValue } from "./utils/encryption";
 import {
@@ -3606,6 +3607,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error fetching Anaplan status:", error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ── DB Connection Status ────────────────────────────────────────────────────
+  app.get("/api/admin/db-status", async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const user = await storage.getUser(userId);
+      if (user?.role !== "admin") {
+        return res.status(403).json({ error: "Forbidden: Admin access required" });
+      }
+
+      const mode = dbAuthMode;
+      const isEntra = mode === "entra" || mode === "hybrid";
+      const tokenStatus = isEntra ? getTokenStatus() : null;
+
+      // Quick connectivity probe
+      let connected = false;
+      try {
+        await storage.db.execute("SELECT 1" as any);
+        connected = true;
+      } catch (_) {
+        connected = false;
+      }
+
+      res.json({
+        mode,
+        connected,
+        host: process.env.DB_HOST
+          ? process.env.DB_HOST.replace(/^([^.]{4}).*/, "$1****")
+          : null,
+        database: process.env.DB_NAME || null,
+        tokenStatus,
+      });
+    } catch (error: any) {
+      console.error("Error fetching DB status:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 

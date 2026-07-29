@@ -7,8 +7,19 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     
-    # Database
+    # Database — legacy URL (used when DB_AUTH_MODE is not set)
     DATABASE_URL: str = os.environ.get("NEON_DATABASE_URL", os.environ.get("DATABASE_URL", ""))
+
+    # Database — auth mode selector
+    # Values: "" / "neon" (default), "postgres-azure", "entra", "hybrid"
+    # When "entra" or "hybrid": DB_HOST + DB_USER + DB_NAME are used; password
+    # is fetched automatically from Azure IMDS (no DB_PASSWORD needed).
+    # When "postgres-azure": DB_HOST + DB_USER + DB_NAME + DB_PASSWORD are used.
+    DB_AUTH_MODE: str = os.environ.get("DB_AUTH_MODE", "")
+    DB_HOST: str = os.environ.get("DB_HOST", "")
+    DB_USER: str = os.environ.get("DB_USER", "")
+    DB_NAME: str = os.environ.get("DB_NAME", "")
+    DB_PASSWORD: str = os.environ.get("DB_PASSWORD", "")
     
     # Ollama (OpenAI Compatible)
     OLLAMA_BASE_URL: str = os.environ.get("OLLAMA_BASE_URL", "https://ollama.ledgerlm.ai").replace("/v1", "").rstrip("/")

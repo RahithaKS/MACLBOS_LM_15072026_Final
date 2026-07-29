@@ -28,6 +28,7 @@ import { runSemanticSqlMigration } from "./migrations/create-semantic-sql-tables
 import { runSchemaConfigMigration } from "./migrations/create-schema-config-tables";
 import { createIngestionJobsTable } from "./migrations/create-ingestion-jobs";
 import { createBusinessLogicTables } from "./migrations/create-business-logic-tables";
+import { getEntraToken } from "./utils/entraToken";
 import { addSsoColumnsToDomains } from "./migrations/add-sso-columns";
 import { addSsoGroupColumnsToDomains } from "./migrations/add-sso-group-columns";
 import { addEmailConfigColumnsToDomains } from "./migrations/add-email-config-columns";
@@ -145,21 +146,44 @@ if (!process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET environment variable is required");
 }
 
-const dbUrl = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
-if (!dbUrl) {
-  throw new Error("NEON_DATABASE_URL environment variable is required");
+// ── Session pool — mirrors the auth-mode logic in db.ts ──────────────────────
+const _sessionAuthMode = (process.env.DB_AUTH_MODE || '').toLowerCase();
+let sessionPool: Pool;
+
+if (_sessionAuthMode === 'entra' || _sessionAuthMode === 'hybrid') {
+  sessionPool = new Pool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    database: process.env.DB_NAME,
+    port: 5432,
+    password: () => getEntraToken(),
+    ssl: { rejectUnauthorized: false },
+  });
+} else if (_sessionAuthMode === 'postgres-azure') {
+  sessionPool = new Pool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    database: process.env.DB_NAME,
+    password: process.env.DB_PASSWORD,
+    port: 5432,
+    ssl: { rejectUnauthorized: false },
+  });
+} else {
+  // Default: Neon / local (unchanged)
+  const dbUrl = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
+  if (!dbUrl) {
+    throw new Error("NEON_DATABASE_URL environment variable is required");
+  }
+  const isLocalDb =
+    dbUrl.includes('localhost') ||
+    dbUrl.includes('ledgerlm-db') ||
+    dbUrl.includes('172.17.') ||
+    dbUrl.includes('127.0.0.1');
+  sessionPool = new Pool({
+    connectionString: dbUrl,
+    ssl: isLocalDb ? false : { rejectUnauthorized: false },
+  });
 }
-
-// Determine if SSL should be used (disabled for local Docker containers)
-const isLocalDb = dbUrl.includes('localhost') || 
-                  dbUrl.includes('ledgerlm-db') ||
-                  dbUrl.includes('172.17.') ||
-                  dbUrl.includes('127.0.0.1');
-
-const sessionPool = new Pool({
-  connectionString: dbUrl,
-  ssl: isLocalDb ? false : { rejectUnauthorized: false },
-});
 
 app.use(session({
   store: new PgSession({

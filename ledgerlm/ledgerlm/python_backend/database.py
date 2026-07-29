@@ -11,9 +11,43 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def get_db_connection():
-    """Get PostgreSQL database connection"""
+    """
+    Get PostgreSQL database connection.
+
+    Connection strategy is selected once at startup via DB_AUTH_MODE env var:
+
+      (not set / "neon")  → psycopg2.connect(NEON_DATABASE_URL / DATABASE_URL)
+      "postgres-azure"    → Azure Postgres with username + password + SSL
+      "entra" / "hybrid"  → Azure Postgres with Managed Identity Entra token + SSL
+                            Token is fetched/refreshed automatically from Azure IMDS.
+    """
+    auth_mode = (settings.DB_AUTH_MODE or "").lower()
+
     try:
-        conn = psycopg2.connect(settings.DATABASE_URL)
+        if auth_mode in ("entra", "hybrid"):
+            from utils.entra_token import get_entra_token
+            token = get_entra_token()
+            conn = psycopg2.connect(
+                host=settings.DB_HOST,
+                user=settings.DB_USER,
+                dbname=settings.DB_NAME,
+                password=token,
+                port=5432,
+                sslmode="require",
+            )
+        elif auth_mode == "postgres-azure":
+            conn = psycopg2.connect(
+                host=settings.DB_HOST,
+                user=settings.DB_USER,
+                dbname=settings.DB_NAME,
+                password=settings.DB_PASSWORD,
+                port=5432,
+                sslmode="require",
+            )
+        else:
+            # Default: Neon / local (unchanged behaviour)
+            conn = psycopg2.connect(settings.DATABASE_URL)
+
         return conn
     except Exception as e:
         logger.error(f"Database connection failed: {e}")

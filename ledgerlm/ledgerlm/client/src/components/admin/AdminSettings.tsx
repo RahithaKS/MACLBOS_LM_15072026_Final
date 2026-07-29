@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 import { useAuthUser } from '@/lib/auth';
 import { 
   TrendingUp,
@@ -16,8 +17,142 @@ import {
   Edit,
   Settings,
   ArrowRight,
-  AlertTriangle
+  AlertTriangle,
+  Database,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  Clock,
+  Shield,
+  Lock
 } from 'lucide-react';
+
+// ── DB Connection Status Panel ────────────────────────────────────────────────
+
+const MODE_LABELS: Record<string, { label: string; description: string; icon: React.ReactNode }> = {
+  neon:           { label: 'Neon DB (Cloud)', description: 'Replit / NeonDB — NEON_DATABASE_URL', icon: <Database className="h-4 w-4" /> },
+  '':             { label: 'Neon DB (Cloud)', description: 'Replit / NeonDB — NEON_DATABASE_URL', icon: <Database className="h-4 w-4" /> },
+  'postgres-azure': { label: 'Azure PostgreSQL — Password', description: 'DB_HOST + DB_USER + DB_PASSWORD', icon: <Lock className="h-4 w-4" /> },
+  entra:          { label: 'Azure PostgreSQL — Entra ID', description: 'Managed Identity token (auto-refreshed)', icon: <Shield className="h-4 w-4" /> },
+  hybrid:         { label: 'Azure PostgreSQL — Entra + Password', description: 'Managed Identity token, password fallback', icon: <Shield className="h-4 w-4" /> },
+};
+
+interface DbStatus {
+  mode: string;
+  connected: boolean;
+  host: string | null;
+  database: string | null;
+  tokenStatus: { cached: boolean; expiresInMin?: number } | null;
+}
+
+function DbConnectionPanel() {
+  const [status, setStatus] = useState<DbStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchStatus = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/db-status');
+      if (res.ok) setStatus(await res.json());
+    } catch (_) {}
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchStatus(); }, []);
+
+  const modeInfo = status ? (MODE_LABELS[status.mode] ?? MODE_LABELS['neon']) : null;
+  const isEntra = status?.mode === 'entra' || status?.mode === 'hybrid';
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Database className="h-5 w-5 text-primary" />
+            <div>
+              <CardTitle>Database Connection</CardTitle>
+              <CardDescription>
+                Active connection mode and health status. Configure via environment variables before deployment.
+              </CardDescription>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={fetchStatus} disabled={loading} data-testid="button-refresh-db-status">
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {/* Status row */}
+        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border">
+          <div className="flex items-center gap-3">
+            {status?.connected
+              ? <CheckCircle2 className="h-5 w-5 text-green-500" />
+              : <XCircle className="h-5 w-5 text-destructive" />}
+            <div>
+              <p className="font-medium text-sm">
+                {status?.connected ? 'Connected' : 'Connection Failed'}
+              </p>
+              {status?.host && (
+                <p className="text-xs text-muted-foreground">{status.host} · {status.database}</p>
+              )}
+            </div>
+          </div>
+          {modeInfo && (
+            <Badge variant="secondary" className="flex items-center gap-1">
+              {modeInfo.icon}
+              {modeInfo.label}
+            </Badge>
+          )}
+        </div>
+
+        {/* Entra token status */}
+        {isEntra && status?.tokenStatus && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground p-2 rounded bg-blue-500/5 border border-blue-500/20">
+            <Clock className="h-4 w-4 text-blue-500 shrink-0" />
+            {status.tokenStatus.cached
+              ? <>Entra token active · refreshes in <strong className="text-foreground ml-1">{status.tokenStatus.expiresInMin} min</strong></>
+              : <>Entra token not yet cached — will fetch on next DB call</>}
+          </div>
+        )}
+
+        <Separator />
+
+        {/* How to configure guide */}
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+            How to configure (set before app starts)
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div className="p-3 rounded-lg border bg-muted/30">
+              <p className="font-semibold mb-1 flex items-center gap-1"><Database className="h-3.5 w-3.5" /> Replit / NeonDB</p>
+              <p className="text-muted-foreground font-mono">NEON_DATABASE_URL = postgres://...neon.tech/...</p>
+              <p className="text-muted-foreground mt-1">Set in Replit Secrets panel. No other vars needed.</p>
+            </div>
+            <div className="p-3 rounded-lg border bg-muted/30">
+              <p className="font-semibold mb-1 flex items-center gap-1"><Database className="h-3.5 w-3.5" /> Local Dev</p>
+              <p className="text-muted-foreground font-mono">DATABASE_URL = postgresql://user:pass@localhost:5432/db</p>
+              <p className="text-muted-foreground mt-1">Set in .env file. SSL is disabled automatically.</p>
+            </div>
+            <div className="p-3 rounded-lg border bg-muted/30">
+              <p className="font-semibold mb-1 flex items-center gap-1"><Lock className="h-3.5 w-3.5" /> Azure — Password</p>
+              <p className="text-muted-foreground font-mono">DB_AUTH_MODE = postgres-azure</p>
+              <p className="text-muted-foreground font-mono">DB_HOST · DB_NAME · DB_USER · DB_PASSWORD</p>
+              <p className="text-muted-foreground mt-1">Set in App Service → Configuration.</p>
+            </div>
+            <div className="p-3 rounded-lg border bg-muted/30">
+              <p className="font-semibold mb-1 flex items-center gap-1"><Shield className="h-3.5 w-3.5" /> Azure — Entra ID</p>
+              <p className="text-muted-foreground font-mono">DB_AUTH_MODE = entra</p>
+              <p className="text-muted-foreground font-mono">DB_HOST · DB_NAME · DB_USER</p>
+              <p className="text-muted-foreground mt-1">No password. Token fetched from Azure IMDS automatically.</p>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function AdminSettings() {
   const currentUser = useAuthUser();
@@ -35,6 +170,9 @@ export default function AdminSettings() {
 
   return (
     <div className="space-y-6">
+      {/* DB Connection Status */}
+      <DbConnectionPanel />
+
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card data-testid="card-profile-views">
