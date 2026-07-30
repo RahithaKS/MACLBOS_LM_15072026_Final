@@ -3,29 +3,74 @@ import { execSync } from "child_process";
 
 const authMode = (process.env.DB_AUTH_MODE || "").toLowerCase();
 
-const IMDS_URL =
-  "http://169.254.169.254/metadata/identity/oauth2/token" +
-  "?api-version=2019-08-01" +
-  "&resource=https%3A%2F%2Fossrdbms-aad.database.windows.net";
+// Azure PostgreSQL resource URI (same for both IMDS and App Service MSI)
+const PG_RESOURCE = "https%3A%2F%2Fossrdbms-aad.database.windows.net";
 
+// VM IMDS endpoint (works on bare Azure VMs, NOT in App Service containers)
+const VM_IMDS_URL =
+  `http://169.254.169.254/metadata/identity/oauth2/token` +
+  `?api-version=2019-08-01&resource=${PG_RESOURCE}`;
+
+/**
+ * Fetch an Entra ID token for PostgreSQL authentication.
+ *
+ * Azure exposes two different MSI endpoints depending on where the code runs:
+ *
+ *   App Service / Container Apps:
+ *     URL    → $IDENTITY_ENDPOINT?resource=...&api-version=2019-08-01
+ *     Header → X-IDENTITY-HEADER: $IDENTITY_HEADER
+ *
+ *   Bare VM / VMSS:
+ *     URL    → http://169.254.169.254/metadata/identity/oauth2/token?...
+ *     Header → Metadata: true
+ *
+ * We try the App Service path first (env vars present) and fall back to IMDS.
+ */
 function fetchEntraTokenSync(): string {
+  const identityEndpoint = process.env.IDENTITY_ENDPOINT;
+  const identityHeader   = process.env.IDENTITY_HEADER;
+
   try {
-    const raw = execSync(
-      `curl -s --max-time 10 -H "Metadata: true" "${IMDS_URL}"`,
-      { encoding: "utf8" }
-    );
-    const parsed = JSON.parse(raw) as { access_token?: string; error?: string };
-    if (!parsed.access_token) {
-      throw new Error(parsed.error ?? "No access_token in IMDS response");
+    let raw: string;
+
+    if (identityEndpoint && identityHeader) {
+      // ── Azure App Service / Container Apps MSI ──────────────────────────────
+      // This is the CORRECT path for App Service deployments.
+      const url = `${identityEndpoint}?resource=https://ossrdbms-aad.database.windows.net&api-version=2019-08-01`;
+      console.log(`[drizzle] Using App Service MSI endpoint: ${url.split('?')[0]}…`);
+      raw = execSync(
+        `curl -s --max-time 15 -H "X-IDENTITY-HEADER: ${identityHeader}" "${url}"`,
+        { encoding: "utf8" }
+      );
+    } else {
+      // ── VM IMDS fallback ────────────────────────────────────────────────────
+      // Only reaches here when IDENTITY_ENDPOINT is not set (bare VM, local debug).
+      console.log("[drizzle] IDENTITY_ENDPOINT not set — falling back to VM IMDS.");
+      raw = execSync(
+        `curl -s --max-time 15 -H "Metadata: true" "${VM_IMDS_URL}"`,
+        { encoding: "utf8" }
+      );
     }
-    console.log("[drizzle] Entra token fetched — running migrations with Managed Identity.");
+
+    const parsed = JSON.parse(raw) as { access_token?: string; error?: string; error_description?: string };
+    if (!parsed.access_token) {
+      throw new Error(
+        parsed.error_description ?? parsed.error ?? `No access_token in response: ${raw.slice(0, 200)}`
+      );
+    }
+
+    console.log("[drizzle] ✅ Entra token fetched — running migrations with Managed Identity.");
     return parsed.access_token;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `[drizzle] Failed to fetch Entra token from Azure IMDS.\n` +
-      `Ensure you are inside Azure App Service with a System-assigned Managed Identity\n` +
-      `that has PostgreSQL Entra admin rights.\nDetail: ${msg}`
+      `[drizzle] ❌ Failed to fetch Entra token.\n` +
+      `  IDENTITY_ENDPOINT = ${identityEndpoint ?? "(not set — expected for App Service)"}\n` +
+      `  IDENTITY_HEADER   = ${identityHeader   ? "(present)" : "(not set)"}\n` +
+      `  DB_AUTH_MODE      = ${authMode}\n` +
+      `  Ensure the App Service has a System-assigned Managed Identity enabled\n` +
+      `  and that identity is registered as a PostgreSQL Entra administrator.\n` +
+      `  Detail: ${msg}`
     );
   }
 }
@@ -36,32 +81,32 @@ function requireEnv(name: string): string {
   return val;
 }
 
-// Resolve credentials based on auth mode — evaluated once at migration time.
+// ── Resolve DB credentials once at migration time ─────────────────────────────
 const dbCredentials = (() => {
   if (authMode === "entra" || authMode === "hybrid") {
-    // Azure Managed Identity: fetch short-lived JWT from IMDS, use as password.
-    // Individual fields are used (not a URL) so the JWT needs no URL-encoding.
     return {
       host:     requireEnv("DB_HOST"),
       user:     requireEnv("DB_USER"),
       database: requireEnv("DB_NAME"),
       password: fetchEntraTokenSync(),
-      ssl:      true,
+      // Private endpoint PostgreSQL: cert may not be in the container trust store.
+      // rejectUnauthorized:false keeps the connection encrypted while skipping
+      // CA chain validation — acceptable inside a private VNet.
+      ssl: { rejectUnauthorized: false },
     };
   }
 
   if (authMode === "postgres-azure") {
-    // Azure PostgreSQL with a static username + password.
     return {
       host:     requireEnv("DB_HOST"),
       user:     requireEnv("DB_USER"),
       database: requireEnv("DB_NAME"),
       password: requireEnv("DB_PASSWORD"),
-      ssl:      true,
+      ssl: { rejectUnauthorized: false },
     };
   }
 
-  // Default: Neon cloud or local Postgres via connection URL.
+  // Default: Neon cloud or local Postgres via connection URL
   const url = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
@@ -73,8 +118,8 @@ const dbCredentials = (() => {
 })();
 
 export default defineConfig({
-  out: "./migrations",
-  schema: "./shared/schema.ts",
-  dialect: "postgresql",
+  out:      "./migrations",
+  schema:   "./shared/schema.ts",
+  dialect:  "postgresql",
   dbCredentials,
 });
