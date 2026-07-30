@@ -1,23 +1,38 @@
-import { db } from './db';
-import { users, chats, companies, companyMemberships, userSettings, boardTemplates, domains, domainUsers, cubes, cubeBusinessTerms, cubeCalculationRules, cubeFilterRules, cubeQueryPatterns, cubeColumnValues } from '@shared/schema';
-import { eq } from 'drizzle-orm';
-import bcrypt from 'bcryptjs';
-import { fixCompanyMemberships } from './migrations/fix-company-memberships';
-import { 
-  BOSCH_BUSINESS_TERMS, 
-  BOSCH_CALCULATION_RULES, 
-  BOSCH_FILTER_RULES, 
-  BOSCH_QUERY_PATTERNS, 
-  BOSCH_COLUMN_VALUES 
-} from './seed/bosch-business-logic';
+import { db } from "./db";
+import {
+  users,
+  chats,
+  companies,
+  companyMemberships,
+  userSettings,
+  boardTemplates,
+  domains,
+  domainUsers,
+  cubes,
+  cubeBusinessTerms,
+  cubeCalculationRules,
+  cubeFilterRules,
+  cubeQueryPatterns,
+  cubeColumnValues,
+} from "@shared/schema";
+import { eq } from "drizzle-orm";
+import bcrypt from "bcryptjs";
+import { fixCompanyMemberships } from "./migrations/fix-company-memberships";
+import {
+  BOSCH_BUSINESS_TERMS,
+  BOSCH_CALCULATION_RULES,
+  BOSCH_FILTER_RULES,
+  BOSCH_QUERY_PATTERNS,
+  BOSCH_COLUMN_VALUES,
+} from "./seed/bosch-business-logic";
 
 export async function seedDatabase() {
   const defaultUsername = "john.smith@example.com";
-  
+
   // Check if companies already exist - if so, just run idempotent updates
   const existingCompanies = await db.select().from(companies).limit(1);
   if (existingCompanies.length > 0) {
-    console.log('Companies already exist, skipping seed');
+    console.log("Companies already exist, skipping seed");
     await seedBoardTemplates();
     await seedDomainsIfNeeded(); // Seed domains for existing setup
     await seedBoschBusinessLogic(); // Auto-seed Bosch business logic for existing cubes
@@ -25,44 +40,61 @@ export async function seedDatabase() {
     return;
   }
 
-  console.log('Seeding database with multi-tenant setup: companies, admins, and users...');
+  console.log(
+    "Seeding database with multi-tenant setup: companies, admins, and users...",
+  );
 
   const hashedPassword = await bcrypt.hash("password123", 10);
 
   // Create companies
-  const [ledgerlmCompany] = await db.insert(companies).values({
-    name: "LedgerLM",
-    slug: "ledgerlm",
-    description: "LedgerLM Platform - AI-Powered Financial Analysis",
-  }).returning();
+  const [ledgerlmCompany] = await db
+    .insert(companies)
+    .values({
+      name: "LedgerLM",
+      slug: "ledgerlm",
+      description: "LedgerLM Platform - AI-Powered Financial Analysis",
+    })
+    .returning();
 
-  const [boschCompany] = await db.insert(companies).values({
-    name: "Bosch",
-    slug: "bosch",
-    description: "Bosch - Engineering and Technology Company",
-  }).returning();
+  const [boschCompany] = await db
+    .insert(companies)
+    .values({
+      name: "Bosch",
+      slug: "bosch",
+      description: "Bosch - Engineering and Technology Company",
+    })
+    .returning();
 
   // Create users
-  const [ledgerlmAdmin] = await db.insert(users).values({
-    username: "customer@ledgerlm.ai",
-    password: hashedPassword,
-    displayName: "LedgerLM Customer",
-    role: "admin",
-  }).returning();
+  const [ledgerlmAdmin] = await db
+    .insert(users)
+    .values({
+      username: "customer@ledgerlm.ai",
+      password: hashedPassword,
+      displayName: "LedgerLM Customer",
+      role: "admin",
+    })
+    .returning();
 
-  const [boschAdmin] = await db.insert(users).values({
-    username: "boschmatasma@bosch.com",
-    password: hashedPassword,
-    displayName: "Bosch Admin",
-    role: "admin",
-  }).returning();
+  const [boschAdmin] = await db
+    .insert(users)
+    .values({
+      username: "boschmatasma@bosch.com",
+      password: hashedPassword,
+      displayName: "Bosch Admin",
+      role: "admin",
+    })
+    .returning();
 
-  const [sampleUser] = await db.insert(users).values({
-    username: defaultUsername,
-    password: hashedPassword,
-    displayName: "John Smith",
-    role: "standard",
-  }).returning();
+  const [sampleUser] = await db
+    .insert(users)
+    .values({
+      username: defaultUsername,
+      password: hashedPassword,
+      displayName: "John Smith",
+      role: "standard",
+    })
+    .returning();
 
   // Create company memberships
   await db.insert(companyMemberships).values([
@@ -93,11 +125,26 @@ export async function seedDatabase() {
   ]);
 
   const sampleChats = [
-    { title: 'Q2 Profit & Loss Summary', preview: 'Analysis of Q2 financial performance' },
-    { title: 'Balance Sheet Breakdown', preview: 'Detailed breakdown of assets and liabilities' },
-    { title: 'Quarterly Financial Analysis', preview: 'Comprehensive quarterly review' },
-    { title: 'Year-End Financial Overview', preview: 'Annual financial summary and insights' },
-    { title: 'Expense Trend Analysis', preview: 'Monthly expense tracking and trends' },
+    {
+      title: "Q2 Profit & Loss Summary",
+      preview: "Analysis of Q2 financial performance",
+    },
+    {
+      title: "Balance Sheet Breakdown",
+      preview: "Detailed breakdown of assets and liabilities",
+    },
+    {
+      title: "Quarterly Financial Analysis",
+      preview: "Comprehensive quarterly review",
+    },
+    {
+      title: "Year-End Financial Overview",
+      preview: "Annual financial summary and insights",
+    },
+    {
+      title: "Expense Trend Analysis",
+      preview: "Monthly expense tracking and trends",
+    },
   ];
 
   for (const chat of sampleChats) {
@@ -108,23 +155,27 @@ export async function seedDatabase() {
     });
   }
 
-  console.log('✅ Multi-tenant database seeded successfully!');
-  console.log('   🏢 Companies: LedgerLM, Bosch');
-  console.log('   👤 Admins: customer@ledgerlm.ai (Super Admin), boschmatasma@bosch.com');
-  console.log('   👥 Users: john.smith@example.com (LedgerLM member)');
+  console.log("✅ Multi-tenant database seeded successfully!");
+  console.log("   🏢 Companies: LedgerLM, Bosch");
+  console.log(
+    "   👤 Admins: customer@ledgerlm.ai (Super Admin), boschmatasma@bosch.com",
+  );
+  console.log("   👥 Users: john.smith@example.com (LedgerLM member)");
 
   // Seed board templates
   await seedBoardTemplates();
-  
+
   // Seed domains (LedgerLM, Bosch)
   await seedDomains(
-    boschCompany.id, boschAdmin.id, 
-    ledgerlmCompany.id, ledgerlmAdmin.id
+    boschCompany.id,
+    boschAdmin.id,
+    ledgerlmCompany.id,
+    ledgerlmAdmin.id,
   );
-  
+
   // Auto-seed Bosch business logic (will run when cubes are created)
   await seedBoschBusinessLogic();
-  
+
   // Fix company memberships for existing users
   await fixCompanyMemberships();
 }
@@ -132,9 +183,10 @@ export async function seedDatabase() {
 async function seedBoardTemplates() {
   const templates = [
     {
-      slug: 'quarterly-pl-review',
-      name: 'Quarterly P&L Review',
-      description: 'Track revenue, expenses, and profit trends for each quarter with clear visual insights.',
+      slug: "quarterly-pl-review",
+      name: "Quarterly P&L Review",
+      description:
+        "Track revenue, expenses, and profit trends for each quarter with clear visual insights.",
       defaultConfig: {
         analysisPrompts: `I'll help you analyze your quarterly Profit & Loss statement. I'm configured to:
 - Compare revenue vs previous quarters and identify growth trends
@@ -147,18 +199,19 @@ Please upload your P&L statement or I can analyze your enterprise data if availa
           enterprise: true,
           vault: true,
           webApis: false,
-          financialApis: true
+          financialApis: true,
         },
         settings: {
           resultLimit: 10,
-          timeout: 30
-        }
-      }
+          timeout: 30,
+        },
+      },
     },
     {
-      slug: 'balance-sheet-tracker',
-      name: 'Balance Sheet Tracker',
-      description: 'Monitor assets, liabilities, and equity breakdowns in a structured format.',
+      slug: "balance-sheet-tracker",
+      name: "Balance Sheet Tracker",
+      description:
+        "Monitor assets, liabilities, and equity breakdowns in a structured format.",
       defaultConfig: {
         analysisPrompts: `I'll help you analyze your Balance Sheet. I'm configured to:
 - Analyze asset composition and liquidity ratios
@@ -171,18 +224,19 @@ Please upload your balance sheet or I can analyze your enterprise financial data
           enterprise: true,
           vault: true,
           webApis: false,
-          financialApis: true
+          financialApis: true,
         },
         settings: {
           resultLimit: 10,
-          timeout: 30
-        }
-      }
+          timeout: 30,
+        },
+      },
     },
     {
-      slug: 'cashflow-monitoring',
-      name: 'Cashflow Monitoring',
-      description: 'Stay on top of inflows and outflows, forecast liquidity, and highlight red flags.',
+      slug: "cashflow-monitoring",
+      name: "Cashflow Monitoring",
+      description:
+        "Stay on top of inflows and outflows, forecast liquidity, and highlight red flags.",
       defaultConfig: {
         analysisPrompts: `I'll help you monitor your cash flow. I'm configured to:
 - Track operating, investing, and financing cash flows
@@ -195,18 +249,19 @@ Please share your cash flow statements or operational data.`,
           enterprise: true,
           vault: true,
           webApis: false,
-          financialApis: true
+          financialApis: true,
         },
         settings: {
           resultLimit: 10,
-          timeout: 30
-        }
-      }
+          timeout: 30,
+        },
+      },
     },
     {
-      slug: 'financial-ratios-dashboard',
-      name: 'Financial Ratios Dashboard',
-      description: 'Auto-calculate solvency, liquidity, and profitability ratios with benchmarks.',
+      slug: "financial-ratios-dashboard",
+      name: "Financial Ratios Dashboard",
+      description:
+        "Auto-calculate solvency, liquidity, and profitability ratios with benchmarks.",
       defaultConfig: {
         analysisPrompts: `I'll calculate and analyze your key financial ratios. I'm configured to:
 - Calculate liquidity ratios (current ratio, quick ratio)
@@ -219,18 +274,19 @@ Upload your financial statements for comprehensive ratio analysis.`,
           enterprise: true,
           vault: true,
           webApis: true,
-          financialApis: true
+          financialApis: true,
         },
         settings: {
           resultLimit: 15,
-          timeout: 45
-        }
-      }
+          timeout: 45,
+        },
+      },
     },
     {
-      slug: 'audit-preparation',
-      name: 'Audit Preparation',
-      description: 'Centralize compliance reports, audit checklists, and flagged risk items in one board.',
+      slug: "audit-preparation",
+      name: "Audit Preparation",
+      description:
+        "Centralize compliance reports, audit checklists, and flagged risk items in one board.",
       defaultConfig: {
         analysisPrompts: `I'll help you prepare for your audit. I'm configured to:
 - Review compliance with accounting standards
@@ -243,18 +299,19 @@ Share your financial records and I'll help ensure audit readiness.`,
           enterprise: true,
           vault: true,
           webApis: false,
-          financialApis: false
+          financialApis: false,
         },
         settings: {
           resultLimit: 20,
-          timeout: 60
-        }
-      }
+          timeout: 60,
+        },
+      },
     },
     {
-      slug: 'company-research',
-      name: 'Company Research',
-      description: 'Collect ROC/MCA filings, competitor financials, and external data sources.',
+      slug: "company-research",
+      name: "Company Research",
+      description:
+        "Collect ROC/MCA filings, competitor financials, and external data sources.",
       defaultConfig: {
         analysisPrompts: `I'll help you research company financials. I'm configured to:
 - Analyze regulatory filings (ROC, MCA, SEC)
@@ -267,18 +324,19 @@ Provide company names or upload financial documents for analysis.`,
           enterprise: false,
           vault: true,
           webApis: true,
-          financialApis: true
+          financialApis: true,
         },
         settings: {
           resultLimit: 15,
-          timeout: 60
-        }
-      }
+          timeout: 60,
+        },
+      },
     },
     {
-      slug: 'custom-kpi-board',
-      name: 'Custom KPI Board',
-      description: 'Create a tailored view with metrics like gross margin, YoY growth, and cost ratios.',
+      slug: "custom-kpi-board",
+      name: "Custom KPI Board",
+      description:
+        "Create a tailored view with metrics like gross margin, YoY growth, and cost ratios.",
       defaultConfig: {
         analysisPrompts: `I'll analyze your custom KPIs. I'm configured to:
 - Track your specific performance metrics
@@ -291,18 +349,19 @@ Tell me which KPIs you want to track and I'll analyze your data accordingly.`,
           enterprise: true,
           vault: true,
           webApis: true,
-          financialApis: true
+          financialApis: true,
         },
         settings: {
           resultLimit: 10,
-          timeout: 30
-        }
-      }
+          timeout: 30,
+        },
+      },
     },
     {
-      slug: 'investor-updates',
-      name: 'Investor Updates',
-      description: 'Prepare comprehensive investor reports with key financial metrics and growth indicators.',
+      slug: "investor-updates",
+      name: "Investor Updates",
+      description:
+        "Prepare comprehensive investor reports with key financial metrics and growth indicators.",
       defaultConfig: {
         analysisPrompts: `I'll help you create investor updates. I'm configured to:
 - Summarize key financial performance metrics
@@ -315,22 +374,22 @@ Share your financial data and I'll help prepare compelling investor materials.`,
           enterprise: true,
           vault: true,
           webApis: true,
-          financialApis: true
+          financialApis: true,
         },
         settings: {
           resultLimit: 10,
-          timeout: 30
-        }
-      }
-    }
+          timeout: 30,
+        },
+      },
+    },
   ];
 
-  console.log('🌱 Seeding board templates...');
-  
+  console.log("🌱 Seeding board templates...");
+
   for (const template of templates) {
     try {
       const existing = await db.query.boardTemplates.findFirst({
-        where: (templates, { eq }) => eq(templates.slug, template.slug)
+        where: (templates, { eq }) => eq(templates.slug, template.slug),
       });
 
       if (!existing) {
@@ -341,198 +400,225 @@ Share your financial data and I'll help prepare compelling investor materials.`,
       console.error(`❌ Error seeding template ${template.name}:`, error);
     }
   }
-  
-  console.log('✨ Board templates seeded');
+
+  console.log("✨ Board templates seeded");
 }
 
 // Called when seeding fresh database with known IDs
 async function seedDomains(
-  boschCompanyId: string, boschAdminId: string, 
-  ledgerlmCompanyId?: string, ledgerlmAdminId?: string
+  boschCompanyId: string,
+  boschAdminId: string,
+  ledgerlmCompanyId?: string,
+  ledgerlmAdminId?: string,
 ) {
-  console.log('🌱 Seeding domains...');
-  
+  console.log("🌱 Seeding domains...");
+
   // Seed ledgerlm.ai domain for super admin
   const existingLedgerlmDomain = await db.query.domains.findFirst({
-    where: (d, { eq }) => eq(d.name, 'ledgerlm.ai')
+    where: (d, { eq }) => eq(d.name, "ledgerlm.ai"),
   });
-  
+
   if (existingLedgerlmDomain) {
-    console.log('✅ ledgerlm.ai domain already exists');
+    console.log("✅ ledgerlm.ai domain already exists");
   } else if (ledgerlmCompanyId && ledgerlmAdminId) {
-    const [ledgerlmDomain] = await db.insert(domains).values({
-      name: 'ledgerlm.ai',
-      adminEmail: 'customer@ledgerlm.ai',
-      companyId: ledgerlmCompanyId,
-      userQuota: 1000,
-      createdBy: ledgerlmAdminId,
-    }).returning();
-    
-    console.log('✅ Created domain: ledgerlm.ai');
-    
+    const [ledgerlmDomain] = await db
+      .insert(domains)
+      .values({
+        name: "ledgerlm.ai",
+        adminEmail: "customer@ledgerlm.ai",
+        companyId: ledgerlmCompanyId,
+        userQuota: 1000,
+        createdBy: ledgerlmAdminId,
+
+        emailProvider: "microsoft",
+        emailSmtpUser: "customer@ledgerlm.ai",
+        emailSmtpPass: "Matasma@26",
+        emailFromAddress: "customer@ledgerlm.ai",
+      })
+      .returning();
+
+    console.log("✅ Created domain: ledgerlm.ai");
+
     await db.insert(domainUsers).values({
       domainId: ledgerlmDomain.id,
-      email: 'customer@ledgerlm.ai',
-      role: 'admin',
+      email: "customer@ledgerlm.ai",
+      role: "admin",
       invitedBy: ledgerlmAdminId,
     });
-    
-    console.log('✅ Created domain admin: customer@ledgerlm.ai (Super Admin - uses email OTP)');
+
+    console.log(
+      "✅ Created domain admin: customer@ledgerlm.ai (Super Admin - uses email OTP)",
+    );
   }
-  
+
   // Seed bosch.com domain
   const existingBoschDomain = await db.query.domains.findFirst({
-    where: (d, { eq }) => eq(d.name, 'bosch.com')
+    where: (d, { eq }) => eq(d.name, "bosch.com"),
   });
-  
+
   if (existingBoschDomain) {
-    console.log('✅ bosch.com domain already exists');
+    console.log("✅ bosch.com domain already exists");
     // Ensure Bosch India users exist under bosch.com domain
-    const boschInEmails = ['boschmatasam@bosch.com', 'boschmatasma@bosch.com'];
+    const boschInEmails = ["boschmatasam@bosch.com", "boschmatasma@bosch.com"];
     for (const email of boschInEmails) {
       const existing = await db.query.domainUsers.findFirst({
-        where: (du, { and, eq }) => and(
-          eq(du.domainId, existingBoschDomain.id),
-          eq(du.email, email)
-        )
+        where: (du, { and, eq }) =>
+          and(eq(du.domainId, existingBoschDomain.id), eq(du.email, email)),
       });
       if (!existing) {
         await db.insert(domainUsers).values({
           domainId: existingBoschDomain.id,
           email,
-          role: 'admin',
-          hardcodedOtp: '123456',
+          role: "admin",
+          hardcodedOtp: "123456",
           invitedBy: boschAdminId,
         });
         console.log(`✅ Created domain user: ${email} (OTP: 123456)`);
       }
     }
   } else {
-    const [boschDomain] = await db.insert(domains).values({
-      name: 'bosch.com',
-      adminEmail: 'boschmatasma@bosch.com',
-      companyId: boschCompanyId,
-      userQuota: 100,
-      createdBy: boschAdminId,
-    }).returning();
-    
-    console.log('✅ Created domain: bosch.com');
-    
+    const [boschDomain] = await db
+      .insert(domains)
+      .values({
+        name: "bosch.com",
+        adminEmail: "boschmatasma@bosch.com",
+        companyId: boschCompanyId,
+        userQuota: 100,
+        createdBy: boschAdminId,
+      })
+      .returning();
+
+    console.log("✅ Created domain: bosch.com");
+
     await db.insert(domainUsers).values([
       {
         domainId: boschDomain.id,
-        email: 'boschmatasma@bosch.com',
-        role: 'admin',
-        hardcodedOtp: '123456',
+        email: "boschmatasma@bosch.com",
+        role: "admin",
+        hardcodedOtp: "123456",
         invitedBy: boschAdminId,
       },
       {
         domainId: boschDomain.id,
-        email: 'boschmatasam@bosch.com',
-        role: 'admin',
-        hardcodedOtp: '123456',
+        email: "boschmatasam@bosch.com",
+        role: "admin",
+        hardcodedOtp: "123456",
         invitedBy: boschAdminId,
       },
     ]);
 
-    console.log('✅ Created domain admins: boschmatasma@bosch.com, boschmatasam@bosch.com (OTP: 123456)');
+    console.log(
+      "✅ Created domain admins: boschmatasma@bosch.com, boschmatasam@bosch.com (OTP: 123456)",
+    );
   }
-  
-  console.log('✨ Domains seeded');
+
+  console.log("✨ Domains seeded");
 }
 
 // Called when companies already exist - looks up IDs dynamically
 async function seedDomainsIfNeeded() {
   // Look up Bosch company
   const boschCompany = await db.query.companies.findFirst({
-    where: (c, { eq }) => eq(c.slug, 'bosch')
+    where: (c, { eq }) => eq(c.slug, "bosch"),
   });
-  
+
   // Look up LedgerLM company
   const ledgerlmCompany = await db.query.companies.findFirst({
-    where: (c, { eq }) => eq(c.slug, 'ledgerlm')
+    where: (c, { eq }) => eq(c.slug, "ledgerlm"),
   });
-  
+
   // Look up Bosch admin
   const boschAdmin = await db.query.users.findFirst({
-    where: (u, { eq }) => eq(u.username, 'boschmatasma@bosch.com')
+    where: (u, { eq }) => eq(u.username, "boschmatasma@bosch.com"),
   });
-  
+
   // Look up LedgerLM admin (super admin)
   const ledgerlmAdmin = await db.query.users.findFirst({
-    where: (u, { eq }) => eq(u.username, 'customer@ledgerlm.ai')
+    where: (u, { eq }) => eq(u.username, "customer@ledgerlm.ai"),
   });
-  
+
   if (!boschCompany || !boschAdmin) {
-    console.log('⚠️ Bosch company or admin not found, skipping bosch.com domain seed');
+    console.log(
+      "⚠️ Bosch company or admin not found, skipping bosch.com domain seed",
+    );
   }
-  
+
   if (!ledgerlmCompany || !ledgerlmAdmin) {
-    console.log('⚠️ LedgerLM company or admin not found, skipping LedgerLM domain seed');
+    console.log(
+      "⚠️ LedgerLM company or admin not found, skipping LedgerLM domain seed",
+    );
   }
-  
+
   // Seed domains with available data
   if (boschCompany && boschAdmin) {
     await seedDomains(
-      boschCompany.id, 
-      boschAdmin.id, 
-      ledgerlmCompany?.id, 
-      ledgerlmAdmin?.id
+      boschCompany.id,
+      boschAdmin.id,
+      ledgerlmCompany?.id,
+      ledgerlmAdmin?.id,
     );
   } else if (ledgerlmCompany && ledgerlmAdmin) {
     // Fallback: at least seed ledgerlm.ai domain
     const existingLedgerlmDomain = await db.query.domains.findFirst({
-      where: (d, { eq }) => eq(d.name, 'ledgerlm.ai')
+      where: (d, { eq }) => eq(d.name, "ledgerlm.ai"),
     });
-    
+
     if (!existingLedgerlmDomain) {
-      const [ledgerlmDomain] = await db.insert(domains).values({
-        name: 'ledgerlm.ai',
-        adminEmail: 'customer@ledgerlm.ai',
-        companyId: ledgerlmCompany.id,
-        userQuota: 1000,
-        createdBy: ledgerlmAdmin.id,
-      }).returning();
-      
+      const [ledgerlmDomain] = await db
+        .insert(domains)
+        .values({
+          name: "ledgerlm.ai",
+          adminEmail: "customer@ledgerlm.ai",
+          companyId: ledgerlmCompany.id,
+          userQuota: 1000,
+          createdBy: ledgerlmAdmin.id,
+        })
+        .returning();
+
       await db.insert(domainUsers).values({
         domainId: ledgerlmDomain.id,
-        email: 'customer@ledgerlm.ai',
-        role: 'admin',
+        email: "customer@ledgerlm.ai",
+        role: "admin",
         invitedBy: ledgerlmAdmin.id,
       });
-      
-      console.log('✅ Created domain: ledgerlm.ai (Super Admin)');
+
+      console.log("✅ Created domain: ledgerlm.ai (Super Admin)");
     }
   }
 }
 
 // Automatically seed Bosch business logic for all Bosch domain cubes
 export async function seedBoschBusinessLogic() {
-  console.log('🌱 Checking Bosch business logic seeding...');
-  
+  console.log("🌱 Checking Bosch business logic seeding...");
+
   // Find Bosch domain
   const boschDomain = await db.query.domains.findFirst({
-    where: (d, { eq }) => eq(d.name, 'bosch.com')
+    where: (d, { eq }) => eq(d.name, "bosch.com"),
   });
-  
+
   if (!boschDomain) {
-    console.log('⚠️ Bosch domain not found, skipping business logic seed');
+    console.log("⚠️ Bosch domain not found, skipping business logic seed");
     return;
   }
-  
+
   // Find all cubes for Bosch domain
-  const boschCubes = await db.select().from(cubes).where(eq(cubes.domainId, boschDomain.id));
-  
+  const boschCubes = await db
+    .select()
+    .from(cubes)
+    .where(eq(cubes.domainId, boschDomain.id));
+
   if (boschCubes.length === 0) {
-    console.log('⚠️ No Bosch cubes found, business logic will be seeded when cubes are created');
+    console.log(
+      "⚠️ No Bosch cubes found, business logic will be seeded when cubes are created",
+    );
     return;
   }
-  
+
   for (const cube of boschCubes) {
     console.log(`🔧 Seeding business logic for cube: ${cube.name}`);
 
     // Batch insert terms — single roundtrip, skip duplicates
-    const termRows = BOSCH_BUSINESS_TERMS.map(term => ({
+    const termRows = BOSCH_BUSINESS_TERMS.map((term) => ({
       cubeId: cube.id,
       termName: term.termName,
       termAliases: term.termAliases,
@@ -544,12 +630,16 @@ export async function seedBoschBusinessLogic() {
     }));
     let termsCreated = 0;
     if (termRows.length > 0) {
-      const res = await db.insert(cubeBusinessTerms).values(termRows).onConflictDoNothing().returning({ id: cubeBusinessTerms.id });
+      const res = await db
+        .insert(cubeBusinessTerms)
+        .values(termRows)
+        .onConflictDoNothing()
+        .returning({ id: cubeBusinessTerms.id });
       termsCreated = res.length;
     }
 
     // Batch insert calculations
-    const calcRows = BOSCH_CALCULATION_RULES.map(calc => ({
+    const calcRows = BOSCH_CALCULATION_RULES.map((calc) => ({
       cubeId: cube.id,
       calculationName: calc.calculationName,
       calculationAliases: calc.calculationAliases,
@@ -563,12 +653,16 @@ export async function seedBoschBusinessLogic() {
     }));
     let calculationsCreated = 0;
     if (calcRows.length > 0) {
-      const res = await db.insert(cubeCalculationRules).values(calcRows).onConflictDoNothing().returning({ id: cubeCalculationRules.id });
+      const res = await db
+        .insert(cubeCalculationRules)
+        .values(calcRows)
+        .onConflictDoNothing()
+        .returning({ id: cubeCalculationRules.id });
       calculationsCreated = res.length;
     }
 
     // Batch insert filter rules
-    const filterRows = BOSCH_FILTER_RULES.map(filter => ({
+    const filterRows = BOSCH_FILTER_RULES.map((filter) => ({
       cubeId: cube.id,
       filterName: filter.filterName,
       filterAliases: filter.filterAliases,
@@ -579,12 +673,16 @@ export async function seedBoschBusinessLogic() {
     }));
     let filtersCreated = 0;
     if (filterRows.length > 0) {
-      const res = await db.insert(cubeFilterRules).values(filterRows).onConflictDoNothing().returning({ id: cubeFilterRules.id });
+      const res = await db
+        .insert(cubeFilterRules)
+        .values(filterRows)
+        .onConflictDoNothing()
+        .returning({ id: cubeFilterRules.id });
       filtersCreated = res.length;
     }
 
     // Batch insert query patterns
-    const patternRows = BOSCH_QUERY_PATTERNS.map(pattern => ({
+    const patternRows = BOSCH_QUERY_PATTERNS.map((pattern) => ({
       cubeId: cube.id,
       patternName: pattern.patternName,
       patternDescription: pattern.patternDescription,
@@ -597,12 +695,16 @@ export async function seedBoschBusinessLogic() {
     }));
     let patternsCreated = 0;
     if (patternRows.length > 0) {
-      const res = await db.insert(cubeQueryPatterns).values(patternRows).onConflictDoNothing().returning({ id: cubeQueryPatterns.id });
+      const res = await db
+        .insert(cubeQueryPatterns)
+        .values(patternRows)
+        .onConflictDoNothing()
+        .returning({ id: cubeQueryPatterns.id });
       patternsCreated = res.length;
     }
 
     // Batch insert column values
-    const colValRows = BOSCH_COLUMN_VALUES.map(colVal => ({
+    const colValRows = BOSCH_COLUMN_VALUES.map((colVal) => ({
       cubeId: cube.id,
       columnName: colVal.columnName,
       valueName: colVal.valueName,
@@ -613,12 +715,18 @@ export async function seedBoschBusinessLogic() {
     }));
     let columnValuesCreated = 0;
     if (colValRows.length > 0) {
-      const res = await db.insert(cubeColumnValues).values(colValRows).onConflictDoNothing().returning({ id: cubeColumnValues.id });
+      const res = await db
+        .insert(cubeColumnValues)
+        .values(colValRows)
+        .onConflictDoNothing()
+        .returning({ id: cubeColumnValues.id });
       columnValuesCreated = res.length;
     }
 
-    console.log(`✅ Cube ${cube.name}: ${termsCreated} terms, ${calculationsCreated} calculations, ${filtersCreated} filters, ${patternsCreated} patterns, ${columnValuesCreated} column values`);
+    console.log(
+      `✅ Cube ${cube.name}: ${termsCreated} terms, ${calculationsCreated} calculations, ${filtersCreated} filters, ${patternsCreated} patterns, ${columnValuesCreated} column values`,
+    );
   }
 
-  console.log('✨ Bosch business logic seeding complete');
+  console.log("✨ Bosch business logic seeding complete");
 }
