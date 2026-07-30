@@ -4,6 +4,7 @@ import { writeAuditLog } from "./auditLogger";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { getSchedulerSettings, createSchedulerLog, completeSchedulerLog } from "./schedulerService";
+import { getEntraToken } from "../utils/entraToken";
 
 export interface BackupRecord {
   id: string;
@@ -63,19 +64,72 @@ export async function runBackup(
 ): Promise<{ success: boolean; filename?: string; sizeBytes?: number; error?: string }> {
   await ensureBackupLogTable();
 
-  const dbUrl =
-    process.env.NEON_DATABASE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.AZURE_POSTGRESQL_URL;
+  const authMode = (process.env.DB_AUTH_MODE || "").toLowerCase();
 
-  if (!dbUrl) {
-    const error = "No database URL configured for backup";
-    logger.error(error);
-    await db.execute(sql`
-      INSERT INTO backup_logs (filename, size_bytes, status, triggered_by, error_message)
-      VALUES ('none', 0, 'failed', ${triggeredBy}, ${error})
-    `);
-    return { success: false, error };
+  // Build pg_dump args + env based on the active auth mode so backup works
+  // across all deployment targets (Neon, local, Azure password, Azure Entra).
+  let pgDumpArgs: string[];
+  let pgDumpEnv: NodeJS.ProcessEnv;
+
+  if (authMode === "entra" || authMode === "hybrid") {
+    // Azure Managed Identity — fetch a short-lived token and pass it as PGPASSWORD.
+    const dbHost = process.env.DB_HOST || "";
+    const dbUser = process.env.DB_USER || "";
+    const dbName = process.env.DB_NAME || "";
+    if (!dbHost || !dbUser || !dbName) {
+      const error = "DB_AUTH_MODE=entra requires DB_HOST, DB_USER, DB_NAME for backup";
+      logger.error(error);
+      await db.execute(sql`
+        INSERT INTO backup_logs (filename, size_bytes, status, triggered_by, error_message)
+        VALUES ('none', 0, 'failed', ${triggeredBy}, ${error})
+      `);
+      return { success: false, error };
+    }
+    const token = await getEntraToken();
+    pgDumpArgs = [
+      "--no-password", "--format=plain", "--no-owner", "--no-acl",
+      `--host=${dbHost}`, `--username=${dbUser}`, `--dbname=${dbName}`,
+    ];
+    pgDumpEnv = { ...process.env, PGPASSWORD: token, PGSSLMODE: "require" };
+
+  } else if (authMode === "postgres-azure") {
+    const dbHost = process.env.DB_HOST || "";
+    const dbUser = process.env.DB_USER || "";
+    const dbName = process.env.DB_NAME || "";
+    const dbPass = process.env.DB_PASSWORD || "";
+    if (!dbHost || !dbUser || !dbName || !dbPass) {
+      const error = "DB_AUTH_MODE=postgres-azure requires DB_HOST, DB_USER, DB_NAME, DB_PASSWORD for backup";
+      logger.error(error);
+      await db.execute(sql`
+        INSERT INTO backup_logs (filename, size_bytes, status, triggered_by, error_message)
+        VALUES ('none', 0, 'failed', ${triggeredBy}, ${error})
+      `);
+      return { success: false, error };
+    }
+    pgDumpArgs = [
+      "--no-password", "--format=plain", "--no-owner", "--no-acl",
+      `--host=${dbHost}`, `--username=${dbUser}`, `--dbname=${dbName}`,
+    ];
+    pgDumpEnv = { ...process.env, PGPASSWORD: dbPass, PGSSLMODE: "require" };
+
+  } else {
+    // Default: Neon cloud or local Postgres — use the connection URL directly.
+    const dbUrl =
+      process.env.NEON_DATABASE_URL ||
+      process.env.DATABASE_URL ||
+      process.env.AZURE_POSTGRESQL_URL;
+
+    if (!dbUrl) {
+      const error = "No database URL configured for backup";
+      logger.error(error);
+      await db.execute(sql`
+        INSERT INTO backup_logs (filename, size_bytes, status, triggered_by, error_message)
+        VALUES ('none', 0, 'failed', ${triggeredBy}, ${error})
+      `);
+      return { success: false, error };
+    }
+    pgDumpArgs = ["--no-password", "--format=plain", "--no-owner", "--no-acl", dbUrl];
+    pgDumpEnv = { ...process.env, PGPASSWORD: "" };
   }
 
   // Read blob config from DB (falls back to env var inside getSchedulerSettings)
@@ -95,11 +149,7 @@ export async function runBackup(
     const chunks: Buffer[] = [];
     let errorOutput = "";
 
-    const pgDump = spawn(
-      "pg_dump",
-      ["--no-password", "--format=plain", "--no-owner", "--no-acl", dbUrl],
-      { env: { ...process.env, PGPASSWORD: "" } }
-    );
+    const pgDump = spawn("pg_dump", pgDumpArgs, { env: pgDumpEnv });
 
     pgDump.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
     pgDump.stderr.on("data", (d: Buffer) => { errorOutput += d.toString(); });

@@ -2,6 +2,7 @@
 Health check endpoint for Azure App Service health probes.
 Returns 200 when healthy, 503 when degraded.
 """
+import asyncio
 import os
 import time
 import logging
@@ -29,24 +30,28 @@ async def health_check():
 
     db_status = "ok"
     try:
-        db_url = (
-            os.getenv("NEON_DATABASE_URL")
-            or os.getenv("DATABASE_URL")
-            or os.getenv("AZURE_POSTGRESQL_URL", "")
-        )
-        if db_url:
-            import asyncpg
-            conn = await asyncpg.connect(db_url, timeout=3)
-            await conn.fetchval("SELECT 1")
-            await conn.close()
-        else:
-            db_status = "no_url"
+        # Use the central Entra-aware helper so the health check works across
+        # all auth modes (Neon, local, Azure password, Azure Managed Identity).
+        # get_db_connection() is synchronous (psycopg2), so run it in a thread
+        # pool executor to avoid blocking the async event loop.
+        from database import get_db_connection
+
+        def _check():
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+            conn.close()
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _check)
+
     except Exception as exc:
         logger.warning(f"Health DB check failed: {exc}")
         db_status = f"error: {str(exc)[:80]}"
 
     return HealthResponse(
-        status="healthy" if db_status == "ok" or db_status == "no_url" else "degraded",
+        status="healthy" if db_status == "ok" else "degraded",
         uptime_seconds=uptime,
         service="LedgerLM Python Backend",
         version="1.0.0",

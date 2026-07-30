@@ -115,11 +115,11 @@ class MCPServer:
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
             
             from services.vector_store import get_embeddings
-            import psycopg2
-            from config import settings
-            
-            # Get chunk texts
-            conn = psycopg2.connect(settings.DATABASE_URL)
+            from database import get_db_connection
+
+            # Get chunk texts — use the Entra-aware helper so this works on
+            # Azure (DB_AUTH_MODE=entra) as well as Neon/local.
+            conn = get_db_connection()
             cur = conn.cursor()
             
             placeholders = ','.join(['%s'] * len(chunk_ids))
