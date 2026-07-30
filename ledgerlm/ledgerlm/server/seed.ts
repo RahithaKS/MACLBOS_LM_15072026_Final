@@ -436,26 +436,6 @@ async function seedDomains(
     ]);
 
     console.log('✅ Created domain admins: boschmatasma@bosch.com, boschmatasam@bosch.com (OTP: 123456)');
-
-    // Also seed Bosch India users
-    await db.insert(domainUsers).values([
-      {
-        domainId: boschDomain.id,
-        email: 'boschmatasam@bosch.com',
-        role: 'admin',
-        hardcodedOtp: '123456',
-        invitedBy: boschAdminId,
-      },
-      {
-        domainId: boschDomain.id,
-        email: 'boschmatasma@bosch.com',
-        role: 'admin',
-        hardcodedOtp: '123456',
-        invitedBy: boschAdminId,
-      },
-    ]);
-
-    console.log('✅ Created domain users: boschmatasam@bosch.com, boschmatasma@bosch.com (OTP: 123456)');
   }
   
   console.log('✨ Domains seeded');
