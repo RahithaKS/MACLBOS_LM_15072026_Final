@@ -28,6 +28,8 @@ import { createCubeMetadataTable } from "./migrations/create-cube-metadata";
 import { runSemanticSqlMigration } from "./migrations/create-semantic-sql-tables";
 import { runSchemaConfigMigration } from "./migrations/create-schema-config-tables";
 import { createIngestionJobsTable } from "./migrations/create-ingestion-jobs";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 import { createBusinessLogicTables } from "./migrations/create-business-logic-tables";
 import { getEntraToken } from "./utils/entraToken";
 import { addSsoColumnsToDomains } from "./migrations/add-sso-columns";

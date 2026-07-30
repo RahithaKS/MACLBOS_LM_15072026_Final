@@ -91,6 +91,9 @@ COPY --from=node-builder /app/package*.json ./
 
 # Copy drizzle config for database migrations
 COPY drizzle.config.ts ./
+
+# Copy pre-push scripts (extension creation etc.)
+COPY scripts ./scripts
  
 # Verify frontend files exist
 RUN echo "=== Verifying production frontend files ===" && ls -la server/public/ && test -f server/public/index.html && echo "=== Production frontend files verified ==="
