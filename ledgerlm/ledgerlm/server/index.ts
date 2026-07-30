@@ -255,6 +255,21 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 (async () => {
+  // ── Step 0: ensure required PostgreSQL extensions exist ──────────────────
+  // Must run first — the schema has vector(1024) / vector(3072) columns that
+  // require the pgvector extension to exist before any table can be created.
+  // Azure Portal prerequisite: Server parameters → azure.extensions → VECTOR
+  try {
+    await db.execute(sql`CREATE EXTENSION IF NOT EXISTS vector`);
+    await db.execute(sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+    log("PostgreSQL extensions ready (vector, pg_trgm)");
+  } catch (extErr: unknown) {
+    const msg = extErr instanceof Error ? extErr.message : String(extErr);
+    log(`⚠️  Extension creation warning (non-fatal): ${msg}`);
+    // Non-fatal at runtime — if the extension already exists this is a no-op.
+    // If it truly fails, vector queries will fail later with a clear error.
+  }
+
   // Ensure scheduler_config table exists (required for scheduler service)
   await createSchedulerConfig();
   

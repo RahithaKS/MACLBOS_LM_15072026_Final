@@ -263,19 +263,23 @@ echo "===== Looking for gel-core ====="\n\
 find node_modules -name "*gel*" || true\n\
 \n\
 echo ""\n\
-echo "===== Running drizzle db:push ====="\n\
-npm run db:push\n\
+echo "===== Creating PostgreSQL extensions (pgvector, pg_trgm) ====="\n\
+echo "NOTE: Azure Portal prerequisite — Server parameters → azure.extensions → VECTOR must be enabled first"\n\
+npm run db:prepare\n\
 DB_EXIT=$?\n\
 \n\
-echo "db:push Exit Code: $DB_EXIT"\n\
+echo "db:prepare Exit Code: $DB_EXIT"\n\
 \n\
 if [ $DB_EXIT -eq 0 ]; then\n\
     echo "========================================="\n\
-    echo "✅ Database schema push successful"\n\
+    echo "✅ Extensions created + schema push successful"\n\
     echo "========================================="\n\
 else\n\
     echo "========================================="\n\
-    echo "❌ Database schema push failed"\n\
+    echo "❌ db:prepare failed (extensions or schema push)"\n\
+    echo "  If error is about vector extension: go to Azure Portal →"\n\
+    echo "  PostgreSQL server → Server parameters → azure.extensions"\n\
+    echo "  → add VECTOR and PG_TRGM → Save → redeploy"\n\
     echo "========================================="\n\
 fi\n\
 \n\
