@@ -1,24 +1,36 @@
 """
 Azure Entra ID token fetcher for PostgreSQL Managed Identity auth.
-Calls the Azure Instance Metadata Service (IMDS) — only available inside
-Azure App Service / VM. Never called on Replit or local dev.
 
+Azure exposes two different MSI endpoints depending on the host:
+
+  App Service / Container Apps:
+    URL    → $IDENTITY_ENDPOINT?resource=...&api-version=2019-08-01
+    Header → X-IDENTITY-HEADER: $IDENTITY_HEADER
+
+  Bare VM / VMSS:
+    URL    → http://169.254.169.254/metadata/identity/oauth2/token?...
+    Header → Metadata: true
+
+We try the App Service path first and fall back to VM IMDS.
 Token is cached in-process and refreshed 5 minutes before expiry.
-get_entra_token() is called inside get_db_connection() so every new
-psycopg2 connection gets a fresh token when needed.
 """
 
+import os
 import time
 import logging
 import requests
 
 logger = logging.getLogger(__name__)
 
-IMDS_URL = (
+PG_RESOURCE = "https://ossrdbms-aad.database.windows.net"
+
+# VM IMDS fallback — NOT available inside App Service containers
+VM_IMDS_URL = (
     "http://169.254.169.254/metadata/identity/oauth2/token"
     "?api-version=2019-08-01"
-    "&resource=https://ossrdbms-aad.database.windows.net"
+    f"&resource={PG_RESOURCE}"
 )
+
 REFRESH_BUFFER_SECONDS = 5 * 60  # refresh 5 min before expiry
 
 _token_cache: dict = {}  # keys: token, expires_at
@@ -32,26 +44,48 @@ def get_entra_token() -> str:
     if _token_cache.get("token") and expires_at - now > REFRESH_BUFFER_SECONDS:
         return _token_cache["token"]
 
-    logger.info("[EntraToken] Fetching new token from Azure IMDS...")
+    identity_endpoint = os.environ.get("IDENTITY_ENDPOINT")
+    identity_header   = os.environ.get("IDENTITY_HEADER")
 
     try:
-        resp = requests.get(
-            IMDS_URL,
-            headers={"Metadata": "true"},
-            timeout=10,
-        )
+        if identity_endpoint and identity_header:
+            # ── Azure App Service / Container Apps MSI ────────────────────────
+            url = f"{identity_endpoint}?resource={PG_RESOURCE}&api-version=2019-08-01"
+            logger.info("[EntraToken] Fetching token via App Service IDENTITY_ENDPOINT...")
+            resp = requests.get(
+                url,
+                headers={"X-IDENTITY-HEADER": identity_header},
+                timeout=15,
+            )
+        else:
+            # ── VM IMDS fallback ──────────────────────────────────────────────
+            logger.info("[EntraToken] IDENTITY_ENDPOINT not set — using VM IMDS...")
+            resp = requests.get(
+                VM_IMDS_URL,
+                headers={"Metadata": "true"},
+                timeout=15,
+            )
+
         resp.raise_for_status()
+
     except requests.RequestException as exc:
         raise RuntimeError(
-            f"[EntraToken] IMDS token fetch failed: {exc}"
+            f"[EntraToken] Token fetch failed: {exc}\n"
+            f"  IDENTITY_ENDPOINT = {identity_endpoint or '(not set)'}\n"
+            f"  IDENTITY_HEADER   = {'(present)' if identity_header else '(not set)'}"
         ) from exc
 
     data = resp.json()
-    _token_cache["token"] = data["access_token"]
+    if "access_token" not in data:
+        raise RuntimeError(
+            f"[EntraToken] No access_token in response: {str(data)[:200]}"
+        )
+
+    _token_cache["token"]      = data["access_token"]
     _token_cache["expires_at"] = int(data["expires_on"])  # unix seconds
 
     expires_in_min = round((_token_cache["expires_at"] - now) / 60)
-    logger.info(f"[EntraToken] Token fetched. Expires in ~{expires_in_min} minutes.")
+    logger.info(f"[EntraToken] Token fetched via App Service MSI. Expires in ~{expires_in_min} minutes.")
 
     return _token_cache["token"]
 
