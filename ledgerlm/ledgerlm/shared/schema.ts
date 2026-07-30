@@ -172,6 +172,26 @@ export const boardDataSources = pgTable("board_data_sources", {
   positionIdx: index("board_data_sources_position_idx").on(table.boardId, table.position),
 }));
 
+// Smart Analysis Board reports — generated reports per board per period
+export const cubeBoardReports = pgTable("cube_board_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  boardId: varchar("board_id").notNull().references(() => boards.id, { onDelete: 'cascade' }),
+  title: text("title").notNull(),
+  periodLabel: text("period_label").notNull(),     // e.g. "Feb 2026", "Q1 2026"
+  year: integer("year").notNull(),
+  months: jsonb("months").notNull(),               // number[]
+  columnMapping: jsonb("column_mapping").notNull(), // { actuals, budget, forecast? }
+  dimensions: jsonb("dimensions"),                  // string[] used in analysis
+  userPromptFinal: text("user_prompt_final"),       // resolved prompt with real data tables
+  rawAnalysis: text("raw_analysis"),                // full LLM markdown response
+  status: varchar("status", { length: 20 }).notNull().default('complete'), // 'generating'|'complete'|'error'
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  boardIdIdx: index("cube_board_reports_board_id_idx").on(table.boardId),
+  createdAtIdx: index("cube_board_reports_created_at_idx").on(table.createdAt),
+}));
+
 export const documentChunks = pgTable("document_chunks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   documentId: varchar("document_id").notNull().references(() => documents.id, { onDelete: 'cascade' }),
@@ -1128,6 +1148,13 @@ export const insertBoardDataSourceSchema = createInsertSchema(boardDataSources).
   id: true,
   createdAt: true,
 });
+
+export const insertCubeBoardReportSchema = createInsertSchema(cubeBoardReports).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCubeBoardReport = z.infer<typeof insertCubeBoardReportSchema>;
+export type CubeBoardReport = typeof cubeBoardReports.$inferSelect;
 
 export const insertDocumentChunkSchema = createInsertSchema(documentChunks).omit({
   id: true,

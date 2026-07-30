@@ -40,6 +40,7 @@ import { createAuditLogTable } from "./migrations/create-audit-log";
 import { createRetentionPoliciesTable } from "./migrations/create-retention-policies";
 import { runInvestmentTablesMigration } from "./migrations/create-investment-tables";
 import { addSsoGroupMappings } from "./migrations/add-sso-group-mappings";
+import { createBoardReportsTable } from "./migrations/create-board-reports";
 import { runRetentionEngine } from "./services/retentionEngine";
 import { runBackup } from "./services/backupService";
 import { startSsoSyncJob } from "./services/ssoSyncJob";
@@ -325,6 +326,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
   // Add sso_group_mappings JSONB column to domains + status column to domain_users
   await addSsoGroupMappings();
+
+  // Create cube_board_reports table for Smart Analysis Board reports
+  await createBoardReportsTable();
 
   await seedDatabase();
   await fixAzureBlobConnectorSchedules();

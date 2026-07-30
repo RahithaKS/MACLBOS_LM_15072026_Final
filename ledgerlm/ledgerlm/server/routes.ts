@@ -22,6 +22,8 @@ import path from "path";
 import fs from "fs/promises";
 import { existsSync, unlinkSync } from "fs";
 import { streamFinancialAnalysis, checkPromptSafety, type DomainAiConfig } from "./openai";
+import { runBoardAnalysis, getCubeVersions } from "./services/boardAnalysisService";
+import { cubeBoardReports } from "@shared/schema";
 import { queryOrchestrator } from "./services/queryOrchestrator";
 import { evidenceBroker } from "./services/evidenceBroker";
 import { requireAdmin } from "./middleware/rbac";
@@ -2527,6 +2529,150 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete board" });
+    }
+  });
+
+  // ── PUT /api/boards/:id — fix missing update route ────────────────────────
+  app.put("/api/boards/:id", async (req, res) => {
+    try {
+      const userId = (req.session?.userId ?? "");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const board = await storage.getBoard(req.params.id);
+      if (!board) return res.status(404).json({ error: "Board not found" });
+      if (board.userId !== userId) return res.status(403).json({ error: "Forbidden" });
+
+      const { title, description, templateId, settings } = req.body;
+      const updated = await storage.updateBoard(req.params.id, {
+        title:      title      ?? board.title,
+        description: description ?? board.description,
+        templateId:  templateId  ?? board.templateId,
+        settings:    settings    ?? board.settings,
+      });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update board" });
+    }
+  });
+
+  // ── GET /api/cubes/:cubeId/versions — available version values in a cube ──
+  app.get("/api/cubes/:cubeId/versions", async (req, res) => {
+    try {
+      const userId = (req.session?.userId ?? "");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const versions = await getCubeVersions(req.params.cubeId);
+      res.json(versions);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch cube versions" });
+    }
+  });
+
+  // ── GET /api/boards/:id/reports — list reports for a board ────────────────
+  app.get("/api/boards/:id/reports", async (req, res) => {
+    try {
+      const userId = (req.session?.userId ?? "");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const board = await storage.getBoard(req.params.id);
+      if (!board || board.userId !== userId) return res.status(403).json({ error: "Forbidden" });
+
+      const reports = await db
+        .select()
+        .from(cubeBoardReports)
+        .where(eq(cubeBoardReports.boardId, req.params.id))
+        .orderBy(desc(cubeBoardReports.createdAt));
+      res.json(reports);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch board reports" });
+    }
+  });
+
+  // ── POST /api/boards/:id/run-analysis — generate a Smart Board report ─────
+  app.post("/api/boards/:id/run-analysis", async (req, res) => {
+    try {
+      const userId = (req.session?.userId ?? "");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const board = await storage.getBoard(req.params.id);
+      if (!board || board.userId !== userId) return res.status(403).json({ error: "Forbidden" });
+
+      const settings = (board.settings as any) ?? {};
+      const cubeId: string = settings.cubeId;
+      if (!cubeId) return res.status(400).json({ error: "No data cube configured on this board. Edit the board and select a cube first." });
+
+      const columnMapping = settings.columnMapping;
+      if (!columnMapping?.actuals || !columnMapping?.budget) {
+        return res.status(400).json({ error: "Column mapping (actuals + budget) is required. Edit the board to configure it." });
+      }
+
+      const { year, months, userPromptTemplate, extraContext } = req.body;
+      if (!year || !months?.length) return res.status(400).json({ error: "year and months are required" });
+
+      // Look up domain AI config for the requesting user
+      let domainAiConfig: DomainAiConfig | undefined;
+      try {
+        const domainUser = await db.execute(
+          sql`SELECT du.domain_id FROM domain_users du WHERE du.user_id = ${userId} LIMIT 1`
+        );
+        const domainId = (domainUser.rows?.[0] as any)?.domain_id;
+        if (domainId) {
+          const domainRow = await db.execute(
+            sql`SELECT ai_provider, ai_endpoint, ai_api_key, ai_chat_model, ai_chat_api_version, ai_system_prompt
+                FROM domains WHERE id = ${domainId} LIMIT 1`
+          );
+          const d = domainRow.rows?.[0] as any;
+          if (d?.ai_provider === 'azure_openai' && d?.ai_endpoint) {
+            domainAiConfig = {
+              provider: 'azure_openai',
+              endpoint: d.ai_endpoint,
+              apiKey: d.ai_api_key ? decryptValue(d.ai_api_key) : undefined,
+              chatModel: d.ai_chat_model,
+              chatApiVersion: d.ai_chat_api_version,
+              systemPrompt: d.ai_system_prompt,
+            };
+          }
+        }
+      } catch { /* fall back to default AI */ }
+
+      const dimensions: string[] = req.body.dimensions ?? ['Entity', 'Sector', 'Cost Category'];
+
+      const report = await runBoardAnalysis({
+        boardId:             req.params.id,
+        cubeId,
+        columnMapping,
+        year:                Number(year),
+        months:              (months as number[]).map(Number),
+        dimensions,
+        systemPromptTemplate: settings.analysisPrompts || '',
+        userPromptTemplate:   userPromptTemplate || '',
+        extraContext:         extraContext || '',
+        domainAiConfig,
+      });
+
+      res.status(201).json(report);
+    } catch (error: any) {
+      console.error("run-analysis error:", error);
+      res.status(500).json({ error: error?.message || "Failed to run analysis" });
+    }
+  });
+
+  // ── DELETE /api/boards/:id/reports/:reportId ──────────────────────────────
+  app.delete("/api/boards/:id/reports/:reportId", async (req, res) => {
+    try {
+      const userId = (req.session?.userId ?? "");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const board = await storage.getBoard(req.params.id);
+      if (!board || board.userId !== userId) return res.status(403).json({ error: "Forbidden" });
+
+      await db
+        .delete(cubeBoardReports)
+        .where(
+          sql`id = ${req.params.reportId} AND board_id = ${req.params.id}`
+        );
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete report" });
     }
   });
 
