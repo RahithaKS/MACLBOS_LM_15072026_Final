@@ -22,7 +22,7 @@ import path from "path";
 import fs from "fs/promises";
 import { existsSync, unlinkSync } from "fs";
 import { streamFinancialAnalysis, checkPromptSafety, type DomainAiConfig } from "./openai";
-import { runBoardAnalysis, getCubeVersions } from "./services/boardAnalysisService";
+import { runBoardAnalysis, getCubeVersions, previewBoardData, FOLLOW_UP_INTENTS } from "./services/boardAnalysisService";
 import { cubeBoardReports } from "@shared/schema";
 import { queryOrchestrator } from "./services/queryOrchestrator";
 import { evidenceBroker } from "./services/evidenceBroker";
@@ -2564,6 +2564,95 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(versions);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch cube versions" });
+    }
+  });
+
+  // ── GET /api/boards/:id/preview-data — lightweight data check + dimension values ──
+  app.get("/api/boards/:id/preview-data", async (req, res) => {
+    try {
+      const userId = (req.session?.userId ?? "");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const board = await storage.getBoard(req.params.id);
+      if (!board || board.userId !== userId) return res.status(403).json({ error: "Forbidden" });
+
+      const settings = (board.settings as any) ?? {};
+      const cubeId: string = settings.cubeId;
+      if (!cubeId) return res.status(400).json({ error: "No cube configured on this board" });
+
+      const columnMapping = settings.columnMapping;
+      if (!columnMapping?.actuals || !columnMapping?.budget) {
+        return res.status(400).json({ error: "Column mapping (actuals + budget) required" });
+      }
+
+      const year   = Number(req.query.year);
+      const months = String(req.query.months || '').split(',').map(Number).filter(Boolean);
+      if (!year || months.length === 0) return res.status(400).json({ error: "year and months are required" });
+
+      const preview = await previewBoardData({ cubeId, columnMapping, year, months });
+      res.json(preview);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to fetch preview data" });
+    }
+  });
+
+  // ── POST /api/boards/:id/reports/:reportId/follow-up — quick-intent chat ──
+  app.post("/api/boards/:id/reports/:reportId/follow-up", async (req, res) => {
+    try {
+      const userId = (req.session?.userId ?? "");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const board = await storage.getBoard(req.params.id);
+      if (!board || board.userId !== userId) return res.status(403).json({ error: "Forbidden" });
+
+      // Fetch the report
+      const reportRows = await db
+        .select()
+        .from(cubeBoardReports)
+        .where(sql`id = ${req.params.reportId} AND board_id = ${req.params.id}`)
+        .limit(1);
+      if (reportRows.length === 0) return res.status(404).json({ error: "Report not found" });
+      const report = reportRows[0];
+
+      const intent = req.body.intent as string;
+      const intentDef = FOLLOW_UP_INTENTS[intent];
+      if (!intentDef) return res.status(400).json({ error: `Unknown intent: ${intent}` });
+
+      // Build context for the seeded chat message
+      const mapping = (report.columnMapping as any) ?? {};
+      const summary = report.rawAnalysis
+        ? report.rawAnalysis.slice(0, 800) + (report.rawAnalysis.length > 800 ? '\n\n[... report continues ...]' : '')
+        : 'No analysis content available.';
+
+      const contextBlock = `You are continuing an analysis of board: "${board.title}".
+
+**Report context:**
+- Period: ${report.periodLabel}${report.comparisonPeriodLabel ? ` (compared to ${report.comparisonPeriodLabel})` : ''}
+- Actuals column: ${mapping.actuals ?? 'N/A'}
+- Budget column: ${mapping.budget ?? 'N/A'}
+- Dimensions analysed: ${(report.dimensions as string[] | null)?.join(', ') ?? 'N/A'}
+
+**Report summary (excerpt):**
+${summary}
+
+---
+**Your specific question:**
+${intentDef.question}`;
+
+      // Create the linked chat + seed it with the context message
+      const chatTitle = `${intentDef.icon} ${intentDef.label} — ${report.periodLabel}`;
+      const chat = await storage.createChat({ userId, title: chatTitle });
+
+      // Insert a seeded user message so the context is pre-loaded when opened
+      await storage.createMessage({ chatId: chat.id, role: 'user', content: contextBlock });
+
+      // Link it to the board as a thread
+      await storage.addBoardThread({ boardId: req.params.id, chatId: chat.id });
+
+      res.status(201).json({ chatId: chat.id });
+    } catch (error: any) {
+      console.error("follow-up error:", error);
+      res.status(500).json({ error: error?.message || "Failed to create follow-up chat" });
     }
   });
 

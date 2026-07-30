@@ -41,6 +41,7 @@ import { createRetentionPoliciesTable } from "./migrations/create-retention-poli
 import { runInvestmentTablesMigration } from "./migrations/create-investment-tables";
 import { addSsoGroupMappings } from "./migrations/add-sso-group-mappings";
 import { createBoardReportsTable } from "./migrations/create-board-reports";
+import { addVarianceDataColumn } from "./migrations/add-variance-data-column";
 import { runRetentionEngine } from "./services/retentionEngine";
 import { runBackup } from "./services/backupService";
 import { startSsoSyncJob } from "./services/ssoSyncJob";
@@ -329,6 +330,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
   // Create cube_board_reports table for Smart Analysis Board reports
   await createBoardReportsTable();
+  // Add varianceData + comparisonPeriodLabel columns (Phase 2)
+  await addVarianceDataColumn();
 
   await seedDatabase();
   await fixAzureBlobConnectorSchedules();

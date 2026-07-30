@@ -182,8 +182,10 @@ export const cubeBoardReports = pgTable("cube_board_reports", {
   months: jsonb("months").notNull(),               // number[]
   columnMapping: jsonb("column_mapping").notNull(), // { actuals, budget, forecast? }
   dimensions: jsonb("dimensions"),                  // string[] used in analysis
-  userPromptFinal: text("user_prompt_final"),       // resolved prompt with real data tables
-  rawAnalysis: text("raw_analysis"),                // full LLM markdown response
+  userPromptFinal: text("user_prompt_final"),         // resolved prompt with real data tables
+  rawAnalysis: text("raw_analysis"),                  // full LLM markdown response
+  varianceData: jsonb("variance_data"),               // compact variance rows for CSV export + comparison
+  comparisonPeriodLabel: text("comparison_period_label"), // e.g. "Feb 2025" (if comparison was run)
   status: varchar("status", { length: 20 }).notNull().default('complete'), // 'generating'|'complete'|'error'
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
