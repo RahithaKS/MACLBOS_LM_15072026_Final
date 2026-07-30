@@ -16,6 +16,11 @@ from psycopg2.extras import RealDictCursor, execute_values
 import requests
 from config import settings
 
+# Import the Entra-aware connection helper so every DB call in this service
+# automatically uses the correct auth mode (Neon, local, Azure password, or
+# Azure Managed Identity) without duplicating the connection logic here.
+from database import get_db_connection as _entra_db_connection
+
 def get_llm_response(prompt: str, ai_config: dict = None):
     """
     Call the LLM for intent parsing.
@@ -693,7 +698,7 @@ def get_domain_config_from_db(domain_name: str) -> Optional[Dict[str, Any]]:
         return _domain_config_cache[cache_key]
 
     try:
-        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
+        conn = _entra_db_connection()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             # Find domain by name
             cur.execute(
@@ -1832,11 +1837,12 @@ class SemanticSQLService:
 
     def __init__(self):
         self.client = None # Using get_llm_response instead
-        self.db_url = os.environ.get('DATABASE_URL')
 
     def get_db_connection(self):
-        """Get database connection"""
-        return psycopg2.connect(self.db_url)
+        """Get database connection — delegates to the Entra-aware helper in
+        database.py so this service respects DB_AUTH_MODE (Neon, local,
+        Azure password, or Azure Managed Identity) without duplicating logic."""
+        return _entra_db_connection()
 
     def rephrase_user_query(self,
                             query: str,
@@ -8142,7 +8148,7 @@ Return a JSON object with:
             # ── Source 2: business terms matched from original query ──────────
             if original_query:
                 try:
-                    conn2 = psycopg2.connect(self.db_url)
+                    conn2 = self.get_db_connection()
                     cur2 = conn2.cursor()
                     cur2.execute(
                         """
@@ -8259,7 +8265,7 @@ Return a JSON object with:
                 calc_name_lower = 'revenue'
             else:
                 try:
-                    conn = psycopg2.connect(self.db_url)
+                    conn = self.get_db_connection()
                     cursor = conn.cursor()
 
                     # Build candidate names: original + progressively stripped suffixes
