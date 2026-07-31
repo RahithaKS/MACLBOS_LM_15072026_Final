@@ -19,7 +19,7 @@ import {
   Trash2,
   ScrollText,
 } from "lucide-react";
-import { LuLayoutDashboard } from "react-icons/lu"
+import { LuLayoutDashboard } from "react-icons/lu";
 import { GoHomeFill } from "react-icons/go";
 import { FaFolderClosed } from "react-icons/fa6";
 import { Link, useLocation } from "wouter";
@@ -59,7 +59,11 @@ import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useAuthUser, clearAuthUser } from "@/lib/auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -145,10 +149,14 @@ export function AppSidebar() {
     enabled: !!currentUser,
   });
 
-  const isSuperAdmin = currentUser?.username?.toLowerCase() === 'customer@ledgerlm.ai';
+  const isSuperAdmin =
+    currentUser?.username?.toLowerCase() === "customer@ledgerlm.ai";
   const isDomainAdmin = domainInfo?.isSuperAdmin || !!domainInfo?.domain;
-  const hasAdminAccess = currentUser?.role === 'admin' || isDomainAdmin || isSuperAdmin;
-  const isBoschUser = currentUser?.username?.toLowerCase().endsWith('@bosch.com');
+  const hasAdminAccess =
+    currentUser?.role === "admin" || isDomainAdmin || isSuperAdmin;
+  const isBoschUser = currentUser?.username
+    ?.toLowerCase()
+    .endsWith("@bosch.com");
 
   const displayName = currentUser?.displayName || "User";
   const username = currentUser?.username || "";
@@ -164,7 +172,10 @@ export function AppSidebar() {
     // Without this, navigating directly to a protected route after logout would
     // re-authenticate via /api/auth/me (session cookie still valid).
     try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
     } catch {
       // Best-effort — proceed with client-side cleanup regardless
     }
@@ -199,7 +210,9 @@ export function AppSidebar() {
 
   const renameChatMutation = useMutation({
     mutationFn: async ({ id, title }: { id: string; title: string }) => {
-      const chat = await apiRequest<Chat>("PATCH", `/api/chats/${id}`, { title });
+      const chat = await apiRequest<Chat>("PATCH", `/api/chats/${id}`, {
+        title,
+      });
       return chat;
     },
     onSuccess: () => {
@@ -257,10 +270,10 @@ export function AppSidebar() {
       if (chats && chats.length > 0) {
         const latestChat = chats[0];
         try {
-          const data = await apiRequest<{ hasMessages: boolean; messageCount: number }>(
-            "GET",
-            `/api/chats/${latestChat.id}/has-messages`
-          );
+          const data = await apiRequest<{
+            hasMessages: boolean;
+            messageCount: number;
+          }>("GET", `/api/chats/${latestChat.id}/has-messages`);
           if (!data.hasMessages) {
             // Reuse the existing empty chat
             setLocation(`/chat/${latestChat.id}?openDataSources=true`);
@@ -285,19 +298,27 @@ export function AppSidebar() {
 
   const handleConfirmRename = () => {
     if (renamingChat && renameValue.trim()) {
-      renameChatMutation.mutate({ id: renamingChat.id, title: renameValue.trim() });
+      renameChatMutation.mutate({
+        id: renamingChat.id,
+        title: renameValue.trim(),
+      });
     }
   };
 
   const handleDeleteChat = (chat: Chat) => {
-    if (confirm(`Are you sure you want to delete "${chat.title}"? This action cannot be undone.`)) {
+    if (
+      confirm(
+        `Are you sure you want to delete "${chat.title}"? This action cannot be undone.`,
+      )
+    ) {
       deleteChatMutation.mutate(chat.id);
     }
   };
 
-  const filteredChats = chats?.filter((chat) =>
-    chat.title.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  const filteredChats =
+    chats?.filter((chat) =>
+      chat.title.toLowerCase().includes(searchQuery.toLowerCase()),
+    ) || [];
 
   return (
     <Sidebar collapsible="icon">
@@ -305,7 +326,10 @@ export function AppSidebar() {
         {isCollapsed ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <SidebarTrigger className="flex items-center justify-center w-full" data-testid="button-toggle-sidebar">
+              <SidebarTrigger
+                className="flex items-center justify-center w-full"
+                data-testid="button-toggle-sidebar"
+              >
                 <img
                   src="/Images - Logo/PNGs/120px.png"
                   alt="LedgerLM Logo"
@@ -325,11 +349,16 @@ export function AppSidebar() {
                 alt="LedgerLM Logo"
                 className="h-8 w-9"
               />
-              <span className="text-xl font-bold text-foreground">LedgerLM</span>
+              <span className="text-xl font-bold text-foreground">
+                LedgerLM
+              </span>
             </div>
             <Tooltip>
               <TooltipTrigger asChild>
-                <SidebarTrigger className="h-6 w-6 p-0" data-testid="button-toggle-sidebar">
+                <SidebarTrigger
+                  className="h-6 w-6 p-0"
+                  data-testid="button-toggle-sidebar"
+                >
                   <PanelLeftClose className="h-4 w-4" />
                 </SidebarTrigger>
               </TooltipTrigger>
@@ -385,19 +414,23 @@ export function AppSidebar() {
                   <Link
                     href={item.comingSoon ? location : item.url}
                     data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
-                    className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg transition-colors ${
+                    className={`flex items-center ${isCollapsed ? "justify-center" : "gap-3"} px-3 py-2 rounded-lg transition-colors ${
                       isActive
                         ? "bg-white border border-border/50 shadow-sm"
                         : "hover-elevate"
                     }`}
-                    onClick={item.comingSoon ? (e: React.MouseEvent) => {
-                      e.preventDefault();
-                      toast({
-                        title: "🚧 Boards — Coming Soon",
-                        description: "This feature is under development and will be available shortly.",
-                        duration: 3000,
-                      });
-                    } : undefined}
+                    onClick={
+                      item.comingSoon
+                        ? (e: React.MouseEvent) => {
+                            e.preventDefault();
+                            toast({
+                              title: "🚧 Boards — Coming Soon",
+                              description: "Boards Comming Soon!.",
+                              duration: 3000,
+                            });
+                          }
+                        : undefined
+                    }
                   >
                     <div
                       className={`w-5 h-5 shrink-0 flex items-center justify-center ${
@@ -438,60 +471,68 @@ export function AppSidebar() {
                   </SidebarMenuItem>
                 );
               })}
-              {isBoschUser && (() => {
-                const isActive = location === '/agentic-workflow';
-                const menuItem = (
-                  <Link
-                    href="/agentic-workflow"
-                    data-testid="link-agentic-workflow"
-                    className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg transition-colors ${
-                      isActive
-                        ? "bg-white border border-border/50 shadow-sm"
-                        : "hover-elevate"
-                    }`}
-                  >
-                    <div
-                      className={`w-5 h-5 shrink-0 flex items-center justify-center ${
-                        isActive ? "text-primary" : "text-muted-foreground/60"
+              {isBoschUser &&
+                (() => {
+                  const isActive = location === "/agentic-workflow";
+                  const menuItem = (
+                    <Link
+                      href="/agentic-workflow"
+                      data-testid="link-agentic-workflow"
+                      className={`flex items-center ${isCollapsed ? "justify-center" : "gap-3"} px-3 py-2 rounded-lg transition-colors ${
+                        isActive
+                          ? "bg-white border border-border/50 shadow-sm"
+                          : "hover-elevate"
                       }`}
                     >
-                      <Bot className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
-                    </div>
-                    {!isCollapsed && (
-                      <span
-                        className={`text-sm flex-1 ${
-                          isActive
-                            ? "text-foreground font-medium"
-                            : "text-muted-foreground/80 font-normal"
+                      <div
+                        className={`w-5 h-5 shrink-0 flex items-center justify-center ${
+                          isActive ? "text-primary" : "text-muted-foreground/60"
                         }`}
                       >
-                        Agentic Workflow
-                      </span>
-                    )}
-                  </Link>
-                );
-                return (
-                  <SidebarMenuItem key="agentic-workflow">
-                    {isCollapsed ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>{menuItem}</TooltipTrigger>
-                        <TooltipContent side="right">
-                          <p>Agentic Workflow</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : (
-                      menuItem
-                    )}
-                  </SidebarMenuItem>
-                );
-              })()}
+                        <Bot
+                          className="w-5 h-5"
+                          strokeWidth={isActive ? 2.5 : 2}
+                        />
+                      </div>
+                      {!isCollapsed && (
+                        <span
+                          className={`text-sm flex-1 ${
+                            isActive
+                              ? "text-foreground font-medium"
+                              : "text-muted-foreground/80 font-normal"
+                          }`}
+                        >
+                          Agentic Workflow
+                        </span>
+                      )}
+                    </Link>
+                  );
+                  return (
+                    <SidebarMenuItem key="agentic-workflow">
+                      {isCollapsed ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>{menuItem}</TooltipTrigger>
+                          <TooltipContent side="right">
+                            <p>Agentic Workflow</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        menuItem
+                      )}
+                    </SidebarMenuItem>
+                  );
+                })()}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
         {hasAdminAccess && (
           <SidebarGroup className="px-0">
-            {!isCollapsed && <SidebarGroupLabel className="text-sm font-bold text-black">Admin</SidebarGroupLabel>}
+            {!isCollapsed && (
+              <SidebarGroupLabel className="text-sm font-bold text-black">
+                Admin
+              </SidebarGroupLabel>
+            )}
             <SidebarGroupContent>
               <SidebarMenu className="space-y-1">
                 {adminMenuItems.map((item) => {
@@ -500,7 +541,7 @@ export function AppSidebar() {
                     <Link
                       href={item.url}
                       data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
-                      className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg transition-colors ${
+                      className={`flex items-center ${isCollapsed ? "justify-center" : "gap-3"} px-3 py-2 rounded-lg transition-colors ${
                         isActive
                           ? "bg-white border border-border/50 shadow-sm"
                           : "hover-elevate"
@@ -552,7 +593,11 @@ export function AppSidebar() {
 
         {isSuperAdmin && (
           <SidebarGroup className="px-0">
-            {!isCollapsed && <SidebarGroupLabel className="text-sm font-bold text-black">Super Admin</SidebarGroupLabel>}
+            {!isCollapsed && (
+              <SidebarGroupLabel className="text-sm font-bold text-black">
+                Super Admin
+              </SidebarGroupLabel>
+            )}
             <SidebarGroupContent>
               <SidebarMenu className="space-y-1">
                 {superAdminMenuItems.map((item) => {
@@ -561,7 +606,7 @@ export function AppSidebar() {
                     <Link
                       href={item.url}
                       data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
-                      className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg transition-colors ${
+                      className={`flex items-center ${isCollapsed ? "justify-center" : "gap-3"} px-3 py-2 rounded-lg transition-colors ${
                         isActive
                           ? "bg-white border border-border/50 shadow-sm"
                           : "hover-elevate"
@@ -611,7 +656,6 @@ export function AppSidebar() {
           </SidebarGroup>
         )}
 
-
         {!isCollapsed && (
           <SidebarGroup className="px-0 flex-1 flex flex-col overflow-hidden">
             <SidebarGroupLabel className="text-sm font-bold text-black flex-shrink-0">
@@ -625,58 +669,59 @@ export function AppSidebar() {
               ) : filteredChats.length > 0 ? (
                 <>
                   <SidebarMenu>
-                    {(showAllChats ? filteredChats : filteredChats.slice(0, 5)).map(
-                      (chat, index) => (
-                        <SidebarMenuItem key={chat.id} className="group/chat">
-                          <div className="flex items-center w-full">
-                            <SidebarMenuButton
-                              asChild
-                              isActive={location === `/chat/${chat.id}`}
-                              className="flex-1 min-w-0"
+                    {(showAllChats
+                      ? filteredChats
+                      : filteredChats.slice(0, 5)
+                    ).map((chat, index) => (
+                      <SidebarMenuItem key={chat.id} className="group/chat">
+                        <div className="flex items-center w-full">
+                          <SidebarMenuButton
+                            asChild
+                            isActive={location === `/chat/${chat.id}`}
+                            className="flex-1 min-w-0"
+                          >
+                            <Link
+                              href={`/chat/${chat.id}`}
+                              data-testid={`link-chat-${index}`}
                             >
-                              <Link
-                                href={`/chat/${chat.id}`}
-                                data-testid={`link-chat-${index}`}
+                              <span className="text-sm truncate">
+                                {chat.title}
+                              </span>
+                            </Link>
+                          </SidebarMenuButton>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 opacity-0 group-hover/chat:opacity-100 transition-opacity flex-shrink-0"
+                                data-testid={`button-chat-menu-${index}`}
+                                onClick={(e) => e.stopPropagation()}
                               >
-                                <span className="text-sm truncate">
-                                  {chat.title}
-                                </span>
-                              </Link>
-                            </SidebarMenuButton>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 opacity-0 group-hover/chat:opacity-100 transition-opacity flex-shrink-0"
-                                  data-testid={`button-chat-menu-${index}`}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-40">
-                                <DropdownMenuItem
-                                  onClick={() => handleRenameChat(chat)}
-                                  data-testid={`menu-item-rename-${index}`}
-                                >
-                                  <Pencil className="w-4 h-4 mr-2" />
-                                  Rename
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => handleDeleteChat(chat)}
-                                  className="text-destructive focus:text-destructive"
-                                  data-testid={`menu-item-delete-${index}`}
-                                >
-                                  <Trash2 className="w-4 h-4 mr-2" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </SidebarMenuItem>
-                      ),
-                    )}
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-40">
+                              <DropdownMenuItem
+                                onClick={() => handleRenameChat(chat)}
+                                data-testid={`menu-item-rename-${index}`}
+                              >
+                                <Pencil className="w-4 h-4 mr-2" />
+                                Rename
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleDeleteChat(chat)}
+                                className="text-destructive focus:text-destructive"
+                                data-testid={`menu-item-delete-${index}`}
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </SidebarMenuItem>
+                    ))}
                   </SidebarMenu>
                   {filteredChats.length > 5 && (
                     <div className="px-2 pt-2">
@@ -726,7 +771,10 @@ export function AppSidebar() {
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Avatar className="w-9 h-9 cursor-pointer hover-elevate" data-testid="button-user-profile">
+                <Avatar
+                  className="w-9 h-9 cursor-pointer hover-elevate"
+                  data-testid="button-user-profile"
+                >
                   <AvatarFallback className="bg-primary text-primary-foreground text-sm">
                     {initials}
                   </AvatarFallback>
@@ -793,7 +841,9 @@ export function AppSidebar() {
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{displayName}</p>
+                    <p className="text-sm font-medium truncate">
+                      {displayName}
+                    </p>
                   </div>
                   <ChevronDown className="w-4 h-4 text-muted-foreground" />
                 </div>
@@ -851,7 +901,7 @@ export function AppSidebar() {
               placeholder="Enter chat name"
               data-testid="input-rename-chat"
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
+                if (e.key === "Enter") {
                   handleConfirmRename();
                 }
               }}
