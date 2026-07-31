@@ -1,3 +1,5 @@
+import { getAzureOpenAIToken } from './utils/entraToken';
+
 // Use Ollama directly via your custom Nginx proxy
 const OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "https://ollama.ledgerlm.ai").replace(/\/v1\/?$/, "").replace(/\/api\/?$/, "");
 
@@ -41,8 +43,9 @@ export function checkPromptSafety(text: string): PromptSafetyResult {
 
 export interface DomainAiConfig {
   provider: 'ollama' | 'azure_openai';
+  authMethod?: 'api_key' | 'entra_id' | 'private_endpoint'; // how to authenticate to Azure
   endpoint?: string;     // Azure: base URL e.g. https://xxx.cognitiveservices.azure.com
-  apiKey?: string;       // Azure: decrypted key
+  apiKey?: string;       // Azure: decrypted key (only used when authMethod === 'api_key')
   chatModel?: string;    // Azure: deployment name e.g. gpt-5.2-chat
   chatApiVersion?: string; // Azure: e.g. 2024-12-01-preview
   systemPrompt?: string; // Optional custom system prompt override
@@ -202,21 +205,34 @@ Question: ${request.query}`;
   const useAzure = aiConfig?.provider === 'azure_openai';
 
   try {
-    if (useAzure && aiConfig?.endpoint && aiConfig?.apiKey && aiConfig?.chatModel) {
+    const isAzureKeyless = aiConfig?.authMethod === 'entra_id' || aiConfig?.authMethod === 'private_endpoint';
+    const canUseAzure = useAzure && aiConfig?.endpoint && aiConfig?.chatModel &&
+                        (isAzureKeyless || aiConfig?.apiKey);
+
+    if (canUseAzure) {
       // ── Azure OpenAI path ──────────────────────────────────────────────
       // Azure Cognitive Services endpoint format:
       //   POST {endpoint}/openai/deployments/{deployment}/chat/completions?api-version={version}
-      const endpoint = aiConfig.endpoint.replace(/\/$/, '');
-      const apiVersion = aiConfig.chatApiVersion || '2024-12-01-preview';
-      const url = `${endpoint}/openai/deployments/${aiConfig.chatModel}/chat/completions?api-version=${apiVersion}`;
+      const endpoint = aiConfig!.endpoint!.replace(/\/$/, '');
+      const apiVersion = aiConfig!.chatApiVersion || '2024-12-01-preview';
+      const url = `${endpoint}/openai/deployments/${aiConfig!.chatModel}/chat/completions?api-version=${apiVersion}`;
 
-      console.log(`[Azure OpenAI] Using deployment ${aiConfig.chatModel} at ${endpoint}`);
+      console.log(`[Azure OpenAI] Using deployment ${aiConfig!.chatModel} at ${endpoint} (auth: ${aiConfig!.authMethod || 'api_key'})`);
+
+      // ── Auth header: Bearer token for Entra ID, api-key otherwise ─────
+      let authHeader: Record<string, string>;
+      if (isAzureKeyless) {
+        const token = await getAzureOpenAIToken();
+        authHeader = { 'Authorization': `Bearer ${token}` };
+      } else {
+        authHeader = { 'api-key': aiConfig!.apiKey! };
+      }
 
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'api-key': aiConfig.apiKey,
+          ...authHeader,
         },
         body: JSON.stringify({
           messages,

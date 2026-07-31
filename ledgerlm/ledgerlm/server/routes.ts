@@ -1438,13 +1438,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 if (domain?.aiProvider === 'azure_openai' && domain.aiEndpoint && (isAzureKeyless1 || domain.aiApiKey)) {
                   domainAiConfig = {
                     provider: 'azure_openai',
+                    authMethod: (domain.aiAuthMethod as DomainAiConfig['authMethod']) || 'api_key',
                     endpoint: domain.aiEndpoint,
                     apiKey: domain.aiApiKey ? decryptValue(domain.aiApiKey) : undefined,
                     chatModel: domain.aiChatModel || undefined,
                     chatApiVersion: domain.aiChatApiVersion || undefined,
                     systemPrompt: domain.aiSystemPrompt || undefined,
                   };
-                  console.log(`[AI Router] Using Azure OpenAI for domain ${domain.name} (model: ${domain.aiChatModel})`);
+                  console.log(`[AI Router] Using Azure OpenAI for domain ${domain.name} (model: ${domain.aiChatModel}, auth: ${domain.aiAuthMethod || 'api_key'})`);
                 }
               }
             }
@@ -2706,13 +2707,15 @@ ${intentDef.question}`;
         const domainId = (domainUser.rows?.[0] as any)?.domain_id;
         if (domainId) {
           const domainRow = await db.execute(
-            sql`SELECT ai_provider, ai_endpoint, ai_api_key, ai_chat_model, ai_chat_api_version, ai_system_prompt
+            sql`SELECT ai_provider, ai_auth_method, ai_endpoint, ai_api_key, ai_chat_model, ai_chat_api_version, ai_system_prompt
                 FROM domains WHERE id = ${domainId} LIMIT 1`
           );
           const d = domainRow.rows?.[0] as any;
-          if (d?.ai_provider === 'azure_openai' && d?.ai_endpoint) {
+          const isKeyless2 = d?.ai_auth_method === 'entra_id' || d?.ai_auth_method === 'private_endpoint';
+          if (d?.ai_provider === 'azure_openai' && d?.ai_endpoint && (isKeyless2 || d?.ai_api_key)) {
             domainAiConfig = {
               provider: 'azure_openai',
+              authMethod: (d.ai_auth_method as DomainAiConfig['authMethod']) || 'api_key',
               endpoint: d.ai_endpoint,
               apiKey: d.ai_api_key ? decryptValue(d.ai_api_key) : undefined,
               chatModel: d.ai_chat_model,
