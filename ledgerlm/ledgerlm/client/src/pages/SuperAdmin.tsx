@@ -187,6 +187,7 @@ export default function SuperAdmin() {
         } : {}),
         aiProvider: data.aiProvider || 'ollama',
         ...(data.aiProvider === 'azure_openai' ? {
+          aiAuthMethod: data.aiAuthMethod || 'api_key',
           aiEndpoint: data.aiEndpoint || null,
           aiApiKey: data.aiApiKey || null,
           aiChatModel: data.aiChatModel || null,
@@ -235,6 +236,7 @@ export default function SuperAdmin() {
         } : {}),
         aiProvider: data.aiProvider || 'ollama',
         ...(data.aiProvider === 'azure_openai' ? {
+          aiAuthMethod: data.aiAuthMethod || 'api_key',
           aiEndpoint: data.aiEndpoint || null,
           aiApiKey: data.aiApiKey || null,
           aiChatModel: data.aiChatModel || null,
