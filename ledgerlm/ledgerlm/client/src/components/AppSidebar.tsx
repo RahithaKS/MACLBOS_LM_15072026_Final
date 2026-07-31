@@ -80,6 +80,7 @@ const menuItems = [
     title: "Boards",
     url: "/boards",
     icon: LuLayoutDashboard,
+    comingSoon: true,
   },
   // {
   //   title: "Market Intelligence",
@@ -382,13 +383,21 @@ export function AppSidebar() {
                 const isActive = location === item.url;
                 const menuItem = (
                   <Link
-                    href={item.url}
+                    href={item.comingSoon ? location : item.url}
                     data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
                     className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg transition-colors ${
                       isActive
                         ? "bg-white border border-border/50 shadow-sm"
                         : "hover-elevate"
                     }`}
+                    onClick={item.comingSoon ? (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      toast({
+                        title: "🚧 Boards — Coming Soon",
+                        description: "This feature is under development and will be available shortly.",
+                        duration: 3000,
+                      });
+                    } : undefined}
                   >
                     <div
                       className={`w-5 h-5 shrink-0 flex items-center justify-center ${
