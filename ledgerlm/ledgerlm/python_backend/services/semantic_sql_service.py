@@ -9157,11 +9157,31 @@ Return a JSON object with:
         outer_order  = ((', '.join(dim_cols) + ', ') if dim_cols else '') + \
                        (year_select) + 'month::int'
 
-        # Strip ORDER BY / LIMIT from inner SQL
-        clean = re.sub(
-            r'\s*ORDER\s+BY\s+.*?(?=\s*LIMIT\s|\s*;?\s*$)',
-            '', original_sql, flags=re.IGNORECASE | re.DOTALL
-        ).strip()
+        # Strip trailing ORDER BY / LIMIT from inner SQL.
+        #
+        # ⚠️  Do NOT use a simple regex here.  The inner SQL may contain
+        #   ORDER BY inside a window function OVER (PARTITION BY … ORDER BY …).
+        #   A regex with re.DOTALL will match that first and strip everything
+        #   from the window ORDER BY to the end of the string, leaving a broken
+        #   half-open parenthesis before _mom_lag AS ( and causing a syntax error.
+        #
+        # Instead: scan the SQL character-by-character tracking parenthesis
+        # depth and record only the last ORDER BY found at depth 0 (top level).
+        _sql_upper = original_sql.upper()
+        _last_top_ob = -1
+        _depth = 0
+        _pos = 0
+        while _pos < len(original_sql):
+            ch = original_sql[_pos]
+            if ch == '(':
+                _depth += 1
+            elif ch == ')':
+                _depth -= 1
+            elif _depth == 0 and _sql_upper[_pos:_pos + 8] == 'ORDER BY':
+                _last_top_ob = _pos
+            _pos += 1
+        clean = (original_sql[:_last_top_ob].rstrip()
+                 if _last_top_ob >= 0 else original_sql)
         clean = re.sub(r'\s*LIMIT\s+\d+', '', clean, flags=re.IGNORECASE).strip()
 
         wrapped_sql = (
