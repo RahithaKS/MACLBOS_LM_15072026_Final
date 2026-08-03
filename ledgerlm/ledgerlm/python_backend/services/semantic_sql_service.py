@@ -12968,10 +12968,20 @@ Return a JSON object with:
                 f"time_agg={time_agg}, cost_category=Revenue Summary, column={amt_col}, alias={col_alias})")
 
         elif time_agg == 'MTD':
-            # MTD: derive single-month value = YTD(N) - YTD(N-1) using LAG.
-            # Partition by everything except month so the window runs within
-            # each (entity, year) group ordered by month.
-            sql = f"""
+            # MTD derivation strategy depends on whether month is in the GROUP BY:
+            #
+            # A) month IS in group_by (multi-month trend query, e.g. "MTD trend 2025"):
+            #    Use LAG(YTD) so MTD(N) = YTD(N) - YTD(N-1).
+            #    month must be in the inner SELECT for the window to reference it.
+            #
+            # B) month NOT in group_by (single-period query, e.g. "MTD Jan 2025 BGSW"):
+            #    month is already in the WHERE clause — SUM(Revenue Summary) for that
+            #    month equals YTD(Jan) = MTD(Jan).  No LAG needed.
+            _has_month_in_gb = 'month' in _gb_parts
+
+            if _has_month_in_gb:
+                # LAG path: month present in GROUP BY — compute per-month delta
+                sql = f"""
             SELECT
                 {select_cols},
                 ROUND(
@@ -12991,9 +13001,24 @@ Return a JSON object with:
             ) _ytd
             ORDER BY {col_alias} DESC
         """
-            logger.info(
-                f"Generated MTD Revenue SQL (LAG on Revenue Summary, "
-                f"partition={_entity_key}, column={amt_col}, alias={col_alias})")
+                logger.info(
+                    f"Generated MTD Revenue SQL (LAG on Revenue Summary, "
+                    f"partition={_entity_key}, column={amt_col}, alias={col_alias})")
+            else:
+                # Single-period path: WHERE already pins month; YTD = MTD for that month
+                sql = f"""
+            SELECT
+                {select_cols},
+                ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) as {col_alias}
+            FROM cube_fact_data
+            WHERE {where_clause_with_values}
+              AND cost_category = 'Revenue Summary'
+            GROUP BY {group_by_clause}
+            ORDER BY {col_alias} DESC
+        """
+                logger.info(
+                    f"Generated MTD Revenue SQL (single-period, Revenue Summary, "
+                    f"month in WHERE, column={amt_col}, alias={col_alias})")
 
         else:
             # YTD: standard aggregation on Revenue Summary
