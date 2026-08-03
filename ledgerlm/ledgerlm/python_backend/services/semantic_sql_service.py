@@ -4823,7 +4823,7 @@ The "cost_category" column determines what type of data each row contains. You M
 
 1. For REVENUE queries:
    - Aggregate: {{"column": "cost_category", "operator": "=", "value": "Revenue Summary"}}
-   - Employee-level: {{"column": "cost_category", "operator": "=", "value": "Revenue"}}
+   - Employee-level: {{"column": "cost_category", "operator": "=", "value": "Revenue Summary"}}
    - Also add: {{"column": "include_exclude", "operator": "=", "value": "Include"}}
    
 2. For BILLING UTILIZATION queries (utilization %, BU%, capacity, bench, billed hours):
@@ -7665,7 +7665,7 @@ Return a JSON object with:
         query text themselves.
 
         Rules (first match wins):
-          MTD keywords → 'MTD'  (single-month, cost_category = 'Revenue')
+          MTD keywords → 'MTD'  (single-month, derived via LAG on 'Revenue Summary')
           YTD keywords → 'YTD'  (cumulative,   cost_category = 'Revenue Summary')
           No keyword   → 'YTD'  (default — preserves all existing behaviour)
 
@@ -7741,17 +7741,16 @@ Return a JSON object with:
                 # Determine exact cost category based on context
                 # Always route based on user's MTD/YTD intent, overriding LLM's choice
                 if 'revenue' in clean_value.lower():
-                    if wants_summary:
+                    if wants_monthly:
+                        # MTD request — still use Revenue Summary; MTD is derived via
+                        # LAG(YTD) in _build_revenue_sql, not a different cost_category.
                         f['value'] = 'Revenue Summary'
-                    elif wants_monthly:
-                        # Explicit MTD request -> use Revenue (not Revenue Summary)
-                        f['value'] = 'Revenue'
                     elif 'summary' in clean_value.lower():
                         # LLM said summary but user didn't specify MTD/YTD - keep as summary
                         f['value'] = 'Revenue Summary'
                     else:
-                        # Default to Revenue (MTD) when no explicit preference
-                        f['value'] = 'Revenue'
+                        # Default: always Revenue Summary (single source of truth)
+                        f['value'] = 'Revenue Summary'
                     f['operator'] = '='
                     detected_cost_category = f['value']
                     logger.info(
@@ -7831,15 +7830,15 @@ Return a JSON object with:
             wants_summary = 'summary' in query_lower or 'ytd' in query_lower or 'year to date' in query_lower
             wants_monthly = 'mtd' in query_lower or 'monthly' in query_lower or 'month to date' in query_lower
 
-            # Revenue queries - MTD uses 'Revenue', YTD uses 'Revenue Summary'
+            # Revenue queries — always Revenue Summary.
+            # MTD is derived via LAG(YTD) in _build_revenue_sql, not a separate
+            # cost_category. wants_monthly only controls time_agg, not cost_category.
             if 'revenue' in query_lower:
-                if wants_summary:
+                if wants_summary or wants_monthly:
                     category = 'Revenue Summary'
-                elif wants_monthly:
-                    category = 'Revenue'
                 else:
-                    # Default: Revenue (MTD) for general revenue queries
-                    category = 'Revenue'
+                    # Default: Revenue Summary (single source of truth)
+                    category = 'Revenue Summary'
                 filters.append({
                     'column': 'cost_category',
                     'operator': '=',
@@ -12942,41 +12941,74 @@ Return a JSON object with:
             where_parts, params)
 
         col_alias = 'revenue_inr' if amt_col == 'amount_inr' else 'revenue'
-        # Single source of truth: MTD → 'Revenue' (individual month),
-        # YTD → 'Revenue Summary' (cumulative). Default is YTD.
-        cost_cat = 'Revenue' if time_agg == 'MTD' else 'Revenue Summary'
+        # Always use Revenue Summary as the single source of truth.
+        # MTD (single-month) values are derived via LAG(YTD) window function so that
+        # MTD(Jan) = YTD(Jan) and MTD(N) = YTD(N) - YTD(N-1) for subsequent months.
+        # This guarantees Jan MTD == Jan YTD and avoids the separate 'Revenue' dataset.
+
+        # Pre-compute partition key (group_by minus month) used by both LAG and DISTINCT ON.
+        _gb_parts = [c.strip() for c in group_by_clause.split(',')]
+        _entity_key = ', '.join(c for c in _gb_parts if c != 'month') or 'year'
 
         if quarter_ytd_latest:
-            # Strip 'month' from group_by to get the entity key for DISTINCT ON.
-            # group_by_clause is "month, region_entity, year" (month always first).
-            _gb_parts = [c.strip() for c in group_by_clause.split(',')]
-            _entity_key = ', '.join(c for c in _gb_parts if c != 'month')
+            # Quarter cross-year comparison: always YTD Revenue Summary.
+            # DISTINCT ON picks the latest month per entity+year (= full quarter cumulative).
             sql = f"""
             SELECT DISTINCT ON ({_entity_key})
                 {select_cols},
                 ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) as {col_alias}
             FROM cube_fact_data
             WHERE {where_clause_with_values}
-              AND cost_category = '{cost_cat}'
+              AND cost_category = 'Revenue Summary'
             GROUP BY {group_by_clause}
             ORDER BY {_entity_key}, month DESC
         """
             logger.info(
                 f"Generated Quarter YTD Revenue SQL (DISTINCT ON latest month per entity+year, "
-                f"time_agg={time_agg}, cost_category={cost_cat}, column={amt_col}, alias={col_alias})")
+                f"time_agg={time_agg}, cost_category=Revenue Summary, column={amt_col}, alias={col_alias})")
+
+        elif time_agg == 'MTD':
+            # MTD: derive single-month value = YTD(N) - YTD(N-1) using LAG.
+            # Partition by everything except month so the window runs within
+            # each (entity, year) group ordered by month.
+            sql = f"""
+            SELECT
+                {select_cols},
+                ROUND(
+                    (ytd_val - COALESCE(LAG(ytd_val) OVER (
+                        PARTITION BY {_entity_key}
+                        ORDER BY month
+                    ), 0)) / 1000000.0
+                , {rounding})::numeric AS {col_alias}
+            FROM (
+                SELECT
+                    {select_cols},
+                    SUM({amt_col}) AS ytd_val
+                FROM cube_fact_data
+                WHERE {where_clause_with_values}
+                  AND cost_category = 'Revenue Summary'
+                GROUP BY {group_by_clause}
+            ) _ytd
+            ORDER BY {col_alias} DESC
+        """
+            logger.info(
+                f"Generated MTD Revenue SQL (LAG on Revenue Summary, "
+                f"partition={_entity_key}, column={amt_col}, alias={col_alias})")
+
         else:
+            # YTD: standard aggregation on Revenue Summary
             sql = f"""
             SELECT 
                 {select_cols},
                 ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) as {col_alias}
             FROM cube_fact_data
             WHERE {where_clause_with_values}
-              AND cost_category = '{cost_cat}'
+              AND cost_category = 'Revenue Summary'
             GROUP BY {group_by_clause}
             ORDER BY {col_alias} DESC
         """
             logger.info(
-                f"Generated Revenue SQL (time_agg={time_agg}, cost_category={cost_cat}, "
+                f"Generated YTD Revenue SQL (Revenue Summary, "
                 f"column={amt_col}, alias={col_alias}, divided by 1M)")
         sql = sql.replace('%', '%%')
         return {
@@ -13014,7 +13046,12 @@ Return a JSON object with:
         """
         where_clause = self._embed_params_in_where(where_parts, params)
         col_alias = 'revenue_inr' if amt_col == 'amount_inr' else 'revenue'
-        cost_cat = 'Revenue' if time_agg == 'MTD' else 'Revenue Summary'
+        # Always Revenue Summary — single source of truth.
+        # MTD: the WHERE already carries a specific month filter from the caller,
+        # so SUM(Revenue Summary WHERE month=N) = YTD(N).  For single-month queries
+        # (the typical customer-revenue ask) this equals MTD correctly.
+        # For multi-month trend queries, a LAG wrapper is not applied here because
+        # customer revenue is aggregated across the requested period, not per-month.
 
         # Build SELECT and GROUP BY manually — _build_group_by_columns does not
         # know bill_to_party_legal_entity_full_name.
@@ -13037,7 +13074,7 @@ Return a JSON object with:
                     ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) AS {col_alias}
                 FROM cube_fact_data
                 WHERE {where_clause}
-                  AND cost_category = '{cost_cat}'
+                  AND cost_category = 'Revenue Summary'
                   AND bill_to_party_legal_entity_full_name IS NOT NULL
                   AND TRIM(bill_to_party_legal_entity_full_name) != ''
                 GROUP BY {_group_str}
@@ -13049,7 +13086,7 @@ Return a JSON object with:
         sql = sql.replace('%', '%%')
         logger.info(
             f"Generated Customer Revenue SQL ("
-            f"time_agg={time_agg}, cost_category={cost_cat}, "
+            f"time_agg={time_agg}, cost_category=Revenue Summary, "
             f"top_n={top_n}, order={order_dir}, col={amt_col}, "
             f"include_entity={include_entity})"
         )
