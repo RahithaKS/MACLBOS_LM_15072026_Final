@@ -1412,6 +1412,26 @@ def detect_mom_intent(query: str) -> bool:
     return False
 
 
+def detect_trend_intent(query: str) -> bool:
+    """Return True when the query asks for a trend / time-series breakdown by month.
+
+    Catches standalone 'trend', 'trends', 'over time', 'time series' — phrases NOT
+    already covered by detect_mom_intent.  Used alongside detect_mom_intent in ALL
+    intent builders so that ANY metric (capacity, utilization, headcount, cost,
+    revenue …) responds to trend queries with per-month rows and the MoM wrapper.
+
+    Examples that trigger:
+      "outsourcing end capacity trend in 2025 for BGSW"
+      "MTD revenue trend for BGSW 2025"
+      "headcount trend over time"
+      "billing utilization trends 2025"
+    """
+    q = query.lower()
+    if re.search(r'\btrend(?:s|ing)?\b', q):
+        return True
+    return any(t in q for t in ['over time', 'time series', 'time-series'])
+
+
 def detect_avg_monthly_intent(query: str) -> bool:
     """Return True when the query asks for the average across months (YTD ÷ months).
 
@@ -6095,18 +6115,20 @@ Return a JSON object with:
                 intent['group_by'] = ['month'] + intent.get('group_by', [])
             logger.info('_build_kpi_intent_fast: avg_monthly_mode=True')
 
-        # MoM mode: adds LAG() window for month-over-month growth %.
+        # MoM / trend mode: adds LAG() window for month-over-month growth %.
+        # Triggers on explicit MoM keywords ("month over month", "MoM", …)
+        # OR on plain trend keywords ("trend", "over time", …).
         # Mutually exclusive with avg_monthly_mode.
-        if detect_mom_intent(query) and not _kpi_avg_monthly:
+        if (detect_mom_intent(query) or detect_trend_intent(query)) and not _kpi_avg_monthly:
             intent['mom_mode'] = True
             if 'month' not in intent.get('group_by', []):
                 intent['group_by'] = ['month'] + intent.get('group_by', [])
-            # Single-month MoM: expand month=N to month IN (1..N) so the LAG
+            # Single-month: expand month=N to month IN (1..N) so the LAG
             # window has all preceding months and growth is calculable.
             # Mirrors the same expansion in _build_cost_class_intent and
             # _build_entity_pl_intent.  Only fires when the user named exactly
             # one month (operator='='); multi-month and no-month filters are
-            # left untouched.
+            # left untouched (no-month → full year, which is correct for trends).
             _month_f = next(
                 (f for f in intent.get('filters', []) if f.get('column') == 'month'),
                 None
@@ -6117,10 +6139,10 @@ Return a JSON object with:
                     _month_f['operator'] = 'IN'
                     _month_f['value'] = list(range(1, _single_month + 1))
                     logger.info(
-                        f'_build_kpi_intent_fast: MoM single-month expansion '
+                        f'_build_kpi_intent_fast: MoM/trend single-month expansion '
                         f'month={_single_month} → month IN {_month_f["value"]}'
                     )
-            logger.info('_build_kpi_intent_fast: mom_mode=True — MoM LAG wrapper will be applied by compile_sql')
+            logger.info('_build_kpi_intent_fast: mom_mode=True — MoM/trend LAG wrapper will be applied by compile_sql')
 
         # Comparison mode: side-by-side year columns (e.g. "2025 vs 2026").
         # Mutually exclusive with avg_monthly_mode and mom_mode.
@@ -6323,11 +6345,10 @@ Return a JSON object with:
             if 'year' not in intent['group_by']:
                 intent['group_by'] = intent['group_by'] + ['year']
 
-        # MoM mode flag: ensure month is in group_by even for single-month queries
-        # (compile_sql uses this to apply per-month breakdown)
-        if detect_mom_intent(query) and not _ccl_avg_monthly:
+        # MoM / trend mode flag: per-month breakdown for MoM keywords or plain "trend".
+        if (detect_mom_intent(query) or detect_trend_intent(query)) and not _ccl_avg_monthly:
             intent['mom_mode'] = True
-            if len(_ccl_detected_months) > 1 and 'month' not in intent['group_by']:
+            if 'month' not in intent['group_by']:
                 intent['group_by'] = ['month'] + intent['group_by']
 
         # Enhancement #3: Comparative strict months guard.
@@ -6645,8 +6666,8 @@ Return a JSON object with:
         if _epl_needs_month_in_gb and 'month' not in intent['group_by']:
             intent['group_by'] = ['month'] + intent['group_by']
 
-        # Propagate MoM flag
-        if detect_mom_intent(query) and not _epl_avg_monthly:
+        # Propagate MoM / trend flag
+        if (detect_mom_intent(query) or detect_trend_intent(query)) and not _epl_avg_monthly:
             intent['mom_mode'] = True
 
         # Enhancement #3: Comparative strict months guard (entity P&L).
@@ -6844,16 +6865,16 @@ Return a JSON object with:
                 f"_build_gb_pl_cost_breakdown_intent: avg_monthly_mode=True"
             )
 
-        # MoM mode: adds LAG() window for month-over-month growth %.
+        # MoM / trend mode: adds LAG() window for month-over-month growth %.
         # Mirrors the same block in _build_entity_pl_intent.
         # Mutually exclusive with avg_monthly_mode.
-        if detect_mom_intent(query) and not _gbpl_avg_monthly:
+        if (detect_mom_intent(query) or detect_trend_intent(query)) and not _gbpl_avg_monthly:
             intent['mom_mode'] = True
             if 'month' not in intent['group_by']:
                 intent['group_by'] = ['month'] + intent['group_by']
             logger.info(
                 "_build_gb_pl_cost_breakdown_intent: mom_mode=True — "
-                "MoM LAG wrapper will be applied by compile_sql"
+                "MoM/trend LAG wrapper will be applied by compile_sql"
             )
 
         # Comparison mode: side-by-side year columns (e.g. "2025 vs 2026").
@@ -14403,11 +14424,12 @@ Return a JSON object with:
                         logger.info(
                             "compile_sql P2: 'which month' → group_by=['month']")
 
-                    # ── Group D: MoM / monthly trend → add month to group_by ──
-                    # "month over month", "monthly trend", "analyze month", etc.
+                    # ── Group D: MoM / trend → add month to group_by ──────────
+                    # "month over month", "monthly trend", "trend", "over time",
+                    # "analyze month", etc.
                     # Need per-month rows — add month to group_by and strip any
                     # single-month filter so all months in the year are returned.
-                    elif detect_mom_intent(_p2_raw_q) or re.search(
+                    elif detect_mom_intent(_p2_raw_q) or detect_trend_intent(_p2_raw_q) or re.search(
                             r'\b(?:analyze|analyse)\s+month\b'
                             r'|\beach\s+month\b'
                             r'|\bmonth(?:ly)?\s+trend\b'
@@ -14786,8 +14808,11 @@ Return a JSON object with:
                         f"by_entity={_cr_by_entity}, entity_filter={_cr_entity_filter}, "
                         f"bypassing LLM routing"
                     )
-                    return self.compile_calculation_sql(
+                    _cr_result = self.compile_calculation_sql(
                         'customer_revenue', cube_id, intent, domain)
+                    if _cr_result.get('success') and intent.get('mom_mode'):
+                        _cr_result = self._apply_mom_lag_sql_wrapper(_cr_result, intent)
+                    return _cr_result
 
                 # ----------------------------------------------------------------
                 # REVENUE FAST-PATH: detect "revenue" keyword before LLM routing.
@@ -14977,8 +15002,11 @@ Return a JSON object with:
                     logger.info(
                         f"Revenue fast-path: currency={_currency}, bypassing LLM routing"
                     )
-                    return self.compile_calculation_sql(
+                    _rev_result = self.compile_calculation_sql(
                         'revenue', cube_id, intent, domain)
+                    if _rev_result.get('success') and intent.get('mom_mode'):
+                        _rev_result = self._apply_mom_lag_sql_wrapper(_rev_result, intent)
+                    return _rev_result
 
                 # ----------------------------------------------------------------
                 # BUDGET FAST-PATH: entity-level "budget musd/inr" queries are
@@ -15028,8 +15056,11 @@ Return a JSON object with:
                     logger.info(
                         f"Budget fast-path: treating as revenue query, currency={_currency}, bypassing LLM routing"
                     )
-                    return self.compile_calculation_sql(
+                    _bgt_result = self.compile_calculation_sql(
                         'revenue', cube_id, intent, domain)
+                    if _bgt_result.get('success') and intent.get('mom_mode'):
+                        _bgt_result = self._apply_mom_lag_sql_wrapper(_bgt_result, intent)
+                    return _bgt_result
 
                 # ----------------------------------------------------------------
                 # COST TYPE FAST-PATH: route well-known cost keywords directly
@@ -15091,8 +15122,11 @@ Return a JSON object with:
                                 f"Cost type fast-path: stripped {_before - len(intent['filters'])} "
                                 f"new_service_area/entity_category filter(s) from cost query"
                             )
-                    return self.compile_calculation_sql(
+                    _cost_result = self.compile_calculation_sql(
                         _matched_cost_metric, cube_id, intent, domain)
+                    if _cost_result.get('success') and intent.get('mom_mode'):
+                        _cost_result = self._apply_mom_lag_sql_wrapper(_cost_result, intent)
+                    return _cost_result
 
                 try:
                     llm_result = parse_query_with_llm(
