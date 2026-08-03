@@ -6503,13 +6503,23 @@ Return a JSON object with:
             # "total cost by entity P&L" → one row per entity+category pair (no sub_category noise)
             group_by = ['region_entity', 'entity_category']
         else:
-            group_by = ['region_entity', 'entity_sub_category']
+            # General entity P&L → show both parent category AND sub-category columns
+            group_by = ['region_entity', 'entity_category', 'entity_sub_category']
 
-        filters = [{
-            'column': 'cost_category',
-            'operator': '=',
-            'value': 'Cost Summary'
-        }]
+        filters = [
+            {
+                'column': 'cost_category',
+                'operator': '=',
+                'value': 'Cost Summary'
+            },
+            # Exclude rows where entity_sub_category is blank ('-') — these are
+            # unmapped / catch-all ledger lines with no meaningful label.
+            {
+                'column': 'entity_sub_category',
+                'operator': '!=',
+                'value': '-'
+            },
+        ]
         if entity_category:
             filters.append({
                 'column': 'entity_category',
