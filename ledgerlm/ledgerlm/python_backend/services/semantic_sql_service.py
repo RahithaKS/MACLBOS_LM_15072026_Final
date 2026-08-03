@@ -13005,8 +13005,98 @@ Return a JSON object with:
                     f"Generated MTD Revenue SQL (LAG on Revenue Summary, "
                     f"partition={_entity_key}, column={amt_col}, alias={col_alias})")
             else:
-                # Single-period path: WHERE already pins month; YTD = MTD for that month
-                sql = f"""
+                # Single-period MTD: Revenue Summary stores YTD cumulative values.
+                # MTD(N) = YTD(N) - YTD(N-1).
+                # Strategy:
+                #   1. Extract the target month N from where_parts.
+                #   2. Replace "month = N" with "month IN (N-1, N)" so both rows
+                #      are fetched in one scan.
+                #   3. Use CASE WHEN to subtract: SUM(month=N) - SUM(month=N-1).
+                # For January (N=1): month-1=0 matches nothing → subtraction = 0
+                #   → MTD(Jan) = YTD(Jan)  ✅
+
+                # ── Step 1: extract N ──────────────────────────────────────────
+                _target_month = None
+                _param_cursor = 0
+                for _part in where_parts:
+                    _phs = _part.count('%s')
+                    _lit = re.search(
+                        r'\bmonth\s*=\s*[\'"]?(\d{1,2})[\'"]?',
+                        _part, re.IGNORECASE
+                    )
+                    if _lit and 'in' not in _part.lower():
+                        try:
+                            _target_month = int(_lit.group(1))
+                            break
+                        except (ValueError, TypeError):
+                            pass
+                    elif 'month' in _part.lower() and '=' in _part and 'in' not in _part.lower():
+                        if _phs > 0 and _param_cursor < len(params):
+                            try:
+                                _target_month = int(params[_param_cursor])
+                                break
+                            except (ValueError, TypeError):
+                                pass
+                    _param_cursor += _phs
+
+                if _target_month is not None:
+                    _prev_month = _target_month - 1  # 0 for Jan → no rows match → delta=0
+
+                    # ── Step 2: replace month filter in where_parts ────────────
+                    _mtd_where_parts = []
+                    _mtd_params = []
+                    _pc = 0
+                    for _part in where_parts:
+                        _phs = _part.count('%s')
+                        _lit = re.search(
+                            r'\bmonth\s*=\s*[\'"]?(\d{1,2})[\'"]?',
+                            _part, re.IGNORECASE
+                        )
+                        if _lit and 'in' not in _part.lower():
+                            # literal month = N → replace with month IN (N-1, N)
+                            if _prev_month >= 1:
+                                _mtd_where_parts.append(
+                                    f'month IN ({_prev_month}, {_target_month})')
+                            else:
+                                _mtd_where_parts.append(f'month = {_target_month}')
+                        elif 'month' in _part.lower() and '=' in _part and 'in' not in _part.lower() and _phs > 0:
+                            # parameterised month = %s → replace with literal IN
+                            if _prev_month >= 1:
+                                _mtd_where_parts.append(
+                                    f'month IN ({_prev_month}, {_target_month})')
+                            else:
+                                _mtd_where_parts.append(f'month = {_target_month}')
+                            _pc += _phs  # consume the placeholder param, don't copy
+                            continue
+                        else:
+                            _mtd_where_parts.append(_part)
+                            _mtd_params.extend(params[_pc:_pc + _phs])
+                        _pc += _phs
+
+                    _mtd_where_clause = self._embed_params_in_where(
+                        _mtd_where_parts, _mtd_params)
+
+                    # ── Step 3: CASE WHEN delta SQL ────────────────────────────
+                    sql = f"""
+            SELECT
+                {select_cols},
+                ROUND((
+                    SUM(CASE WHEN month = {_target_month} THEN {amt_col} ELSE 0 END)
+                    - SUM(CASE WHEN month = {_prev_month}  THEN {amt_col} ELSE 0 END)
+                ) / 1000000.0, {rounding})::numeric AS {col_alias}
+            FROM cube_fact_data
+            WHERE {_mtd_where_clause}
+              AND cost_category = 'Revenue Summary'
+            GROUP BY {group_by_clause}
+            ORDER BY {col_alias} DESC
+        """
+                    logger.info(
+                        f"Generated MTD Revenue SQL (single-period delta, "
+                        f"YTD[{_target_month}] - YTD[{_prev_month}], "
+                        f"column={amt_col}, alias={col_alias})")
+                else:
+                    # Fallback: could not parse month — return YTD value as-is
+                    sql = f"""
             SELECT
                 {select_cols},
                 ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) as {col_alias}
@@ -13016,9 +13106,9 @@ Return a JSON object with:
             GROUP BY {group_by_clause}
             ORDER BY {col_alias} DESC
         """
-                logger.info(
-                    f"Generated MTD Revenue SQL (single-period, Revenue Summary, "
-                    f"month in WHERE, column={amt_col}, alias={col_alias})")
+                    logger.info(
+                        f"Generated MTD Revenue SQL (single-period fallback – "
+                        f"month not found, returning YTD, column={amt_col})")
 
         else:
             # YTD: standard aggregation on Revenue Summary
