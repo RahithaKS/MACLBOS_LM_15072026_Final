@@ -6200,6 +6200,55 @@ Return a JSON object with:
         )
         return intent
 
+    def _detect_hierarchy_dims(self, query_lower: str) -> List[str]:
+        """Detect the 7 project-hierarchy GROUP BY dimensions from query text.
+
+        project_gb, planning_gb, region_entity, and sector are handled
+        separately in each intent builder (with value-filter guards);
+        this helper covers the remaining hierarchy levels.
+
+        Returns a list of DB column names for dimensions explicitly requested.
+        All patterns use word boundaries / multi-word phrases to avoid false
+        positives from short common words.
+        """
+        dims: List[str] = []
+        # BU level — "proj bu", "project bu", "by bu", "bu level", "bu wise"
+        if re.search(
+                r'\bproj(?:ect)?\s+bu\b|\bbu\s+level\b|\bby\s+bu\b|\bbu\s+wise\b',
+                query_lower):
+            dims.append('proj_bu')
+        # Section level — "proj section", "project section", "by section", "section level"
+        if re.search(
+                r'\bproj(?:ect)?\s+section\b|\bby\s+section\b'
+                r'|\bsection\s+level\b|\bsection\s+wise\b',
+                query_lower):
+            dims.append('proj_section')
+        # Department level — "proj dept", "project dept", "by department/dept"
+        if re.search(
+                r'\bproj(?:ect)?\s+dept\b|\bby\s+department\b|\bby\s+dept\b'
+                r'|\bdept\s+level\b|\bdept\s+wise\b'
+                r'|\bdepartment\s+level\b|\bdepartment\s+wise\b',
+                query_lower):
+            dims.append('proj_dept')
+        # Group level — "proj group", "project group", "by group", "group level"
+        if re.search(
+                r'\bproj(?:ect)?\s+group\b|\bby\s+(?:proj\s+)?group\b'
+                r'|\bgroup\s+level\b|\bgroup\s+wise\b',
+                query_lower):
+            dims.append('proj_group')
+        # Top BU — "proj top bu", "project top bu", "top bu" (the hierarchy level, not top-N)
+        if re.search(r'\bproj(?:ect)?\s+top\s+bu\b|\btop\s+bu\b', query_lower):
+            dims.append('proj_top_bu')
+        # Top Section — "proj top section", "project top section", "top section"
+        if re.search(
+                r'\bproj(?:ect)?\s+top\s+section\b|\btop\s+section\b',
+                query_lower):
+            dims.append('proj_top_section')
+        # Service Area — "new service area", "service area"
+        if re.search(r'\bnew\s+service\s+area\b|\bservice\s+area\b', query_lower):
+            dims.append('new_service_area')
+        return dims
+
     def _build_cost_class_intent(self, query: str, cost_class: str,
                                  entity_filters: List[Dict]) -> Dict[str, Any]:
         """Build intent for cost category class queries (resource cost, travel cost, etc.).
@@ -6229,6 +6278,12 @@ Return a JSON object with:
         if 'planning gb' in query_lower and not _PLANNING_GB_RE.search(query):
             _ccl_dims.append('planning_gb')
             logger.info("_build_cost_class_intent: GB grouping — GROUP BY planning_gb")
+        # Remaining project-hierarchy dimensions (BU, Section, Dept, Group, Top-BU,
+        # Top-Section, Service Area) — detected via the shared helper.
+        for _h_dim in self._detect_hierarchy_dims(query_lower):
+            if _h_dim not in _ccl_dims:
+                _ccl_dims.append(_h_dim)
+                logger.info(f"_build_cost_class_intent: hierarchy dim detected — GROUP BY {_h_dim}")
         if any(p in query_lower for p in ['by month', 'monthly', 'month wise', 'month-wise', 'monthwise', 'month by month']):
             _ccl_dims.append('month')
         if any(p in query_lower for p in ['by year', 'yearly', 'year wise', 'year-wise', 'annual']):
@@ -6823,6 +6878,11 @@ Return a JSON object with:
         if 'planning gb' in query_lower and not _PLANNING_GB_RE.search(query):
             _group_by.append('planning_gb')
             logger.info("_build_gb_pl_cost_breakdown_intent: GB grouping — GROUP BY planning_gb")
+        # Remaining project-hierarchy dimensions via shared helper
+        for _h_dim in self._detect_hierarchy_dims(query_lower):
+            if _h_dim not in _group_by:
+                _group_by.append(_h_dim)
+                logger.info(f"_build_gb_pl_cost_breakdown_intent: hierarchy dim — GROUP BY {_h_dim}")
         if any(p in query_lower for p in ['by month', 'monthly', 'month wise', 'month-wise', 'monthwise']):
             _group_by.append('month')
         if any(p in query_lower for p in ['by year', 'yearly', 'year wise', 'year-wise', 'annual']):
@@ -8654,27 +8714,30 @@ Return a JSON object with:
                         time_agg=intent.get('_time_agg', 'YTD'))
                 elif catalog_key == 'revenue':
                     # Revenue type split (Bosch P1): CASE WHEN on order_reason
-                    # TODO: _build_revenue_type_sql always uses Revenue Summary; add MTD support if needed.
                     if intent.get('revenue_type_split'):
                         return self._build_revenue_type_sql(
                             where_parts, params, select_cols,
                             group_by_clause, rounding or 0, amt_col,
-                            revenue_type_filter=intent.get('revenue_type_filter'))
+                            revenue_type_filter=intent.get('revenue_type_filter'),
+                            top_n=_calc_top_n)
                     return self._build_revenue_sql(where_parts, params,
                                                    select_cols,
                                                    group_by_clause, rounding
                                                    or 0, amt_col,
                                                    quarter_ytd_latest=intent.get('_quarter_ytd_latest', False),
                                                    quarter_period_comparison=intent.get('quarter_period_comparison'),
-                                                   time_agg=intent.get('_time_agg', 'YTD'))
+                                                   time_agg=intent.get('_time_agg', 'YTD'),
+                                                   top_n=_calc_top_n)
                 elif catalog_key == 'gb_pl_revenue':
                     return self._build_gb_pl_revenue_sql(
                         where_parts, params, select_cols, group_by_clause,
-                        rounding or 2, amt_col)
+                        rounding or 2, amt_col,
+                        top_n=_calc_top_n, rank_dim=_calc_rank_dim)
                 elif catalog_key == 'entity_pl_revenue':
                     return self._build_entity_pl_revenue_sql(
                         where_parts, params, select_cols, group_by_clause,
-                        rounding or 2, amt_col)
+                        rounding or 2, amt_col,
+                        top_n=_calc_top_n, rank_dim=_calc_rank_dim)
                 elif catalog_key == 'budget_per_capacity':
                     return self._build_budget_per_capacity_sql(
                         where_parts, params, select_cols, group_by_clause,
@@ -8718,7 +8781,8 @@ Return a JSON object with:
                 elif catalog_key == 'ebit':
                     return self._build_ebit_sql(where_parts, params,
                                                 select_cols, group_by_clause,
-                                                rounding or 2, amt_col)
+                                                rounding or 2, amt_col,
+                                                top_n=_calc_top_n)
                 elif catalog_key == 'price_mix':
                     return self._build_price_mix_sql(where_parts, params,
                                                      select_cols,
@@ -8750,7 +8814,8 @@ Return a JSON object with:
                     ])
                     return self._build_gross_margin_sql(
                         where_parts, params, select_cols, group_by_clause,
-                        rounding or 2, amt_col, apply_pl_exclusions=_gm_pl)
+                        rounding or 2, amt_col, apply_pl_exclusions=_gm_pl,
+                        top_n=_calc_top_n)
                 elif catalog_key == 'resource_cost':
                     return self._build_resource_cost_sql(
                         where_parts, params, select_cols, group_by_clause,
@@ -8948,7 +9013,8 @@ Return a JSON object with:
                 logger.info("Bare 'P&L revenue' → defaulting to GB P&L revenue")
                 return self._build_gb_pl_revenue_sql(
                     where_parts, params, select_cols, group_by_clause, rounding
-                    or 2, amt_col)
+                    or 2, amt_col,
+                    top_n=_calc_top_n, rank_dim=_calc_rank_dim)
 
             elif 'p&l cost' in calc_name_lower or 'pl cost' in calc_name_lower:
                 logger.info("Bare 'P&L cost' → defaulting to direct_cost (GB P&L cost)")
@@ -8998,7 +9064,8 @@ Return a JSON object with:
                 and not intent.get('revenue_type_split'):
                 return self._build_gb_pl_revenue_sql(
                     where_parts, params, select_cols, group_by_clause,
-                    rounding or 2, amt_col)
+                    rounding or 2, amt_col,
+                    top_n=_calc_top_n, rank_dim=_calc_rank_dim)
 
             # Entity P&L Revenue (YTD, with order_reason + GL account exclusions)
             # Must be checked BEFORE the generic 'revenue' catch-all below.
@@ -9011,7 +9078,8 @@ Return a JSON object with:
                 and not intent.get('revenue_type_split'):
                 return self._build_entity_pl_revenue_sql(
                     where_parts, params, select_cols, group_by_clause,
-                    rounding or 2, amt_col)
+                    rounding or 2, amt_col,
+                    top_n=_calc_top_n, rank_dim=_calc_rank_dim)
 
             # Customer Revenue — must be BEFORE generic revenue catch-all
             elif any(kw in calc_name_lower for kw in [
@@ -9039,32 +9107,40 @@ Return a JSON object with:
                     return self._build_revenue_type_sql(
                         where_parts, params, select_cols,
                         group_by_clause, rounding or 0, amt_col,
-                        revenue_type_filter=intent.get('revenue_type_filter'))
+                        revenue_type_filter=intent.get('revenue_type_filter'),
+                        top_n=_calc_top_n)
                 return self._build_revenue_sql(where_parts, params,
                                                select_cols, group_by_clause,
                                                rounding or 0, amt_col,
                                                quarter_ytd_latest=intent.get('_quarter_ytd_latest', False),
                                                quarter_period_comparison=intent.get('quarter_period_comparison'),
-                                               time_agg=intent.get('_time_agg', 'YTD'))
+                                               time_agg=intent.get('_time_agg', 'YTD'),
+                                               top_n=_calc_top_n)
 
             # Cost breakdown metrics
             elif 'travel cost' in calc_name_lower or 'travel expense' in calc_name_lower:
                 return self._build_travel_cost_sql(where_parts, params,
                                                    select_cols,
                                                    group_by_clause, rounding
-                                                   or 2, amt_col)
+                                                   or 2, amt_col,
+                                                   top_n=_calc_top_n,
+                                                   rank_dim=_calc_rank_dim)
 
             elif 'direct cost' in calc_name_lower and 'other' not in calc_name_lower and 'indirect' not in calc_name_lower:
                 return self._build_direct_cost_sql(where_parts, params,
                                                    select_cols,
                                                    group_by_clause, rounding
-                                                   or 2, amt_col)
+                                                   or 2, amt_col,
+                                                   top_n=_calc_top_n,
+                                                   rank_dim=_calc_rank_dim)
 
             elif 'indirect cost' in calc_name_lower or 'corporate cost' in calc_name_lower:
                 return self._build_indirect_cost_sql(where_parts, params,
                                                      select_cols,
                                                      group_by_clause, rounding
-                                                     or 2, amt_col)
+                                                     or 2, amt_col,
+                                                     top_n=_calc_top_n,
+                                                     rank_dim=_calc_rank_dim)
 
             elif 'gross margin' in calc_name_lower or 'gross profit' in calc_name_lower:
                 _gm_pl_legacy = any(kw in calc_name_lower for kw in [
@@ -9075,18 +9151,22 @@ Return a JSON object with:
                                                     select_cols,
                                                     group_by_clause, rounding
                                                     or 2, amt_col,
-                                                    apply_pl_exclusions=_gm_pl_legacy)
+                                                    apply_pl_exclusions=_gm_pl_legacy,
+                                                    top_n=_calc_top_n)
 
             elif 'resource cost' in calc_name_lower or 'resource expense' in calc_name_lower:
                 return self._build_resource_cost_sql(where_parts, params,
                                                      select_cols,
                                                      group_by_clause, rounding
-                                                     or 2, amt_col)
+                                                     or 2, amt_col,
+                                                     top_n=_calc_top_n,
+                                                     rank_dim=_calc_rank_dim)
 
             elif 'other direct cost' in calc_name_lower or 'other direct expense' in calc_name_lower:
                 return self._build_other_direct_cost_sql(
                     where_parts, params, select_cols, group_by_clause, rounding
-                    or 2, amt_col)
+                    or 2, amt_col,
+                    top_n=_calc_top_n, rank_dim=_calc_rank_dim)
 
             return {
                 'success': False,
@@ -9440,7 +9520,8 @@ Return a JSON object with:
 
     def _build_ebit_sql(self, where_parts: List[str], params: List,
                         select_cols: str, group_by_clause: str,
-                        rounding: int, amt_col: str = 'amount_usd') -> Dict[str, Any]:
+                        rounding: int, amt_col: str = 'amount_usd',
+                        top_n: Optional[int] = None) -> Dict[str, Any]:
         """GB P&L EBIT formula:
           Gross Margin        = Revenue - (Total Direct Cost + Total Indirect Cost)
           Total Direct Cost   = Resource Cost + Travel Cost + Other Direct Cost
@@ -9538,8 +9619,16 @@ Return a JSON object with:
             GROUP BY {group_by_clause}
             ORDER BY ebit_percentage DESC
         """
+        if top_n:
+            sql = (
+                f"SELECT ROW_NUMBER() OVER (ORDER BY ebit_percentage DESC) AS rank, *\n"
+                f"FROM ({sql.strip()}) _ranked\n"
+                f"ORDER BY rank\n"
+                f"LIMIT {top_n}"
+            )
         logger.info(
-            f"Generated GB P&L EBIT SQL: ebit=gross_margin, ebit%=gross_margin/revenue*100 using {amt_col}"
+            f"Generated GB P&L EBIT SQL: ebit=gross_margin, ebit%=gross_margin/revenue*100 "
+            f"using {amt_col}" + (f", top_n={top_n}" if top_n else "")
         )
         return {
             'success': True,
@@ -9802,7 +9891,8 @@ Return a JSON object with:
     def _build_gross_margin_sql(self, where_parts: List[str], params: List,
                                 select_cols: str, group_by_clause: str,
                                 rounding: int, amt_col: str = 'amount_usd',
-                                apply_pl_exclusions: bool = False) -> Dict[str, Any]:
+                                apply_pl_exclusions: bool = False,
+                                top_n: Optional[int] = None) -> Dict[str, Any]:
         """Gross Margin = Revenue - (Total Direct Cost + Total Indirect Cost)
         Total Direct Cost  = Resource Cost + Travel Cost + Other Direct Cost
         Total Indirect Cost = Corporate Cost
@@ -9888,9 +9978,18 @@ Return a JSON object with:
             GROUP BY {group_by_clause}
             ORDER BY gross_margin DESC
         """
+        if top_n:
+            sql = (
+                f"SELECT ROW_NUMBER() OVER (ORDER BY gross_margin DESC) AS rank, *\n"
+                f"FROM ({sql.strip()}) _ranked\n"
+                f"ORDER BY rank\n"
+                f"LIMIT {top_n}"
+            )
         _excl_label = " [P&L exclusions applied]" if apply_pl_exclusions else ""
         logger.info(
-            f"Generated Gross Margin SQL: Revenue - (Direct + Indirect Cost){_excl_label}")
+            f"Generated Gross Margin SQL: Revenue - (Direct + Indirect Cost){_excl_label}"
+            + (f", top_n={top_n}" if top_n else "")
+        )
         return {
             'success': True,
             'sql': sql,
@@ -13091,7 +13190,8 @@ Return a JSON object with:
             group_by_clause: str,
             rounding: int,
             amt_col: str = 'amount_usd',
-            revenue_type_filter: str = None) -> Dict[str, Any]:
+            revenue_type_filter: str = None,
+            top_n: Optional[int] = None) -> Dict[str, Any]:
         """Revenue split by revenue type, derived from order_reason + gl_account.
 
         Revenue type labels (Bosch mapping):
@@ -13151,9 +13251,17 @@ Return a JSON object with:
             ORDER BY {col_alias} DESC
         """
         sql = sql.replace('%', '%%')
+        if top_n:
+            sql = (
+                f"SELECT ROW_NUMBER() OVER (ORDER BY {col_alias} DESC) AS rank, *\n"
+                f"FROM ({sql.strip()}) _ranked\n"
+                f"ORDER BY rank\n"
+                f"LIMIT {top_n}"
+            )
         logger.info(
             f"Generated Revenue Type SQL (order_reason CASE WHEN, col={amt_col}"
             + (f", filter='{revenue_type_filter}'" if revenue_type_filter else "")
+            + (f", top_n={top_n}" if top_n else "")
             + ")"
         )
         return {
@@ -13169,7 +13277,8 @@ Return a JSON object with:
                            amt_col: str = 'amount_usd',
                            quarter_ytd_latest: bool = False,
                            quarter_period_comparison: Optional[List] = None,
-                           time_agg: str = 'YTD') -> Dict[str, Any]:
+                           time_agg: str = 'YTD',
+                           top_n: Optional[int] = None) -> Dict[str, Any]:
         """
         Revenue query builder — supports both MTD and YTD modes.
 
@@ -13447,6 +13556,13 @@ Return a JSON object with:
                 f"Generated YTD Revenue SQL (Revenue Summary, "
                 f"column={amt_col}, alias={col_alias}, divided by 1M)")
         sql = sql.replace('%', '%%')
+        if top_n:
+            sql = (
+                f"SELECT ROW_NUMBER() OVER (ORDER BY {col_alias} DESC) AS rank, *\n"
+                f"FROM ({sql.strip()}) _ranked\n"
+                f"ORDER BY rank\n"
+                f"LIMIT {top_n}"
+            )
         return {
             'success': True,
             'sql': sql,
@@ -13539,23 +13655,58 @@ Return a JSON object with:
     def _build_gb_pl_revenue_sql(self, where_parts: List[str], params: List,
                                   select_cols: str, group_by_clause: str,
                                   rounding: int,
-                                  amt_col: str = 'amount_usd') -> Dict[str, Any]:
+                                  amt_col: str = 'amount_usd',
+                                  top_n: Optional[int] = None,
+                                  rank_dim: Optional[str] = None) -> Dict[str, Any]:
         """
         GB P&L Revenue — YTD cumulative with order_reason + GL account exclusions.
 
-        Reference formula (MV_GB_INSIGHTS_ALL):
-          WHERE cost_category = 'Revenue Summary'
-            AND year = N
-            AND month <= N_max          -- YTD: all months up to specified month
-            AND [region_entity = 'X']  -- only when entity specified (passed via where_parts)
-            AND NVL(TRIM(order_reason),'x') NOT IN ('YEH','YEI','YEJ','YEK','YN2')
-            AND NVL(TRIM(gl_account),'x') NOT LIKE '139%'
-
-        Returns a single aggregated total — no GROUP BY.
-        Entity is always a filter (not a dimension); project_gb is never grouped.
+        Default: returns a single aggregated total (or entity/month breakdown).
+        When rank_dim is set: groups by that project-hierarchy dimension
+        (planning_gb, proj_bu, proj_section, proj_dept, etc.) instead of the
+        default scalar, optionally adding a ROW_NUMBER rank + LIMIT top_n.
+        Entity remains a WHERE filter in both cases.
         """
         # Embed all intent filters as literals into the WHERE clause
         raw_where = self._embed_params_in_where(where_parts, params)
+
+        # ── Hierarchy-dimension branch ────────────────────────────────────────
+        # Fires when user asks "top N [dim] for GB P&L Revenue" or "by [dim]".
+        # Bypasses all entity/month branch logic and groups by the dim directly.
+        _HIER_DIMS_GBREV = {
+            'project_gb', 'planning_gb',
+            'proj_bu', 'proj_section', 'proj_dept', 'proj_group',
+            'proj_top_bu', 'proj_top_section',
+            'region_entity', 'sector', 'new_service_area',
+        }
+        _col_alias_h = 'pl_revenue_inr' if amt_col == 'amount_inr' else 'pl_revenue'
+        if rank_dim and rank_dim in _HIER_DIMS_GBREV:
+            _rank_sel = (
+                f"ROW_NUMBER() OVER (ORDER BY SUM({amt_col}) DESC) AS rank,\n                    "
+                if top_n else ""
+            )
+            _limit_clause = f"\n                LIMIT {top_n}" if top_n else ""
+            sql = f"""
+                SELECT
+                    {_rank_sel}{rank_dim},
+                    ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) AS {_col_alias_h}
+                FROM cube_fact_data
+                WHERE {raw_where}
+                  AND cost_category = 'Revenue Summary'
+                  AND COALESCE(TRIM(order_reason), 'x') NOT IN ('YEH','YEI','YEJ','YEK','YN2')
+                  AND NOT starts_with(COALESCE(TRIM(gl_account), 'x'), '139')
+                GROUP BY {rank_dim}
+                ORDER BY {_col_alias_h} DESC{_limit_clause}
+            """
+            logger.info(
+                f"Generated GB P&L Revenue SQL grouped by {rank_dim}, top_n={top_n}")
+            return {
+                'success': True,
+                'sql': sql,
+                'params': [],
+                'calculation_type': 'gb_pl_revenue',
+            }
+        # ── End hierarchy-dimension branch ────────────────────────────────────
 
         # Detect multi-year: "year IN (2025, 2026)" or multiple "year = N" occurrences
         # (the latter appears in __raw__ OR-pair filters like
@@ -13733,15 +13884,55 @@ Return a JSON object with:
     def _build_entity_pl_revenue_sql(self, where_parts: List[str], params: List,
                                       select_cols: str, group_by_clause: str,
                                       rounding: int,
-                                      amt_col: str = 'amount_usd') -> Dict[str, Any]:
+                                      amt_col: str = 'amount_usd',
+                                      top_n: Optional[int] = None,
+                                      rank_dim: Optional[str] = None) -> Dict[str, Any]:
         """
         Entity P&L Revenue — identical formula to GB P&L Revenue.
         YTD cumulative (month <= N), order_reason + GL account exclusions.
         Entity is a filter (passed via where_parts), not a GROUP BY dimension.
-        Triggered by 'entity p&l revenue', 'entity pl revenue', 'o&l revenue', etc.
+
+        When rank_dim is set: groups by that project-hierarchy dimension instead
+        of the default scalar aggregate.  Supports top_n ranking with ROW_NUMBER.
         """
         # Embed all intent filters as literals into the WHERE clause
         raw_where = self._embed_params_in_where(where_parts, params)
+
+        # ── Hierarchy-dimension branch ────────────────────────────────────────
+        _HIER_DIMS_EPLREV = {
+            'project_gb', 'planning_gb',
+            'proj_bu', 'proj_section', 'proj_dept', 'proj_group',
+            'proj_top_bu', 'proj_top_section',
+            'region_entity', 'sector', 'new_service_area',
+        }
+        _col_alias_h = 'pl_revenue_inr' if amt_col == 'amount_inr' else 'pl_revenue'
+        if rank_dim and rank_dim in _HIER_DIMS_EPLREV:
+            _rank_sel = (
+                f"ROW_NUMBER() OVER (ORDER BY SUM({amt_col}) DESC) AS rank,\n                    "
+                if top_n else ""
+            )
+            _limit_clause = f"\n                LIMIT {top_n}" if top_n else ""
+            sql = f"""
+                SELECT
+                    {_rank_sel}{rank_dim},
+                    ROUND((SUM({amt_col}) / 1000000.0)::numeric, {rounding}) AS {_col_alias_h}
+                FROM cube_fact_data
+                WHERE {raw_where}
+                  AND cost_category = 'Revenue Summary'
+                  AND COALESCE(TRIM(order_reason), 'x') NOT IN ('YEH','YEI','YEJ','YEK','YN2')
+                  AND NOT starts_with(COALESCE(TRIM(gl_account), 'x'), '139')
+                GROUP BY {rank_dim}
+                ORDER BY {_col_alias_h} DESC{_limit_clause}
+            """
+            logger.info(
+                f"Generated Entity P&L Revenue SQL grouped by {rank_dim}, top_n={top_n}")
+            return {
+                'success': True,
+                'sql': sql,
+                'params': [],
+                'calculation_type': 'entity_pl_revenue',
+            }
+        # ── End hierarchy-dimension branch ────────────────────────────────────
 
         # MTD: keep the specific month asked — do NOT convert to cumulative <= N.
         # Case 1: "month = N"  (normal path — leave as-is, just read the value)
