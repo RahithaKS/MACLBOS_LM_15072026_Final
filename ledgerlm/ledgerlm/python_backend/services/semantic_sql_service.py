@@ -8601,6 +8601,7 @@ Return a JSON object with:
                                                    group_by_clause, rounding
                                                    or 0, amt_col,
                                                    quarter_ytd_latest=intent.get('_quarter_ytd_latest', False),
+                                                   quarter_period_comparison=intent.get('quarter_period_comparison'),
                                                    time_agg=intent.get('_time_agg', 'YTD'))
                 elif catalog_key == 'gb_pl_revenue':
                     return self._build_gb_pl_revenue_sql(
@@ -8972,6 +8973,7 @@ Return a JSON object with:
                                                select_cols, group_by_clause,
                                                rounding or 0, amt_col,
                                                quarter_ytd_latest=intent.get('_quarter_ytd_latest', False),
+                                               quarter_period_comparison=intent.get('quarter_period_comparison'),
                                                time_agg=intent.get('_time_agg', 'YTD'))
 
             # Cost breakdown metrics
@@ -12978,6 +12980,7 @@ Return a JSON object with:
                            rounding: int,
                            amt_col: str = 'amount_usd',
                            quarter_ytd_latest: bool = False,
+                           quarter_period_comparison: Optional[List] = None,
                            time_agg: str = 'YTD') -> Dict[str, Any]:
         """
         Revenue query builder — supports both MTD and YTD modes.
@@ -13013,7 +13016,63 @@ Return a JSON object with:
         _gb_parts = [c.strip() for c in group_by_clause.split(',')]
         _entity_key = ', '.join(c for c in _gb_parts if c != 'month') or 'year'
 
-        if quarter_ytd_latest:
+        if quarter_period_comparison:
+            # ── Same-year multi-quarter period comparison ──────────────────────
+            # Data is YTD-cumulative (Revenue Summary).
+            # Period revenue for each quarter = YTD(end_month) - YTD(prev_end_month).
+            # e.g. Q1 = YTD(Mar) - 0          → SUM(month=3)
+            #      Q2 = YTD(Jun) - YTD(Mar)   → SUM(month=6) - SUM(month=3)
+            #      Q3 = YTD(Sep) - YTD(Jun)   → SUM(month=9) - SUM(month=6)
+            #
+            # WHERE already contains month IN (end_months) from the fast-path.
+            # group_by_clause contains entity/year dimensions — NOT month (removed by fast-path).
+            _quarter_col_labels = {1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'}
+            _qpc_select_parts = []
+            for (_qn, _qend, _qprev) in quarter_period_comparison:
+                _qlabel = _quarter_col_labels.get(_qn, f'q{_qn}')
+                _qcol   = f'{_qlabel.lower()}_{col_alias}'  # e.g. q1_revenue, q2_revenue
+                if _qprev == 0:
+                    # Q1: no prior quarter → just the end-month YTD
+                    _qpc_select_parts.append(
+                        f"ROUND(SUM(CASE WHEN month = {_qend} THEN {amt_col} ELSE 0 END) "
+                        f"/ 1000000.0, {rounding})::numeric AS {_qcol}"
+                    )
+                else:
+                    # Q2+: period = YTD(end) - YTD(prev_end)
+                    _qpc_select_parts.append(
+                        f"ROUND((SUM(CASE WHEN month = {_qend}  THEN {amt_col} ELSE 0 END) "
+                        f"     - SUM(CASE WHEN month = {_qprev} THEN {amt_col} ELSE 0 END)) "
+                        f"/ 1000000.0, {rounding})::numeric AS {_qcol}"
+                    )
+            _qpc_select = ',\n    '.join(_qpc_select_parts)
+            # If group_by_clause is empty or only has 'year', handle gracefully
+            _order_col = f'q{quarter_period_comparison[0][0]}_{col_alias}'
+            if group_by_clause.strip():
+                sql = f"""
+            SELECT
+                {select_cols},
+                {_qpc_select}
+            FROM cube_fact_data
+            WHERE {where_clause_with_values}
+              AND cost_category = 'Revenue Summary'
+            GROUP BY {group_by_clause}
+            ORDER BY {_order_col} DESC
+        """
+            else:
+                sql = f"""
+            SELECT
+                {_qpc_select}
+            FROM cube_fact_data
+            WHERE {where_clause_with_values}
+              AND cost_category = 'Revenue Summary'
+        """
+            logger.info(
+                f"Generated Quarter-Period Revenue SQL "
+                f"(periods={[(q[0],q[1],q[2]) for q in quarter_period_comparison]}, "
+                f"column={amt_col})"
+            )
+
+        elif quarter_ytd_latest:
             # Quarter cross-year comparison: always YTD Revenue Summary.
             # DISTINCT ON picks the latest month per entity+year (= full quarter cumulative).
             sql = f"""
@@ -14852,35 +14911,66 @@ Return a JSON object with:
                 if _is_revenue_query:
                     _currency = detect_currency(original_query)
                     intent['currency'] = _currency
-                    # Quarter detection: Q1→month IN(1,2,3), Q2→(4,5,6), etc.
-                    _rev_quarter_map = {
-                        'q1': [1,2,3], 'q2': [4,5,6],
-                        'q3': [7,8,9], 'q4': [10,11,12]
-                    }
-                    for _q, _qmonths in _rev_quarter_map.items():
-                        if _q in _q_lower:
-                            if 'filters' not in intent:
-                                intent['filters'] = []
-                            intent['filters'] = [
-                                f for f in intent['filters']
-                                if f.get('column') != 'month'
-                            ]
-                            intent['filters'].append({
-                                'column': 'month',
-                                'operator': 'IN',
-                                'value': _qmonths
-                            })
-                            if 'group_by' not in intent:
-                                intent['group_by'] = []
-                            if 'month' not in intent['group_by']:
-                                intent['group_by'] = ['month'] + intent['group_by']
-                            break
+                    # Quarter detection — two modes:
+                    # A) Single quarter  → expand to all 3 months (existing behaviour)
+                    # B) Multiple quarters in SAME year → quarter-period comparison:
+                    #    fetch only quarter-end months (3/6/9/12) and use CASE WHEN
+                    #    subtraction so each period shows its own revenue, not YTD.
+                    _rev_qend_map  = {'q1': (1, 3), 'q2': (2, 6), 'q3': (3, 9), 'q4': (4, 12)}
+                    _rev_all_mo    = {1: [1,2,3], 2: [4,5,6], 3: [7,8,9], 4: [10,11,12]}
+                    _rev_prev_end  = {3: 0, 6: 3, 9: 6, 12: 9}
 
-                    # ── Revenue dimension filters (Task #5) ────────────────────
+                    _rev_detected_quarters = []
+                    for _q, (_qnum, _qend) in _rev_qend_map.items():
+                        if re.search(r'\b' + _q + r'\b', _q_lower):
+                            _rev_detected_quarters.append((_qnum, _qend))
+                    _rev_detected_quarters.sort()
+
                     if 'filters' not in intent:
                         intent['filters'] = []
                     if 'group_by' not in intent:
                         intent['group_by'] = ['region_entity']
+
+                    if len(_rev_detected_quarters) >= 2:
+                        # ── Multi-quarter period comparison ───────────────────
+                        _qpc = [
+                            (qn, qe, _rev_prev_end.get(qe, 0))
+                            for qn, qe in _rev_detected_quarters
+                        ]
+                        intent['quarter_period_comparison'] = _qpc
+                        _end_months = [qe for _, qe in _rev_detected_quarters]
+                        intent['filters'] = [
+                            f for f in intent['filters'] if f.get('column') != 'month'
+                        ]
+                        intent['filters'].append({
+                            'column': 'month',
+                            'operator': 'IN',
+                            'value': _end_months
+                        })
+                        # Remove month from group_by — pivot handles quarters as columns
+                        intent['group_by'] = [
+                            g for g in intent['group_by'] if g != 'month'
+                        ]
+                        logger.info(
+                            f"Revenue fast-path: multi-quarter comparison — "
+                            f"quarters={_qpc}, end-months={_end_months}"
+                        )
+
+                    elif len(_rev_detected_quarters) == 1:
+                        # ── Single quarter — keep existing all-months behaviour ─
+                        _sq_num, _ = _rev_detected_quarters[0]
+                        intent['filters'] = [
+                            f for f in intent['filters'] if f.get('column') != 'month'
+                        ]
+                        intent['filters'].append({
+                            'column': 'month',
+                            'operator': 'IN',
+                            'value': _rev_all_mo[_sq_num]
+                        })
+                        if 'month' not in intent['group_by']:
+                            intent['group_by'] = ['month'] + intent['group_by']
+
+                    # ── Revenue dimension filters ──────────────────────────────
 
                     # 1. ProjectGB filter — matches all known project_gb values,
                     #    handles dash separators like "project GB - Corp-BGSV".
