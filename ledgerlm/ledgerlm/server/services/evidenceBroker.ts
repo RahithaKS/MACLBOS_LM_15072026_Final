@@ -40,6 +40,7 @@ export interface EvidenceContext {
   tableData?: { headers: string[]; rows: string[][] }; // first table (backward compat)
   tableSections?: TableSection[]; // all extracted tables in order
   dataCoverage?: DataCoverage;   // structured month coverage — rendered as pill in UI
+  primaryCurrency?: string; // 'usd' | 'inr' — drives currency labels in LLM prompt
 }
 
 const SOURCE_WEIGHTS: Record<string, number> = {
@@ -300,6 +301,7 @@ export class EvidenceBroker {
       tableData,
       tableSections,
       dataCoverage: this.buildDataCoverage(primarySqlResults),
+      primaryCurrency,
     };
   }
 
@@ -2947,6 +2949,8 @@ export class EvidenceBroker {
     const hasAnySqlData = hasRealData || hasPreBuilt;
     const isSingleRow = (context.dataRowCount ?? 0) === 1;
 
+    // Currency unit for this response (mUSD or mINR) — drives all monetary labels below
+    const _cu = this.getCurrencyUnit(context.primaryCurrency ?? "usd", userQuery);
     const calcTypeLabels: Record<string, string> = {
       internal_capacity_mix: "Internal Capacity Mix (%)",
       external_capacity_mix: "External Capacity Mix (%)",
@@ -2956,8 +2960,8 @@ export class EvidenceBroker {
       outsourcing_capacity_avg: "Outsourcing Capacity Avg (heads)",
       total_capacity_end: "Total Capacity End (heads)",
       total_capacity_avg: "Total Capacity Avg (heads)",
-      revenue: "Revenue (millions USD)",
-      customer_revenue: "Customer Revenue (millions USD) — ranked by BillToPartyLegalEntityFullName",
+      revenue: `Revenue (millions ${_cu})`,
+      customer_revenue: `Customer Revenue (millions ${_cu}) — ranked by BillToPartyLegalEntityFullName`,
       budget_per_avg_capacity: "Budget Per Avg Capacity (USD/head)",
       budget_per_avg_capacity_entity: "Budget Per Avg Capacity (USD/head)",
       pyramid_mix: "Pyramid Mix (%)",
@@ -2968,15 +2972,15 @@ export class EvidenceBroker {
       ms_outsourcing_utilization: "MS Outsourcing Utilisation (%)",
       ms_external_utilization: "MS External Utilisation (%)",
       sx_external_utilization: "SX External Utilisation (%)",
-      resource_cost: "Resource Cost (USD)",
+      resource_cost: `Resource Cost (${_cu})`,
       travel_cost:
-        'Travel Cost (USD) — sub-categories use Bosch naming: "Offshore (T)" = offshore travel cost, "Onsite (T)" = onsite travel cost',
+        `Travel Cost (${_cu}) — sub-categories use Bosch naming: "Offshore (T)" = offshore travel cost, "Onsite (T)" = onsite travel cost`,
       direct_cost:
-        "Total Direct Cost (USD) — includes Resource Cost, Travel Cost, and Other Direct Cost",
-      indirect_cost: "Indirect Cost / Corporate Cost (USD)",
-      other_direct_cost: "Other Direct Cost (USD)",
+        `Total Direct Cost (${_cu}) — includes Resource Cost, Travel Cost, and Other Direct Cost`,
+      indirect_cost: `Indirect Cost / Corporate Cost (${_cu})`,
+      other_direct_cost: `Other Direct Cost (${_cu})`,
       gross_margin:
-        "Gross Margin (USD) — Revenue minus (Total Direct Cost + Total Indirect/Corporate Cost)",
+        `Gross Margin (${_cu}) — Revenue minus (Total Direct Cost + Total Indirect/Corporate Cost)`,
       ebit: "EBIT% — (Revenue − Gross Margin) / Revenue × 100 = Total Cost as % of Revenue",
       entity_pl_ebit:
         "Entity P&L EBIT — columns: Revenue, Total Cost, EBIT (Revenue − Total Cost), EBIT% (EBIT / Revenue × 100)",
