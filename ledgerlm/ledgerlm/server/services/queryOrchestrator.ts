@@ -895,7 +895,9 @@ export class QueryOrchestrator {
       'july','august','september','october','november','december',
       'jan','feb','mar','apr','jun','jul','aug','sep','oct','nov','dec',
     ];
-    const foundMonths = monthNames.filter(m => q.includes(m));
+    // Use word-boundary matching so "june" doesn't match both 'june' AND 'jun'
+    // (a plain q.includes() substring match would count "june" as 2 hits).
+    const foundMonths = monthNames.filter(m => new RegExp(`\\b${m}\\b`).test(q));
     if (foundMonths.length >= 2) return true;
 
     const years = q.match(/\b20\d\d\b/g) || [];
