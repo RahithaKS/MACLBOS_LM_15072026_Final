@@ -8476,11 +8476,15 @@ Return a JSON object with:
                         f"month per entity+year "
                         f"(months={_month_vals}, years={_year_f.get('value')})")
                 else:
-                    if 'month' not in group_cols:
-                        group_cols = ['month'] + group_cols
-                        logger.info(
-                            f"Auto-added month to group_by for multi-month range: "
-                            f"months={_month_vals}")
+                    # Skip auto-add when quarter_period_comparison is set:
+                    # that path pivots quarters as CASE WHEN columns, not GROUP BY rows.
+                    # Adding month to group_by would break the YTD-subtraction pivot.
+                    if not intent.get('quarter_period_comparison'):
+                        if 'month' not in group_cols:
+                            group_cols = ['month'] + group_cols
+                            logger.info(
+                                f"Auto-added month to group_by for multi-month range: "
+                                f"months={_month_vals}")
 
             select_cols = ", ".join(group_cols)
             group_by_clause = ", ".join(group_cols)
@@ -13025,7 +13029,18 @@ Return a JSON object with:
             #      Q3 = YTD(Sep) - YTD(Jun)   → SUM(month=9) - SUM(month=6)
             #
             # WHERE already contains month IN (end_months) from the fast-path.
-            # group_by_clause contains entity/year dimensions — NOT month (removed by fast-path).
+            # group_by_clause must NOT contain 'month' — month is a CASE WHEN pivot
+            # dimension.  If compile_calculation_sql's auto-add-month re-inserted it
+            # despite the guard, strip it defensively here so the subtraction works
+            # correctly across the full entity aggregate.
+            _qpc_gb  = ', '.join(
+                c.strip() for c in group_by_clause.split(',') if c.strip() != 'month'
+            )
+            _qpc_sel = ', '.join(
+                c.strip() for c in select_cols.split(',') if c.strip() != 'month'
+            )
+            group_by_clause = _qpc_gb
+            select_cols     = _qpc_sel
             _quarter_col_labels = {1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'}
             _qpc_select_parts = []
             for (_qn, _qend, _qprev) in quarter_period_comparison:
@@ -14931,8 +14946,17 @@ Return a JSON object with:
                     if 'group_by' not in intent:
                         intent['group_by'] = ['region_entity']
 
-                    if len(_rev_detected_quarters) >= 2:
-                        # ── Multi-quarter period comparison ───────────────────
+                    # Safety guard: _build_kpi_intent_fast emits a __raw__ OR filter
+                    # for cross-year quarter pairs (e.g. Q1 2025 vs Q2 2026).
+                    # Those must keep using the existing cross-year path — do not
+                    # route them through the same-year quarter_period_comparison pivot.
+                    _has_cross_year_raw = any(
+                        f.get('column') == '__raw__'
+                        for f in intent.get('filters', [])
+                    )
+
+                    if not _has_cross_year_raw and len(_rev_detected_quarters) >= 2:
+                        # ── Multi-quarter period comparison (same year) ────────
                         _qpc = [
                             (qn, qe, _rev_prev_end.get(qe, 0))
                             for qn, qe in _rev_detected_quarters
