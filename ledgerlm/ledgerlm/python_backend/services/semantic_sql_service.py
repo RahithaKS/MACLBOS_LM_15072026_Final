@@ -6226,15 +6226,24 @@ Return a JSON object with:
                 'name': _cost_class_amt_col,
                 'aggregation': 'SUM'
             }],
-            'filters': [{
-                'column': 'cost_category',
-                'operator': '=',
-                'value': 'Cost Summary'
-            }, {
-                'column': 'cost_category_class',
-                'operator': '=',
-                'value': cost_class
-            }],
+            'filters': [
+                {
+                    'column': 'cost_category',
+                    'operator': '=',
+                    'value': 'Cost Summary'
+                },
+                {
+                    'column': 'cost_category_class',
+                    'operator': '=',
+                    'value': cost_class
+                },
+                # Exclude unmapped catch-all rows where sub_cost_category is blank ('-')
+                {
+                    'column': 'sub_cost_category',
+                    'operator': '!=',
+                    'value': '-'
+                },
+            ],
             'group_by':
             group_by,
             'order_by': {
@@ -6776,11 +6785,14 @@ Return a JSON object with:
             _group_by.append('month')
         if any(p in query_lower for p in ['by year', 'yearly', 'year wise', 'year-wise', 'annual']):
             _group_by.append('year')
-        # Always break down by sub_cost_category (the GB P&L cost line column)
+        # Always break down by cost_category_class (parent) → sub_cost_category (detail)
+        _group_by.append('cost_category_class')
         _group_by.append('sub_cost_category')
 
         filters: List[Dict[str, Any]] = [
-            {'column': 'cost_category', 'operator': '=', 'value': 'Cost Summary'}
+            {'column': 'cost_category', 'operator': '=', 'value': 'Cost Summary'},
+            # Exclude unmapped catch-all rows where sub_cost_category is blank ('-')
+            {'column': 'sub_cost_category', 'operator': '!=', 'value': '-'},
         ]
 
         # Apply entity as a WHERE filter
