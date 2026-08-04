@@ -5770,14 +5770,55 @@ Return a JSON object with:
             _quarter_detected = bool(_fkpi_all_q_months)
             if _quarter_detected:
                 _fkpi_q_months = sorted(set(_fkpi_all_q_months))
-                intent['filters'].append({
-                    'column': 'month',
-                    'operator': 'IN',
-                    'value': _fkpi_q_months
-                })
-                if 'month' not in intent.get('group_by', []):
-                    intent['group_by'] = ['month'] + intent.get('group_by', ['region_entity'])
-                logger.info(f"Fast KPI: quarters detected → months {_fkpi_q_months}")
+
+                # Detect how many distinct full quarters are present in the month list.
+                # A "full quarter" means all 3 of its months appear in _fkpi_q_months.
+                _fkpi_q_sets = {
+                    1: (frozenset([1, 2, 3]),  3),
+                    2: (frozenset([4, 5, 6]),  6),
+                    3: (frozenset([7, 8, 9]),  9),
+                    4: (frozenset([10,11,12]), 12),
+                }
+                _fkpi_prev_end  = {3: 0, 6: 3, 9: 6, 12: 9}
+                _fkpi_full_qs   = [
+                    (qn, qend)
+                    for qn, (qset, qend) in sorted(_fkpi_q_sets.items())
+                    if qset.issubset(set(_fkpi_q_months))
+                ]
+
+                if len(_fkpi_full_qs) >= 2:
+                    # ── Same-year multi-quarter comparison ─────────────────────
+                    # Pivot: each quarter becomes a column via CASE WHEN subtraction
+                    # of YTD-cumulative Revenue Summary values.
+                    # Only fetch quarter-end months; do NOT add month to group_by
+                    # (month is a CASE WHEN dimension, not a GROUP BY dimension).
+                    _fkpi_qpc = [
+                        (qn, qe, _fkpi_prev_end.get(qe, 0))
+                        for qn, qe in _fkpi_full_qs
+                    ]
+                    intent['quarter_period_comparison'] = _fkpi_qpc
+                    _fkpi_end_months = [qe for _, qe in _fkpi_full_qs]
+                    intent['filters'].append({
+                        'column': 'month',
+                        'operator': 'IN',
+                        'value': _fkpi_end_months
+                    })
+                    # month deliberately omitted from group_by
+                    logger.info(
+                        f"Fast KPI: multi-quarter comparison → "
+                        f"end-months={_fkpi_end_months}, qpc={_fkpi_qpc}"
+                    )
+                else:
+                    # Single quarter or partial-quarter range: existing behaviour —
+                    # return all months with month in group_by.
+                    intent['filters'].append({
+                        'column': 'month',
+                        'operator': 'IN',
+                        'value': _fkpi_q_months
+                    })
+                    if 'month' not in intent.get('group_by', []):
+                        intent['group_by'] = ['month'] + intent.get('group_by', ['region_entity'])
+                    logger.info(f"Fast KPI: quarters detected → months {_fkpi_q_months}")
 
         if not _quarter_detected:
             # Range detection: "jan to mar", "january to march", "jan - mar", "jan thru mar"
