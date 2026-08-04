@@ -6219,13 +6219,14 @@ Return a JSON object with:
             _ccl_dims.append('sector')
         if any(p in query_lower for p in ['by service area', 'by new service area']):
             _ccl_dims.append('new_service_area')
-        # "by Project GB" grouping — only when no specific value follows (those become filters below)
-        if any(p in query_lower for p in ['by project gb', 'by gb', 'project gb wise', 'gb wise', 'by projectgb']) \
-                and not _PROJECT_GB_RE.search(query):
+        # "by Project GB" / "top N project GB" — any mention of "project gb" without a specific
+        # value (those are captured by _PROJECT_GB_RE as filters below).
+        if ('project gb' in query_lower and not _PROJECT_GB_RE.search(query)) \
+                or any(p in query_lower for p in ['by gb', 'gb wise', 'by projectgb']):
             _ccl_dims.append('project_gb')
             logger.info("_build_cost_class_intent: GB grouping — GROUP BY project_gb")
-        # "by Planning GB" grouping — only when no specific value follows
-        if 'by planning gb' in query_lower and not _PLANNING_GB_RE.search(query):
+        # "by Planning GB" / "top N planning GB"
+        if 'planning gb' in query_lower and not _PLANNING_GB_RE.search(query):
             _ccl_dims.append('planning_gb')
             logger.info("_build_cost_class_intent: GB grouping — GROUP BY planning_gb")
         if any(p in query_lower for p in ['by month', 'monthly', 'month wise', 'month-wise', 'monthwise', 'month by month']):
@@ -6813,13 +6814,13 @@ Return a JSON object with:
             _group_by.append('region_entity')
         if any(p in query_lower for p in ['by sector', 'sector wise', 'sector-wise']):
             _group_by.append('sector')
-        # "by Project GB" grouping — only when no specific value follows (those become filters)
-        if any(p in query_lower for p in ['by project gb', 'by gb', 'project gb wise', 'gb wise']) \
-                and not _PROJECT_GB_RE.search(query):
+        # "by Project GB" / "top N project GB" — any mention of "project gb" without a specific value
+        if ('project gb' in query_lower and not _PROJECT_GB_RE.search(query)) \
+                or any(p in query_lower for p in ['by gb', 'gb wise']):
             _group_by.append('project_gb')
             logger.info("_build_gb_pl_cost_breakdown_intent: GB grouping — GROUP BY project_gb")
-        # "by Planning GB" grouping — only when no specific value follows
-        if 'by planning gb' in query_lower and not _PLANNING_GB_RE.search(query):
+        # "by Planning GB" / "top N planning GB"
+        if 'planning gb' in query_lower and not _PLANNING_GB_RE.search(query):
             _group_by.append('planning_gb')
             logger.info("_build_gb_pl_cost_breakdown_intent: GB grouping — GROUP BY planning_gb")
         if any(p in query_lower for p in ['by month', 'monthly', 'month wise', 'month-wise', 'monthwise']):
@@ -8530,6 +8531,24 @@ Return a JSON object with:
             select_cols = ", ".join(group_cols)
             group_by_clause = ", ".join(group_cols)
 
+            # ── Top-N ranking detection for cost-class SQL builders ───────────────
+            # These dimensions can serve as ranking targets (builders add sub_cost_category
+            # themselves, so it is excluded from this set — it is the *default* breakdown
+            # and gets a rank only when it is the sole group-by dimension).
+            _COST_RANK_DIMS = {
+                'project_gb', 'planning_gb',
+                'proj_bu', 'proj_section', 'proj_dept', 'proj_group',
+                'proj_top_bu', 'proj_top_section',
+                'region_entity', 'sector', 'new_service_area',
+            }
+            _orig_q = intent.get('original_query', '')
+            _top_n_m = re.search(r'\btop\s+(\d+)\b', _orig_q.lower())
+            _calc_top_n: Optional[int] = int(_top_n_m.group(1)) if _top_n_m else None
+            # Ranking dimension = first recognised non-default dim in the group_by list
+            _calc_rank_dim: Optional[str] = next(
+                (d for d in group_cols if d in _COST_RANK_DIMS), None
+            )
+
             # Extract currency preference (INR vs USD, default USD)
             currency = intent.get('currency', 'usd')
             amt_col = get_amount_column(currency)
@@ -8709,16 +8728,21 @@ Return a JSON object with:
                     return self._build_travel_cost_sql(where_parts, params,
                                                        select_cols,
                                                        group_by_clause,
-                                                       rounding or 2, amt_col)
+                                                       rounding or 2, amt_col,
+                                                       top_n=_calc_top_n,
+                                                       rank_dim=_calc_rank_dim)
                 elif catalog_key == 'direct_cost':
                     return self._build_direct_cost_sql(where_parts, params,
                                                        select_cols,
                                                        group_by_clause,
-                                                       rounding or 2, amt_col)
+                                                       rounding or 2, amt_col,
+                                                       top_n=_calc_top_n,
+                                                       rank_dim=_calc_rank_dim)
                 elif catalog_key == 'indirect_cost':
                     return self._build_indirect_cost_sql(
                         where_parts, params, select_cols, group_by_clause,
-                        rounding or 2, amt_col)
+                        rounding or 2, amt_col,
+                        top_n=_calc_top_n, rank_dim=_calc_rank_dim)
                 elif catalog_key == 'gross_margin':
                     _gm_pl = any(kw in calc_name_lower for kw in [
                         'gb p&l', 'entity p&l', 'gb pl', 'entity pl',
@@ -8730,11 +8754,13 @@ Return a JSON object with:
                 elif catalog_key == 'resource_cost':
                     return self._build_resource_cost_sql(
                         where_parts, params, select_cols, group_by_clause,
-                        rounding or 2, amt_col)
+                        rounding or 2, amt_col,
+                        top_n=_calc_top_n, rank_dim=_calc_rank_dim)
                 elif catalog_key == 'other_direct_cost':
                     return self._build_other_direct_cost_sql(
                         where_parts, params, select_cols, group_by_clause,
-                        rounding or 2, amt_col)
+                        rounding or 2, amt_col,
+                        top_n=_calc_top_n, rank_dim=_calc_rank_dim)
 
             # LEGACY: Keyword-based routing (fallback when LLM not used)
             if 'ebit' in calc_name_lower:
@@ -9524,23 +9550,48 @@ Return a JSON object with:
 
     def _build_travel_cost_sql(self, where_parts: List[str], params: List,
                                select_cols: str, group_by_clause: str,
-                               rounding: int, amt_col: str = 'amount_usd') -> Dict[str, Any]:
-        """Travel Cost from CostCategory_Class = 'Travel Cost', grouped by SubCostCategory"""
-        where_clause = " AND ".join(where_parts)
-        sql = f"""
-            SELECT 
-                {select_cols},
-                sub_cost_category,
-                ROUND(SUM({amt_col})::numeric, {rounding}) as travel_cost
-            FROM cube_fact_data
-            WHERE {where_clause}
-              AND cost_category = 'Cost Summary'
-              AND cost_category_class = 'Travel Cost'
-            GROUP BY {group_by_clause}, sub_cost_category
-            ORDER BY travel_cost DESC
+                               rounding: int, amt_col: str = 'amount_usd',
+                               top_n: Optional[int] = None,
+                               rank_dim: Optional[str] = None) -> Dict[str, Any]:
+        """Travel Cost from CostCategory_Class = 'Travel Cost'.
+
+        Default: grouped by SubCostCategory (detail breakdown).
+        When top_n + rank_dim are set: ranked at the specified dimension level —
+        sub_cost_category is dropped so each dimension value is a single row,
+        and a ROW_NUMBER() rank column is added with LIMIT top_n applied.
         """
-        logger.info(
-            f"Generated Travel Cost SQL with SubCostCategory breakdown")
+        where_clause = " AND ".join(where_parts)
+        if top_n and rank_dim:
+            sql = f"""
+                SELECT
+                    ROW_NUMBER() OVER (ORDER BY SUM({amt_col}) DESC) AS rank,
+                    {select_cols},
+                    ROUND(SUM({amt_col})::numeric, {rounding}) AS travel_cost
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Cost Summary'
+                  AND cost_category_class = 'Travel Cost'
+                GROUP BY {group_by_clause}
+                ORDER BY travel_cost DESC
+                LIMIT {top_n}
+            """
+            logger.info(
+                f"Generated Travel Cost SQL ranked by {rank_dim}, top_n={top_n}")
+        else:
+            sql = f"""
+                SELECT
+                    {select_cols},
+                    sub_cost_category,
+                    ROUND(SUM({amt_col})::numeric, {rounding}) AS travel_cost
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Cost Summary'
+                  AND cost_category_class = 'Travel Cost'
+                GROUP BY {group_by_clause}, sub_cost_category
+                ORDER BY travel_cost DESC
+            """
+            logger.info(
+                f"Generated Travel Cost SQL with SubCostCategory breakdown")
         return {
             'success': True,
             'sql': sql,
@@ -9550,23 +9601,46 @@ Return a JSON object with:
 
     def _build_resource_cost_sql(self, where_parts: List[str], params: List,
                                  select_cols: str, group_by_clause: str,
-                                 rounding: int, amt_col: str = 'amount_usd') -> Dict[str, Any]:
-        """Resource Cost from CostCategory_Class = 'Resource Cost', grouped by SubCostCategory"""
-        where_clause = " AND ".join(where_parts)
-        sql = f"""
-            SELECT 
-                {select_cols},
-                sub_cost_category,
-                ROUND(SUM({amt_col})::numeric, {rounding}) as resource_cost
-            FROM cube_fact_data
-            WHERE {where_clause}
-              AND cost_category = 'Cost Summary'
-              AND cost_category_class = 'Resource Cost'
-            GROUP BY {group_by_clause}, sub_cost_category
-            ORDER BY resource_cost DESC
+                                 rounding: int, amt_col: str = 'amount_usd',
+                                 top_n: Optional[int] = None,
+                                 rank_dim: Optional[str] = None) -> Dict[str, Any]:
+        """Resource Cost from CostCategory_Class = 'Resource Cost'.
+
+        Default: grouped by SubCostCategory. When top_n + rank_dim are set:
+        ranked at the dimension level with a rank column and LIMIT applied.
         """
-        logger.info(
-            f"Generated Resource Cost SQL with SubCostCategory breakdown")
+        where_clause = " AND ".join(where_parts)
+        if top_n and rank_dim:
+            sql = f"""
+                SELECT
+                    ROW_NUMBER() OVER (ORDER BY SUM({amt_col}) DESC) AS rank,
+                    {select_cols},
+                    ROUND(SUM({amt_col})::numeric, {rounding}) AS resource_cost
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Cost Summary'
+                  AND cost_category_class = 'Resource Cost'
+                GROUP BY {group_by_clause}
+                ORDER BY resource_cost DESC
+                LIMIT {top_n}
+            """
+            logger.info(
+                f"Generated Resource Cost SQL ranked by {rank_dim}, top_n={top_n}")
+        else:
+            sql = f"""
+                SELECT
+                    {select_cols},
+                    sub_cost_category,
+                    ROUND(SUM({amt_col})::numeric, {rounding}) AS resource_cost
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Cost Summary'
+                  AND cost_category_class = 'Resource Cost'
+                GROUP BY {group_by_clause}, sub_cost_category
+                ORDER BY resource_cost DESC
+            """
+            logger.info(
+                f"Generated Resource Cost SQL with SubCostCategory breakdown")
         return {
             'success': True,
             'sql': sql,
@@ -9577,23 +9651,46 @@ Return a JSON object with:
     def _build_other_direct_cost_sql(self, where_parts: List[str],
                                      params: List, select_cols: str,
                                      group_by_clause: str,
-                                     rounding: int, amt_col: str = 'amount_usd') -> Dict[str, Any]:
-        """Other Direct Cost from CostCategory_Class = 'Other Direct Cost', grouped by SubCostCategory"""
-        where_clause = " AND ".join(where_parts)
-        sql = f"""
-            SELECT 
-                {select_cols},
-                sub_cost_category,
-                ROUND(SUM({amt_col})::numeric, {rounding}) as other_direct_cost
-            FROM cube_fact_data
-            WHERE {where_clause}
-              AND cost_category = 'Cost Summary'
-              AND cost_category_class = 'Other Direct Cost'
-            GROUP BY {group_by_clause}, sub_cost_category
-            ORDER BY other_direct_cost DESC
+                                     rounding: int, amt_col: str = 'amount_usd',
+                                     top_n: Optional[int] = None,
+                                     rank_dim: Optional[str] = None) -> Dict[str, Any]:
+        """Other Direct Cost from CostCategory_Class = 'Other Direct Cost'.
+
+        Default: grouped by SubCostCategory. When top_n + rank_dim are set:
+        ranked at the dimension level with a rank column and LIMIT applied.
         """
-        logger.info(
-            f"Generated Other Direct Cost SQL with SubCostCategory breakdown")
+        where_clause = " AND ".join(where_parts)
+        if top_n and rank_dim:
+            sql = f"""
+                SELECT
+                    ROW_NUMBER() OVER (ORDER BY SUM({amt_col}) DESC) AS rank,
+                    {select_cols},
+                    ROUND(SUM({amt_col})::numeric, {rounding}) AS other_direct_cost
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Cost Summary'
+                  AND cost_category_class = 'Other Direct Cost'
+                GROUP BY {group_by_clause}
+                ORDER BY other_direct_cost DESC
+                LIMIT {top_n}
+            """
+            logger.info(
+                f"Generated Other Direct Cost SQL ranked by {rank_dim}, top_n={top_n}")
+        else:
+            sql = f"""
+                SELECT
+                    {select_cols},
+                    sub_cost_category,
+                    ROUND(SUM({amt_col})::numeric, {rounding}) AS other_direct_cost
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Cost Summary'
+                  AND cost_category_class = 'Other Direct Cost'
+                GROUP BY {group_by_clause}, sub_cost_category
+                ORDER BY other_direct_cost DESC
+            """
+            logger.info(
+                f"Generated Other Direct Cost SQL with SubCostCategory breakdown")
         return {
             'success': True,
             'sql': sql,
@@ -9603,25 +9700,49 @@ Return a JSON object with:
 
     def _build_direct_cost_sql(self, where_parts: List[str], params: List,
                                select_cols: str, group_by_clause: str,
-                               rounding: int, amt_col: str = 'amount_usd') -> Dict[str, Any]:
-        """Total Direct Cost = Resource Cost + Travel Cost + Other Direct Cost, grouped by SubCostCategory"""
-        where_clause = " AND ".join(where_parts)
-        sql = f"""
-            SELECT 
-                {select_cols},
-                cost_category_class,
-                sub_cost_category,
-                ROUND(SUM({amt_col})::numeric, {rounding}) as amount
-            FROM cube_fact_data
-            WHERE {where_clause}
-              AND cost_category = 'Cost Summary'
-              AND cost_category_class IN ('Resource Cost', 'Travel Cost', 'Other Direct Cost')
-            GROUP BY {group_by_clause}, cost_category_class, sub_cost_category
-            ORDER BY cost_category_class, amount DESC
+                               rounding: int, amt_col: str = 'amount_usd',
+                               top_n: Optional[int] = None,
+                               rank_dim: Optional[str] = None) -> Dict[str, Any]:
+        """Total Direct Cost = Resource Cost + Travel Cost + Other Direct Cost.
+
+        Default: grouped by CostCategory_Class + SubCostCategory (full breakdown).
+        When top_n + rank_dim are set: ranked at the specified dimension level —
+        all direct cost sub-classes are summed together, a rank column is added,
+        and LIMIT top_n is applied.
         """
-        logger.info(
-            f"Generated Direct Cost SQL with CostCategory_Class and SubCostCategory breakdown"
-        )
+        where_clause = " AND ".join(where_parts)
+        if top_n and rank_dim:
+            sql = f"""
+                SELECT
+                    ROW_NUMBER() OVER (ORDER BY SUM({amt_col}) DESC) AS rank,
+                    {select_cols},
+                    ROUND(SUM({amt_col})::numeric, {rounding}) AS amount
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Cost Summary'
+                  AND cost_category_class IN ('Resource Cost', 'Travel Cost', 'Other Direct Cost')
+                GROUP BY {group_by_clause}
+                ORDER BY amount DESC
+                LIMIT {top_n}
+            """
+            logger.info(
+                f"Generated Direct Cost SQL ranked by {rank_dim}, top_n={top_n}")
+        else:
+            sql = f"""
+                SELECT
+                    {select_cols},
+                    cost_category_class,
+                    sub_cost_category,
+                    ROUND(SUM({amt_col})::numeric, {rounding}) AS amount
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Cost Summary'
+                  AND cost_category_class IN ('Resource Cost', 'Travel Cost', 'Other Direct Cost')
+                GROUP BY {group_by_clause}, cost_category_class, sub_cost_category
+                ORDER BY cost_category_class, amount DESC
+            """
+            logger.info(
+                f"Generated Direct Cost SQL with CostCategory_Class and SubCostCategory breakdown")
         return {
             'success': True,
             'sql': sql,
@@ -9631,24 +9752,46 @@ Return a JSON object with:
 
     def _build_indirect_cost_sql(self, where_parts: List[str], params: List,
                                  select_cols: str, group_by_clause: str,
-                                 rounding: int, amt_col: str = 'amount_usd') -> Dict[str, Any]:
-        """Indirect Cost = Corporate Cost from CostCategory_Class, grouped by SubCostCategory"""
-        where_clause = " AND ".join(where_parts)
-        sql = f"""
-            SELECT 
-                {select_cols},
-                sub_cost_category,
-                ROUND(SUM({amt_col})::numeric, {rounding}) as indirect_cost
-            FROM cube_fact_data
-            WHERE {where_clause}
-              AND cost_category = 'Cost Summary'
-              AND cost_category_class = 'Corporate Cost'
-            GROUP BY {group_by_clause}, sub_cost_category
-            ORDER BY indirect_cost DESC
+                                 rounding: int, amt_col: str = 'amount_usd',
+                                 top_n: Optional[int] = None,
+                                 rank_dim: Optional[str] = None) -> Dict[str, Any]:
+        """Indirect Cost = Corporate Cost from CostCategory_Class.
+
+        Default: grouped by SubCostCategory. When top_n + rank_dim are set:
+        ranked at the dimension level with a rank column and LIMIT applied.
         """
-        logger.info(
-            f"Generated Indirect Cost (Corporate Cost) SQL with SubCostCategory breakdown"
-        )
+        where_clause = " AND ".join(where_parts)
+        if top_n and rank_dim:
+            sql = f"""
+                SELECT
+                    ROW_NUMBER() OVER (ORDER BY SUM({amt_col}) DESC) AS rank,
+                    {select_cols},
+                    ROUND(SUM({amt_col})::numeric, {rounding}) AS indirect_cost
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Cost Summary'
+                  AND cost_category_class = 'Corporate Cost'
+                GROUP BY {group_by_clause}
+                ORDER BY indirect_cost DESC
+                LIMIT {top_n}
+            """
+            logger.info(
+                f"Generated Indirect Cost SQL ranked by {rank_dim}, top_n={top_n}")
+        else:
+            sql = f"""
+                SELECT
+                    {select_cols},
+                    sub_cost_category,
+                    ROUND(SUM({amt_col})::numeric, {rounding}) AS indirect_cost
+                FROM cube_fact_data
+                WHERE {where_clause}
+                  AND cost_category = 'Cost Summary'
+                  AND cost_category_class = 'Corporate Cost'
+                GROUP BY {group_by_clause}, sub_cost_category
+                ORDER BY indirect_cost DESC
+            """
+            logger.info(
+                f"Generated Indirect Cost (Corporate Cost) SQL with SubCostCategory breakdown")
         return {
             'success': True,
             'sql': sql,

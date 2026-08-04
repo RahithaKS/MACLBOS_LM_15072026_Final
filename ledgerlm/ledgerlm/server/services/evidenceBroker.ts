@@ -696,6 +696,7 @@ export class EvidenceBroker {
       "proj_top_bu",
       "proj_top_section",
       "planning_gb",
+      "rank",   // ROW_NUMBER() rank from top-N cost-class queries — dimension, not a metric
     ]);
 
     const valueColumns = columns.filter((col) => {
@@ -825,6 +826,18 @@ export class EvidenceBroker {
             `- **Smallest contributor**: ${getLabel(bottom)} — ${fmtVal(bottomN)}${bottomShare}; ${ratio.toFixed(1)}× smaller than top ${cite}`,
           );
         }
+      }
+
+      // Add a scaled Grand Total line so the LLM always sees the correct
+      // aggregated value and does not compute its own total from raw context data.
+      if (
+        !isInvestment &&
+        !this.isPercentageColumn(primaryValueCol) &&
+        rowsSorted.length >= 2
+      ) {
+        insightBullets.push(
+          `- **Grand Total**: ${fmtVal(grandTotal)} ${cite}`,
+        );
       }
 
       keyFindings = `### Key Findings\n${insightBullets.join("\n")}`;
