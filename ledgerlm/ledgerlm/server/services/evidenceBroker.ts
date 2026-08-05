@@ -1788,8 +1788,8 @@ export class EvidenceBroker {
       return "0.00";
     }
 
-    // Dimension columns — return as plain integer (month=4, year=2025, etc.)
-    if (col === "month" || col === "year" || col === "month_num") {
+    // Dimension columns — return as plain integer (month=4, year=2025, rank=1, etc.)
+    if (col === "month" || col === "year" || col === "month_num" || col === "rank") {
       return String(Math.round(num));
     }
 
