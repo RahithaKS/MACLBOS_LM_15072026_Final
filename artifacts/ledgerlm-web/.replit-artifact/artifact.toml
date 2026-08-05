@@ -11,7 +11,7 @@ paths = [ "/" ]
 localPort = 5000
 
 [services.development]
-run = "cd ledgerlm/ledgerlm && npm run dev"
+run = "cd ../../ledgerlm/ledgerlm && npm run dev"
 
 [services.production]
 build = [ "pnpm", "--filter", "@workspace/ledgerlm-web", "run", "build" ]
