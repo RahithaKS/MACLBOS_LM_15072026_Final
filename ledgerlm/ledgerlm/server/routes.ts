@@ -275,7 +275,7 @@ const upload = multer({
     },
   }),
   limits: {
-    fileSize: 250 * 1024 * 1024, // 250MB outer limit — per-type caps enforced post-upload
+    fileSize: 500 * 1024 * 1024, // 500MB outer limit — covers Enterprise (500MB); Vault/Chat caps enforced client-side
   },
   fileFilter: (req, file, cb) => {
     // Gate 1 — MIME type whitelist

@@ -444,14 +444,14 @@ export default function AdminEnterprise() {
   });
 
   // ── Handlers (unchanged + new) ──
-  const MAX_UPLOAD_BYTES = 250 * 1024 * 1024; // 250MB — matches server multer limit
+  const MAX_UPLOAD_BYTES = 500 * 1024 * 1024; // 500MB — Enterprise limit
 
   const validateAndStageFiles = (files: File[]) => {
     const oversized = files.filter(f => f.size > MAX_UPLOAD_BYTES);
     oversized.forEach(f => {
       toast({
         title: "File too large",
-        description: `"${f.name}" is ${(f.size / 1024 / 1024).toFixed(1)} MB. Maximum allowed size is 250 MB.`,
+        description: `"${f.name}" is ${(f.size / 1024 / 1024).toFixed(1)} MB. Maximum allowed size is 500 MB.`,
         variant: "destructive",
       });
     });
@@ -785,7 +785,7 @@ export default function AdminEnterprise() {
                   </div>
                   <div className="flex-1">
                     <p className="font-semibold text-sm text-foreground mb-0.5">Upload Files</p>
-                    <p className="text-xs text-muted-foreground mb-3">PDF, Word, Excel, CSV, TXT — up to 250 MB per file</p>
+                    <p className="text-xs text-muted-foreground mb-3">PDF, Word, Excel, CSV, TXT — up to 500 MB per file</p>
 
                     {/* Hidden file input */}
                     <input

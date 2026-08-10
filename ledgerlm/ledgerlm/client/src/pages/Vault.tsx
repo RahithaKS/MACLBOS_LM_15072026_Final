@@ -256,7 +256,7 @@ export default function Vault() {
     });
   };
 
-  const MAX_UPLOAD_BYTES = 250 * 1024 * 1024; // 250MB — matches server multer limit
+  const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100MB — Vault limit
 
   const handleFileSelect = (files: FileList | null) => {
     const file = files?.[0];
@@ -264,7 +264,7 @@ export default function Vault() {
     if (file.size > MAX_UPLOAD_BYTES) {
       toast({
         title: "File too large",
-        description: `"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)} MB. Maximum allowed size is 250 MB.`,
+        description: `"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)} MB. Maximum allowed size is 100 MB.`,
         variant: "destructive",
       });
       return;
@@ -568,7 +568,7 @@ export default function Vault() {
                         or drag and drop your files
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        PDF, Word, Excel, CSV, TXT — up to 250 MB per file
+                        PDF, Word, Excel, CSV, TXT — up to 100 MB per file
                       </p>
                     </div>
                     <div className="text-xs text-muted-foreground">or</div>

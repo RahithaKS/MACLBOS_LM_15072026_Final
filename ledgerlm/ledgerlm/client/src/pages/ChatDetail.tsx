@@ -869,7 +869,7 @@ export default function ChatDetail() {
     sendStreamingMessage(question, queryContext);
   };
 
-  const MAX_UPLOAD_BYTES = 250 * 1024 * 1024; // 250MB — matches server multer limit
+  const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50MB — Chat limit
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -881,7 +881,7 @@ export default function ChatDetail() {
       oversized.forEach(f => {
         toast({
           title: "File too large",
-          description: `"${f.name}" is ${(f.size / 1024 / 1024).toFixed(1)} MB. Maximum allowed size is 250 MB.`,
+          description: `"${f.name}" is ${(f.size / 1024 / 1024).toFixed(1)} MB. Maximum allowed size is 50 MB.`,
           variant: "destructive",
         });
       });
