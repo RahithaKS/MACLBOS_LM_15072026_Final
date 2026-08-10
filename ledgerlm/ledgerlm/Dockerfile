@@ -191,6 +191,7 @@ stderr_logfile_maxbytes=0 \n\
 [program:node-backend] \n\
 command=/usr/local/bin/tsx server/index.ts \n\
 directory=/app \n\
+user=appuser \n\
 environment=NODE_ENV="production" \n\
 autostart=true \n\
 autorestart=true \n\
@@ -203,6 +204,7 @@ stderr_logfile_maxbytes=0 \n\
 [program:python-backend] \n\
 command=/opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 \n\
 directory=/app/python_backend \n\
+user=appuser \n\
 autostart=true \n\
 autorestart=true \n\
 startsecs=5 \n\
@@ -211,9 +213,21 @@ stdout_logfile_maxbytes=0 \n\
 stderr_logfile=/dev/stderr \n\
 stderr_logfile_maxbytes=0' > /etc/supervisor/conf.d/ledgerlm.conf
 
-# Create directories
-RUN mkdir -p /app/uploads /var/log/supervisor && \
-    chmod 777 /app/uploads
+# Create non-root user for Node.js and Python processes.
+# Nginx master process must remain root to bind port 80 — its worker processes
+# automatically drop to 'nobody'. supervisord global stays root so it can start
+# nginx, but launches node-backend and python-backend as appuser (see above).
+RUN groupadd --gid 1001 appuser && \
+    useradd --uid 1001 --gid 1001 --no-create-home --shell /bin/false appuser
+
+# Create directories, set ownership so appuser can write uploads and logs
+RUN mkdir -p /app/uploads /var/log/supervisor /var/cache/nginx && \
+    chown -R appuser:appuser /app && \
+    chown root:root /app && \
+    chmod 755 /app && \
+    chown -R appuser:appuser /app/uploads /app/python_backend /app/server /app/shared && \
+    chown -R appuser:appuser /var/log/supervisor && \
+    chmod 755 /app/uploads
 
 # Expose port
 EXPOSE 80

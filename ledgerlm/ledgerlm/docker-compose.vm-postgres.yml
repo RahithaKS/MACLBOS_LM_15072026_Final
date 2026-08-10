@@ -79,14 +79,30 @@ services:
       # Admin OTP
       # ================================
       NEMKO_ADMIN_OTP: ${NEMKO_ADMIN_OTP:-}
-    
+
+      # CORS: comma-separated list of trusted frontend origins.
+      # Set this in your .env to your production domain, e.g.:
+      #   ALLOWED_ORIGINS=https://ledgerlm.bosch.com
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+
     volumes:
       - app_uploads:/app/uploads
-    
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:exec,mode=1777
+      - /var/run:mode=0755
+      - /var/log/supervisor:mode=0755
+      - /var/log/nginx:mode=0755
+      - /var/cache/nginx:mode=0755
+
     # No database dependency - PostgreSQL is external
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/api/health"]
       interval: 30s

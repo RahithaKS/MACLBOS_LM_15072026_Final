@@ -58,11 +58,28 @@ app = FastAPI(
 )
 
 # Configure CORS
+# Production: set ALLOWED_ORIGINS to a comma-separated list of trusted frontend
+# URLs, e.g. "https://ledgerlm.bosch.com" in the Azure App Service config.
+# Development: defaults to localhost origins only.
+# Note: allow_credentials=True requires explicit origins — wildcard ("*") is
+# rejected by browsers for credentialed requests and raises a ValueError in
+# modern Starlette, so we never use "*" here.
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
+if _raw_origins:
+    _allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+else:
+    # Restrict to localhost in development. Override via ALLOWED_ORIGINS in prod.
+    _allowed_origins = [
+        "http://localhost:5000",
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 

@@ -105,21 +105,37 @@ services:
       # Admin OTP
       # ================================
       NEMKO_ADMIN_OTP: ${NEMKO_ADMIN_OTP:-}
-      
+
+      # CORS: comma-separated list of trusted frontend origins.
+      # Set this in your .env to your production domain, e.g.:
+      #   ALLOWED_ORIGINS=https://ledgerlm.bosch.com
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+
       # ================================
       # GPU Configuration
       # ================================
       NVIDIA_VISIBLE_DEVICES: all
       CUDA_VISIBLE_DEVICES: "0"
-    
+
     # ================================
     # GPU Access Configuration (NVIDIA Runtime)
     # ================================
     runtime: nvidia
-    
+
     volumes:
       - app_uploads:/app/uploads
-    
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:exec,mode=1777
+      - /var/run:mode=0755
+      - /var/log/supervisor:mode=0755
+      - /var/log/nginx:mode=0755
+      - /var/cache/nginx:mode=0755
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/api/health"]
       interval: 30s
