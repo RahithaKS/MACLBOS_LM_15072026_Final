@@ -1,6 +1,27 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { getAuthUser, clearAuthUser } from "./auth";
 
+// ── SG-41: CSRF token (Synchronizer Token Pattern) ───────────────────────────
+// Stored in memory only (never localStorage). Fetched once after login via
+// fetchCsrfToken() and injected into every state-changing request automatically.
+let _csrfToken: string | null = null;
+
+export async function fetchCsrfToken(): Promise<void> {
+  try {
+    const res = await fetch('/api/auth/csrf-token', { credentials: 'include' });
+    if (res.ok) {
+      const data = await res.json();
+      _csrfToken = data.csrfToken ?? null;
+    }
+  } catch {
+    // Non-fatal — requests will fail with 403 if token cannot be obtained
+  }
+}
+
+export function clearCsrfToken(): void {
+  _csrfToken = null;
+}
+
 function handleSessionExpiry() {
   // Clear in-memory auth state and redirect to login.
   // Using location.replace so the expired page is removed from history.
@@ -36,6 +57,11 @@ export async function apiRequest<T = unknown>(
   
   if (user?.id) {
     headers['x-user-id'] = user.id;
+  }
+
+  // SG-41: Inject CSRF token on all state-changing requests
+  if (_csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase())) {
+    headers['x-csrf-token'] = _csrfToken;
   }
 
   const res = await fetch(url, {

@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { Switch, Route, useLocation } from "wouter";
-import { queryClient } from "./lib/queryClient";
+import { queryClient, fetchCsrfToken, clearCsrfToken } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
-import { getAuthUser, setAuthUser } from "@/lib/auth";
+import { getAuthUser, setAuthUser, clearAuthUser } from "@/lib/auth";
 import { TermsAndConditionsModal } from "@/components/TermsAndConditionsModal";
 import Welcome from "@/pages/Welcome";
 import VerifyOTP from "@/pages/VerifyOTP";
@@ -36,12 +36,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     // Always validate against the server — in-memory user may be stale if session expired.
     fetch('/api/auth/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(r))
-      .then(user => {
+      .then(async (user) => {
         setAuthUser(user);
+        // SG-41: Fetch/refresh the CSRF token every time auth is confirmed
+        await fetchCsrfToken();
         setAuthState('ok');
       })
       .catch(() => {
         clearAuthUser();
+        clearCsrfToken();
         setAuthState('denied');
         setLocation('/');
       });

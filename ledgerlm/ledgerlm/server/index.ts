@@ -1,4 +1,5 @@
 import 'dotenv/config'; // Load .env file before anything else
+import crypto from 'crypto';
 import express, { type Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -262,6 +263,51 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     return res.status(403).json({ error: 'Access restricted to authorized regions.' });
   }
   // Header absent → WAF not yet configured; pass through
+  next();
+});
+
+// ── SG-41: CSRF Token Protection ─────────────────────────────────────────────
+// Synchronizer Token Pattern (OWASP recommended).
+// GET /api/auth/csrf-token issues a per-session token.
+// All state-changing requests (POST/PUT/PATCH/DELETE) must echo it back
+// in the x-csrf-token header. Mismatch → 403.
+// Public auth endpoints are exempt because the user has no session yet.
+const CSRF_EXEMPT_PATHS = new Set([
+  '/api/auth/signin',
+  '/api/auth/verify-otp',
+  '/api/auth/resend-otp',
+  '/api/auth/register',
+  '/api/auth/csrf-token',       // the token-vending endpoint itself
+  '/api/invitations/validate',
+  '/api/invitations/accept',
+]);
+
+function timingSafeStrEqual(a: string, b: string): boolean {
+  try {
+    const bufA = Buffer.from(a);
+    const bufB = Buffer.from(b);
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  // Only state-changing methods need CSRF protection
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  // Exempt public routes
+  if (CSRF_EXEMPT_PATHS.has(req.path)) return next();
+  // SSO routes are all GET redirects — but exempt any POST callbacks defensively
+  if (req.path.startsWith('/api/auth/sso/')) return next();
+
+  const sessionToken = (req.session as any).csrfToken as string | undefined;
+  const requestToken = req.headers['x-csrf-token'] as string | undefined;
+
+  if (!sessionToken || !requestToken || !timingSafeStrEqual(requestToken, sessionToken)) {
+    logger.warn({ path: req.path, method: req.method, ip: req.ip }, 'SG-41: CSRF token validation failed');
+    return res.status(403).json({ error: 'CSRF token validation failed. Please refresh and try again.' });
+  }
   next();
 });
 

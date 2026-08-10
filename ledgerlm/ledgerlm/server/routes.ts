@@ -469,6 +469,18 @@ async function ensureUserAccountForDomainUser(
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+
+  // ── SG-41: CSRF token vending endpoint ───────────────────────────────────
+  // Generates a random per-session token on first call and returns it.
+  // The client fetches this once after login and sends it as x-csrf-token
+  // on every state-changing request.
+  app.get("/api/auth/csrf-token", (req, res) => {
+    if (!(req.session as any).csrfToken) {
+      (req.session as any).csrfToken = require('crypto').randomBytes(32).toString('hex');
+    }
+    res.json({ csrfToken: (req.session as any).csrfToken });
+  });
+
   // ── Microsoft SSO routes ─────────────────────────────────────────────────
 
   // Returns the auth method configured for a given domain (public)
