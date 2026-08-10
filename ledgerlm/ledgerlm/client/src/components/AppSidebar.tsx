@@ -184,7 +184,12 @@ export function AppSidebar() {
     setLocation("/");
   };
 
-  const isCreatingAnalysisRef = useRef(false);
+  // SG: isCreatingAnalysis state holds the guard for the FULL round-trip
+  // (from button click → server response). Using useState instead of useRef
+  // so the button's disabled prop re-renders correctly, and resetting only
+  // in onSuccess/onError so rapid clicks can never sneak through the window
+  // between mutate() and isPending becoming true.
+  const [isCreatingAnalysis, setIsCreatingAnalysis] = useState(false);
 
   const createChatMutation = useMutation({
     mutationFn: async () => {
@@ -195,10 +200,12 @@ export function AppSidebar() {
       return chat;
     },
     onSuccess: (chat) => {
+      setIsCreatingAnalysis(false);
       queryClient.invalidateQueries({ queryKey: ["/api/chats"] });
       setLocation(`/chat/${chat.id}?openDataSources=true`);
     },
     onError: (error) => {
+      setIsCreatingAnalysis(false);
       console.error("Chat creation failed:", error);
       toast({
         title: "Error",
@@ -262,11 +269,12 @@ export function AppSidebar() {
   });
 
   const handleNewAnalysis = async () => {
-    // Concurrency guard: prevent duplicate chat creation from rapid clicks
-    if (isCreatingAnalysisRef.current || createChatMutation.isPending) return;
-    isCreatingAnalysisRef.current = true;
+    // Guard covers the full round-trip — state resets only in onSuccess/onError
+    if (isCreatingAnalysis || createChatMutation.isPending) return;
+    setIsCreatingAnalysis(true);
+
     try {
-      // Check if the most recent chat is empty (has 0 messages)
+      // If the most recent chat has no messages, reuse it instead of creating a new one
       if (chats && chats.length > 0) {
         const latestChat = chats[0];
         try {
@@ -275,7 +283,8 @@ export function AppSidebar() {
             messageCount: number;
           }>("GET", `/api/chats/${latestChat.id}/has-messages`);
           if (!data.hasMessages) {
-            // Reuse the existing empty chat
+            // Reuse the existing empty chat — no new chat created
+            setIsCreatingAnalysis(false);
             setLocation(`/chat/${latestChat.id}?openDataSources=true`);
             return;
           }
@@ -283,10 +292,12 @@ export function AppSidebar() {
           console.error("Failed to check chat messages:", error);
         }
       }
-      // Create a new chat
+      // All existing chats have messages — create a new one
+      // isCreatingAnalysis stays true until onSuccess or onError fires
       createChatMutation.mutate();
-    } finally {
-      isCreatingAnalysisRef.current = false;
+    } catch {
+      // Unexpected error in the pre-check — release the guard
+      setIsCreatingAnalysis(false);
     }
   };
 
@@ -756,7 +767,7 @@ export function AppSidebar() {
               <TooltipTrigger asChild>
                 <Button
                   onClick={handleNewAnalysis}
-                  disabled={createChatMutation.isPending}
+                  disabled={isCreatingAnalysis || createChatMutation.isPending}
                   size="icon"
                   className="bg-primary hover:bg-primary/90 text-primary-foreground"
                   data-testid="button-new-analysis"
@@ -821,11 +832,11 @@ export function AppSidebar() {
           <>
             <Button
               onClick={handleNewAnalysis}
-              disabled={createChatMutation.isPending}
+              disabled={isCreatingAnalysis || createChatMutation.isPending}
               className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
               data-testid="button-new-analysis"
             >
-              {createChatMutation.isPending ? "Creating…" : "New Analysis"}
+              {isCreatingAnalysis || createChatMutation.isPending ? "Creating…" : "New Analysis"}
               <Plus className="w-4 h-4 mr-2" />
             </Button>
 
