@@ -28,17 +28,12 @@ import Downloads from "@/pages/Downloads";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [, setLocation] = useLocation();
-  // Start in "checking" state only when localStorage has no user (e.g. first load after SSO)
-  const [authState, setAuthState] = useState<'checking' | 'ok' | 'denied'>(
-    () => getAuthUser() ? 'ok' : 'checking'
-  );
+  // Always start in "checking" — verify against the server on every mount.
+  // This catches expired sessions even when in-memory auth state still exists.
+  const [authState, setAuthState] = useState<'checking' | 'ok' | 'denied'>('checking');
 
   useEffect(() => {
-    if (getAuthUser()) {
-      setAuthState('ok');
-      return;
-    }
-    // No localStorage user — check if a server session exists (e.g. just came back from SSO)
+    // Always validate against the server — in-memory user may be stale if session expired.
     fetch('/api/auth/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(r))
       .then(user => {
@@ -46,6 +41,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         setAuthState('ok');
       })
       .catch(() => {
+        clearAuthUser();
         setAuthState('denied');
         setLocation('/');
       });

@@ -202,6 +202,7 @@ app.use(session({
   }),
   secret: process.env.SESSION_SECRET,
   resave: false,
+  rolling: true,               // SG-39/84: reset 15-min timer on every request (inactivity timeout)
   saveUninitialized: false,
   cookie: {
     secure: process.env.NODE_ENV === 'production',

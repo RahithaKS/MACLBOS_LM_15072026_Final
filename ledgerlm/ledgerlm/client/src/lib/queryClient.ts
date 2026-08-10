@@ -1,8 +1,20 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
-import { getAuthUser } from "./auth";
+import { getAuthUser, clearAuthUser } from "./auth";
+
+function handleSessionExpiry() {
+  // Clear in-memory auth state and redirect to login.
+  // Using location.replace so the expired page is removed from history.
+  clearAuthUser();
+  if (window.location.pathname !== '/') {
+    window.location.replace('/');
+  }
+}
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
+    if (res.status === 401) {
+      handleSessionExpiry();
+    }
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);
   }
