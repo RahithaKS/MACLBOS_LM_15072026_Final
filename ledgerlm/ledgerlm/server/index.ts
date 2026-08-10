@@ -218,7 +218,11 @@ const globalApiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again in a minute.' },
-  skip: (req) => req.path.startsWith('/api/auth/verify-otp') || req.path.startsWith('/api/auth/resend-otp'),
+  // Security: OTP endpoints must NOT be exempt from rate limiting — the
+  // hardcoded skip was the only thing separating the 6-digit space from
+  // a brute-force attack. The OTP service's own MAX_OTP_ATTEMPTS=5 per-token
+  // counter and the global 100 req/min limiter provide the correct controls.
+  // (SAST Finding 3)
 });
 
 const chatApiLimiter = rateLimit({

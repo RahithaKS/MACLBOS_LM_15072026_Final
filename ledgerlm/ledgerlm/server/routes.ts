@@ -754,17 +754,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // If user has a hardcoded OTP (admin bypass), skip email entirely —
-      // SMTP failures must never block these users from signing in.
-      const hardcodedOtpCheck = await getHardcodedOtpForUser(user.username);
-      if (hardcodedOtpCheck) {
-        return res.json({
-          success: true,
-          requiresOtp: true,
-          message: "Please enter your verification code",
-        });
-      }
-
       await otpService.createAndSendOtp(
         user.id,
         user.username,
@@ -784,57 +773,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Legacy list of admin emails that use the hardcoded OTP from environment variable
-  // NOTE: This is kept for backward compatibility. New users should be added via Super Admin domain management.
-  const HARDCODED_OTP_ADMINS = [
-    "customer@ledgerlm.ai",
-    "boschmatasma@bosch.com",
-  ];
+  // Security (SAST Finding 10): removed HARDCODED_OTP_ADMINS list, getHardcodedOtpForUser,
+  // and the per-user hardcoded OTP fallback. Static OTP backdoors (domain.defaultOtp,
+  // NEMKO_ADMIN_OTP, hardcoded email list) are a standing privilege-escalation path that
+  // Bosch security auditors will flag regardless of whether OTP auth is actively used.
+  // The verify-otp endpoint now accepts only the time-limited, bcrypt-hashed OTP that
+  // was emailed to the user. Rate limiting is provided by the global API limiter
+  // (100 req/min) plus MAX_OTP_ATTEMPTS=5 enforced inside otpService.verifyOtp().
 
-  // Helper function to check if user has hardcoded OTP (from domain_users table or legacy list)
-  async function getHardcodedOtpForUser(email: string): Promise<string | null> {
-    const emailLower = email.toLowerCase();
-
-    // First, check domain_users table for hardcoded OTP
-    const domainUser = await storage.getDomainUserByEmail(emailLower);
-    if (domainUser?.hardcodedOtp) {
-      return domainUser.hardcodedOtp;
-    }
-
-    // If domain user exists but no hardcoded OTP, check domain's default OTP
-    if (domainUser) {
-      const domain = await storage.getDomain(domainUser.domainId);
-      if (domain?.defaultOtp) {
-        return domain.defaultOtp;
-      }
-    }
-
-    // Fallback: Check legacy hardcoded admin list
-    if (
-      HARDCODED_OTP_ADMINS.includes(emailLower) &&
-      process.env.NEMKO_ADMIN_OTP
-    ) {
-      return process.env.NEMKO_ADMIN_OTP;
-    }
-
-    return null;
-  }
-
-  // Rate limiter specifically for hardcoded OTP (security measure)
-  const hardcodedOtpLimiter = rateLimit({
-    windowMs: 5 * 60 * 1000, // 5 minutes
-    max: 5, // limit each IP to 5 requests per windowMs for hardcoded OTP
-    message: "Too many verification attempts. Please wait before trying again.",
-    skip: async (req) => {
-      // Only apply rate limiting to users with hardcoded OTP
-      const { email } = req.body || {};
-      if (!email) return true;
-      const hardcodedOtp = await getHardcodedOtpForUser(email);
-      return !hardcodedOtp;
-    },
-  });
-
-  app.post("/api/auth/verify-otp", hardcodedOtpLimiter, async (req, res) => {
+  app.post("/api/auth/verify-otp", async (req, res) => {
     try {
       const { email, otpCode, rememberDevice, deviceFingerprint } =
         verifyOtpSchema.parse(req.body);
@@ -845,21 +792,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "User not found" });
       }
 
-      // Try BOTH email OTP and hardcoded OTP (email OTP has priority)
-      let verification: { success: boolean; error?: string };
-      const hardcodedOtp = await getHardcodedOtpForUser(email);
-
-      // First, try email OTP verification (priority)
-      verification = await otpService.verifyOtp(user.id, otpCode, "login");
-
-      // If email OTP fails and hardcoded OTP exists, try hardcoded OTP as fallback
-      if (!verification.success && hardcodedOtp) {
-        if (otpCode === hardcodedOtp) {
-          console.warn(`⚠️  SECURITY: Hardcoded OTP used for ${email}`);
-          verification = { success: true };
-        }
-        // If hardcoded also fails, keep the original email OTP error
-      }
+      const verification = await otpService.verifyOtp(user.id, otpCode, "login");
 
       if (!verification.success) {
         return res.status(401).json({ error: verification.error });
@@ -9831,8 +9764,12 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
     }
   });
 
-  // PPT file download route
-  app.get("/api/download/ppt/:filename", (req, res) => {
+  // PPT file download route — requireAuth ensures only logged-in users can
+  // retrieve exported decks. path.basename already blocks path traversal and
+  // the .pptx check limits type, but without auth any unauthenticated party
+  // who guesses a filename could retrieve another tenant's financial deck.
+  // (SAST Finding 5)
+  app.get("/api/download/ppt/:filename", requireAuth, (req, res) => {
     const filename = path.basename(req.params.filename);
     if (!filename.endsWith('.pptx')) {
       return res.status(400).json({ error: 'Invalid file type' });

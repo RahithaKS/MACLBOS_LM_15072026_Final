@@ -12462,15 +12462,27 @@ Return a JSON object with:
     def _embed_params_in_where(self, where_parts: List[str],
                                params: List) -> str:
         """Embed parameter values into a WHERE clause, replacing %s placeholders with actual values.
-        Used for multi-CTE queries where the same WHERE clause is reused multiple times."""
+        Used for multi-CTE queries where the same WHERE clause is reused multiple times.
+
+        Security: uses psycopg2.extensions.adapt() for all string values so that
+        single-quotes and other special characters are properly escaped before
+        embedding into SQL. This prevents SQL injection via entity/sector/category
+        names extracted from user natural-language queries. (CWE-89 / SAST Finding 1)
+        """
+        from psycopg2.extensions import adapt as _pg_adapt
         clause = " AND ".join(where_parts)
         for p in params:
             if '%s' not in clause:
                 break
             if isinstance(p, str):
-                clause = clause.replace('%s', f"'{p}'", 1)
+                # adapt() returns a QuotedString object whose getquoted() method
+                # produces a properly escaped, single-quoted bytes literal,
+                # e.g.  "O'Brien" → b"'O''Brien'"
+                safe = _pg_adapt(p).getquoted().decode('utf-8')
             else:
-                clause = clause.replace('%s', str(p), 1)
+                # Numeric/bool values cannot inject SQL — str() is safe here
+                safe = str(p)
+            clause = clause.replace('%s', safe, 1)
         return clause
 
     def _strip_sector_from_where(self, where_parts: List[str],

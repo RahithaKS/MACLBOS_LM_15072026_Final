@@ -3,8 +3,11 @@ import { storage } from '../storage';
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   try {
-    const userId = req.headers['x-user-id'] as string;
-    
+    // Security: read userId from the server-controlled session, NOT from a
+    // client-supplied header. Trusting x-user-id would allow any caller to
+    // impersonate an admin by setting that header. (CWE-290 / SAST Finding 4)
+    const userId = req.session?.userId;
+
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized - please sign in" });
     }
@@ -44,7 +47,9 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 
 export async function requireCompanyMembership(req: Request, res: Response, next: NextFunction) {
   try {
-    const userId = req.headers['x-user-id'] as string;
+    // Security: read userId from the server-controlled session, NOT from a
+    // client-supplied header. Same fix as requireAdmin above. (CWE-290)
+    const userId = req.session?.userId;
     const companyId = req.params.companyId || req.body.companyId;
     
     if (!userId) {

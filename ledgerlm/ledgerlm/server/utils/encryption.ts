@@ -6,8 +6,27 @@ const TAG_LENGTH = 16; // AES-GCM auth tag: 16 bytes (128 bits) — explicitly e
 const SALT_LENGTH = 32;
 
 function getEncryptionKey(): Buffer {
-  const key = process.env.ENCRYPTION_KEY || process.env.SESSION_SECRET || 'default-encryption-key-change-in-production';
-  return crypto.scryptSync(key, 'salt', 32);
+  // Security: never fall back to a hardcoded literal — that would make all
+  // stored connector credentials effectively plaintext for anyone who reads the
+  // source. Fail closed if no real secret is configured. (SAST Finding 7)
+  if (process.env.ENCRYPTION_KEY) {
+    return crypto.scryptSync(process.env.ENCRYPTION_KEY, 'salt', 32);
+  }
+  if (process.env.SESSION_SECRET) {
+    // SESSION_SECRET is an acceptable fallback in development, but a dedicated
+    // ENCRYPTION_KEY must be set in production so rotating session secrets
+    // does not break decryption of stored credentials.
+    console.warn(
+      '[SECURITY] ENCRYPTION_KEY is not set — falling back to SESSION_SECRET. ' +
+      'Set a dedicated ENCRYPTION_KEY (32+ random chars) in your environment config for production.'
+    );
+    return crypto.scryptSync(process.env.SESSION_SECRET, 'salt', 32);
+  }
+  throw new Error(
+    '[SECURITY] Neither ENCRYPTION_KEY nor SESSION_SECRET is configured. ' +
+    'Connector credential encryption cannot proceed. ' +
+    'Add ENCRYPTION_KEY to your environment variables before starting the server.'
+  );
 }
 
 export function encryptValue(value: string): string {

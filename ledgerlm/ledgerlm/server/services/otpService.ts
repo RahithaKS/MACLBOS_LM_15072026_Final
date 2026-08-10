@@ -10,9 +10,12 @@ const DEVICE_TRUST_DAYS = 10;
 
 export class OtpService {
   generateOtpCode(): string {
-    const min = Math.pow(10, OTP_LENGTH - 1);
-    const max = Math.pow(10, OTP_LENGTH) - 1;
-    return Math.floor(min + Math.random() * (max - min + 1)).toString();
+    // Security: crypto.randomInt() is cryptographically secure (CSPRNG).
+    // Math.random() is not — its output is predictable from observed samples.
+    // (CWE-338 / SAST Finding 2)
+    const min = Math.pow(10, OTP_LENGTH - 1);      // 100000
+    const max = Math.pow(10, OTP_LENGTH);           // 1000000 (exclusive upper bound)
+    return crypto.randomInt(min, max).toString();
   }
 
   async createAndSendOtp(userId: string, email: string, userName: string, context: 'login' | 'password_reset', domainConfig?: DomainEmailConfig | null): Promise<void> {
