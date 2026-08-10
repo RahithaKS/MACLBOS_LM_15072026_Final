@@ -4,42 +4,59 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Chat } from "@shared/schema";
 
+// Session-level workspace chat key — stored in React Query cache so it is
+// automatically wiped by queryClient.clear() on logout.
+const WS_CHAT_KEY = ["lm_ws_chat"];
+
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const redirected = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  // Fix 3: retryCount in the effect deps forces re-run when Retry is clicked,
+  // even if `chats` data hasn't changed (304 / same cache snapshot).
+  const [retryCount, setRetryCount] = useState(0);
 
   const { data: chats, isLoading: chatsLoading } = useQuery<Chat[]>({
     queryKey: ["/api/chats"],
   });
 
   useEffect(() => {
-    // Wait until the chats query has settled
     if (chatsLoading) return;
-    // Guard against running twice (StrictMode double-invoke / fast navigation)
     if (redirected.current) return;
 
     const doRedirect = async () => {
-      // Re-check inside the timeout in case a concurrent effect already ran
       if (redirected.current) return;
       redirected.current = true;
 
       try {
+        // ── Fix 4: Reuse the session workspace chat if we already have one ──────
+        // queryClient.clear() on logout wipes this automatically.
+        const sessionChatId = queryClient.getQueryData<string>(WS_CHAT_KEY);
+        if (sessionChatId) {
+          try {
+            // Verify it still exists (may have been deleted)
+            await apiRequest("GET", `/api/chats/${sessionChatId}`);
+            setLocation(`/chat/${sessionChatId}`);
+            return;
+          } catch {
+            // Gone — clear the stale pointer and fall through to normal flow
+            queryClient.removeQueries({ queryKey: WS_CHAT_KEY });
+          }
+        }
+
         // ── Case 1: No chats at all → create a fresh blank one ──────────────
         if (!chats || chats.length === 0) {
           const chat = await apiRequest<Chat>("POST", "/api/chats", {
             title: "New Analysis",
           });
           queryClient.invalidateQueries({ queryKey: ["/api/chats"] });
+          queryClient.setQueryData<string>(WS_CHAT_KEY, chat.id);
           setLocation(`/chat/${chat.id}`);
           return;
         }
 
-        // ── Case 2: Check if the most recent chat is still blank ─────────────
-        // chats are ordered by createdAt DESC so index 0 is the newest.
-        // If the has-messages check fails (e.g. chat is still being committed
-        // by a concurrent sidebar mutation), fall through conservatively and
-        // reuse the chat — avoids the workspace error on rapid "New Analysis" clicks.
+        // ── Case 2: Most recent chat is still blank → reuse it ──────────────
+        // chats ordered by createdAt DESC so index 0 is the newest.
         const mostRecent = chats[0];
         let hasMessages = false;
         try {
@@ -49,37 +66,65 @@ export default function Dashboard() {
           }>("GET", `/api/chats/${mostRecent.id}/has-messages`);
           hasMessages = result.hasMessages;
         } catch {
-          // Check failed — reuse the most recent chat conservatively
+          // Check failed (network blip, stale ID) — reuse conservatively
+          queryClient.setQueryData<string>(WS_CHAT_KEY, mostRecent.id);
           setLocation(`/chat/${mostRecent.id}`);
           return;
         }
 
         if (!hasMessages) {
-          // Reuse it — no new sidebar entry created
+          queryClient.setQueryData<string>(WS_CHAT_KEY, mostRecent.id);
           setLocation(`/chat/${mostRecent.id}`);
         } else {
-          // ── Case 3: Most recent chat has messages → create a new blank one ──
+          // ── Case 3: Most recent has messages → create a new blank one ────────
           const chat = await apiRequest<Chat>("POST", "/api/chats", {
             title: "New Analysis",
           });
           queryClient.invalidateQueries({ queryKey: ["/api/chats"] });
+          queryClient.setQueryData<string>(WS_CHAT_KEY, chat.id);
           setLocation(`/chat/${chat.id}`);
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.error("[Dashboard] Redirect failed:", err);
-        // Reset guard so the retry button can try again
+        // Reset guard so the retry path can run again
         redirected.current = false;
+
+        // ── Fix 2: Smarter error handling — don't show a fatal screen for
+        // transient failures. Parse the status code out of the error message
+        // (apiRequest throws `new Error("STATUS: text")`).
+        const status =
+          err instanceof Error
+            ? parseInt(err.message.split(":")[0], 10)
+            : NaN;
+
+        if (status === 401 || status === 403) {
+          // Session expired or unauthorised — go back to sign-in
+          setLocation("/");
+          return;
+        }
+
+        if (status === 429) {
+          // Rate-limited — show a brief message then auto-retry
+          setError("Too many requests — retrying in a moment…");
+          setTimeout(() => {
+            setError(null);
+            redirected.current = false;
+            setRetryCount((c) => c + 1);
+          }, 2500);
+          return;
+        }
+
+        // Genuine failure — show error + working Retry button
         setError("Something went wrong loading your workspace. Please try again.");
       }
     };
 
-    // 300 ms settle debounce: lets any in-flight sidebar chat-creation mutations
-    // finish committing before Dashboard decides which chat to open.
-    // The cleanup cancels the timer if chats data updates again within that window,
-    // so the redirect always uses the freshest chats snapshot.
+    // 300 ms settle debounce: lets any in-flight sidebar chat-creation
+    // mutations finish before Dashboard decides which chat to open.
     const timer = setTimeout(doRedirect, 300);
     return () => clearTimeout(timer);
-  }, [chats, chatsLoading, setLocation]);
+    // Fix 3: retryCount in deps so the effect re-fires when Retry is clicked
+  }, [chats, chatsLoading, setLocation, retryCount]);
 
   // ── Error state ────────────────────────────────────────────────────────────
   if (error) {
@@ -93,6 +138,9 @@ export default function Dashboard() {
               setError(null);
               redirected.current = false;
               queryClient.invalidateQueries({ queryKey: ["/api/chats"] });
+              // Fix 3: increment retryCount to force the useEffect to re-run
+              // even if the chats query returns the same cached snapshot (304)
+              setRetryCount((c) => c + 1);
             }}
           >
             Retry
@@ -102,7 +150,7 @@ export default function Dashboard() {
     );
   }
 
-  // ── Loading state — visible for ~100–200 ms while the check runs ──────────
+  // ── Loading state ──────────────────────────────────────────────────────────
   return (
     <div className="h-full flex items-center justify-center bg-primary/10">
       <div className="flex flex-col items-center gap-3">
