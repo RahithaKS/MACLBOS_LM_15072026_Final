@@ -119,7 +119,7 @@ export function ConnectDriveDialog({ open, onOpenChange }: ConnectDriveDialogPro
           <Alert>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription className="text-sm">
-              Make sure the folder or file is set to <strong>'Anyone with the link can view'</strong>
+              Make sure the folder or file is set to <strong>'Anyone with the link can view'</strong>. Maximum file size: <strong>100 MB</strong>.
             </AlertDescription>
           </Alert>
 

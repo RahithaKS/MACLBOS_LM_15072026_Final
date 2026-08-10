@@ -1768,7 +1768,7 @@ export default function ChatDetail() {
                     data-testid="button-attach-file"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploadingFiles.length > 0}
-                    title="Attach File"
+                    title="Attach File (max 50 MB)"
                   >
                     <Paperclip className="w-4 h-4 text-muted-foreground" />
                   </Button>
@@ -1779,7 +1779,7 @@ export default function ChatDetail() {
                     className="h-8 w-8 flex-shrink-0"
                     data-testid="button-attach-image"
                     onClick={() => fileInputRef.current?.click()}
-                    title="Attach Image"
+                    title="Attach Image (max 50 MB)"
                   >
                     <Image className="w-4 h-4 text-muted-foreground" />
                   </Button>
