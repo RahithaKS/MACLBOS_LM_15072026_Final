@@ -87,24 +87,32 @@ async def process_document_background(document_id: str, file_path: str, ai_confi
         
         # Convert relative path to absolute path
         # Python backend runs from python_backend/, but uploads are in project root
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+
         if not os.path.isabs(file_path):
-            # Get project root (two levels up from python_backend/api/routes/)
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
-            
-            # If file_path doesn't start with 'uploads/', prepend it
             if not file_path.startswith('uploads/'):
                 file_path = os.path.join('uploads', file_path)
-            
             absolute_path = os.path.join(project_root, file_path)
         else:
             absolute_path = file_path
-        
+
+        # Security: normalise the path and ensure it stays within the
+        # allowed base directories (uploads/ or attached_assets/) to
+        # prevent path traversal attacks.
+        absolute_path = os.path.realpath(absolute_path)
+        uploads_base    = os.path.realpath(os.path.join(project_root, 'uploads'))
+        attached_base   = os.path.realpath(os.path.join(project_root, 'attached_assets'))
+        if not (absolute_path.startswith(uploads_base + os.sep) or
+                absolute_path.startswith(attached_base + os.sep)):
+            logger.warning(f"[SECURITY] Path traversal attempt blocked in background task: {file_path}")
+            raise PermissionError(f"Access denied: path outside allowed directories")
+
         logger.info(f"Using absolute path: {absolute_path}")
-        
+
         # Verify file exists
         if not os.path.exists(absolute_path):
             raise FileNotFoundError(f"File not found: {absolute_path}")
-        
+
         # Read file content and get filename
         with open(absolute_path, 'rb') as f:
             file_content = f.read()

@@ -2,7 +2,7 @@ import crypto from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
-const TAG_LENGTH = 16;
+const TAG_LENGTH = 16; // AES-GCM auth tag: 16 bytes (128 bits) — explicitly enforced
 const SALT_LENGTH = 32;
 
 function getEncryptionKey(): Buffer {
@@ -15,7 +15,8 @@ export function encryptValue(value: string): string {
   
   const key = getEncryptionKey();
   const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  // SG: authTagLength explicitly set to 128 bits (16 bytes) per AES-GCM spec
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv, { authTagLength: TAG_LENGTH });
   
   let encrypted = cipher.update(value, 'utf8', 'hex');
   encrypted += cipher.final('hex');
@@ -36,8 +37,14 @@ export function decryptValue(encryptedValue: string): string {
     
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(tagHex, 'hex');
-    
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+
+    // Validate tag length before use — rejects truncated/forged tags
+    if (authTag.length !== TAG_LENGTH) {
+      throw new Error('Invalid authentication tag length');
+    }
+
+    // SG: authTagLength explicitly set to 128 bits (16 bytes) per AES-GCM spec
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, { authTagLength: TAG_LENGTH });
     decipher.setAuthTag(authTag);
     
     let decrypted = decipher.update(encrypted, 'hex', 'utf8');

@@ -90,9 +90,9 @@ const dbCredentials = (() => {
       database: requireEnv("DB_NAME"),
       password: fetchEntraTokenSync(),
       // Private endpoint PostgreSQL: cert may not be in the container trust store.
-      // rejectUnauthorized:false keeps the connection encrypted while skipping
-      // CA chain validation — acceptable inside a private VNet.
-      ssl: { rejectUnauthorized: false },
+      // Set DB_TLS_REJECT_UNAUTHORIZED=false in Azure private VNet environments to
+      // keep the connection encrypted while bypassing CA chain validation.
+      ssl: { rejectUnauthorized: process.env.DB_TLS_REJECT_UNAUTHORIZED !== 'false' },
     };
   }
 
@@ -102,7 +102,8 @@ const dbCredentials = (() => {
       user:     requireEnv("DB_USER"),
       database: requireEnv("DB_NAME"),
       password: requireEnv("DB_PASSWORD"),
-      ssl: { rejectUnauthorized: false },
+      // Set DB_TLS_REJECT_UNAUTHORIZED=false in Azure private VNet environments
+      ssl: { rejectUnauthorized: process.env.DB_TLS_REJECT_UNAUTHORIZED !== 'false' },
     };
   }
 

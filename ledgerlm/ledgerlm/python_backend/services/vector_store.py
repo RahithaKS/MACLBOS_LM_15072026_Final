@@ -399,12 +399,15 @@ def get_embeddings(texts, ai_config=None):
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    response = requests.post(
+                    # OLLAMA_VERIFY_TLS=false must be set explicitly when the Ollama
+                # endpoint uses a self-signed certificate (e.g. internal dev proxy).
+                _verify_tls = os.environ.get("OLLAMA_VERIFY_TLS", "true").lower() != "false"
+                response = requests.post(
                         f"{base_url}/embeddings",
                         json={"model": settings.OPENAI_EMBEDDING_MODEL, "text": text},
                         headers={"x-api-key": settings.OLLAMA_API_KEY},
                         timeout=60,
-                        verify=False
+                        verify=_verify_tls,
                     )
                     response.raise_for_status()
                     all_embeddings.append(response.json()["embedding"])

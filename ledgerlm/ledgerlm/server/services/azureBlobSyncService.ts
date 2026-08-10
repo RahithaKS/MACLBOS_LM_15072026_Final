@@ -120,11 +120,18 @@ export async function syncAzureBlobConnector(
         continue;
       }
 
-      // Write to the same uploads directory used by manual uploads
-      const ext = path.extname(blob.name);
-      const baseName = path.basename(blob.name, ext);
+      // Write to the same uploads directory used by manual uploads.
+      // Security: use path.basename on the blob name to strip any directory
+      // components supplied by the external Azure Blob API (path traversal guard).
+      const blobBaseName = path.basename(blob.name);
+      const ext = path.extname(blobBaseName);
+      const baseName = path.basename(blobBaseName, ext);
       const uniqueFileName = `${baseName}_${Date.now()}${ext}`;
       const filePath = path.join(uploadsDir, uniqueFileName);
+      // Guard: resolved path must stay within uploadsDir
+      if (!path.resolve(filePath).startsWith(path.resolve(uploadsDir) + path.sep)) {
+        throw new Error(`Path traversal detected in blob name: ${blob.name}`);
+      }
       await fs.writeFile(filePath, downloadResult.buffer);
 
       // Create a versioned document record (same as manual upload)

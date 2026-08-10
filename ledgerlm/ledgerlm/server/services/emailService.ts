@@ -47,7 +47,9 @@ class EmailService {
           pass: smtpPass,
         },
         tls: {
-          rejectUnauthorized: false,
+          // Set SMTP_TLS_REJECT_UNAUTHORIZED=false only in environments where the
+          // SMTP server uses a self-signed or private CA certificate.
+          rejectUnauthorized: process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false',
         },
       });
 

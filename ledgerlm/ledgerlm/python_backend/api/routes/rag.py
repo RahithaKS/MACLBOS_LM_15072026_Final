@@ -88,7 +88,14 @@ def get_enterprise_chunks(query_embedding, request: RAGRequest, cursor, top_k: i
         return enterprise_chunks  # Return empty list
     
     logger.info(f"🔒 Cube filtering ENABLED - querying only from {len(cube_ids)} accessible cubes via {embedding_col}")
-    dict_cursor.execute(f"""
+    # Security: validate embedding_col against allowlist before interpolating
+    # into SQL — prevents SQL injection if the value were ever externally influenced.
+    _VALID_EMBEDDING_COLS = frozenset({"embedding", "embedding_3072"})
+    if embedding_col not in _VALID_EMBEDDING_COLS:
+        raise ValueError(f"Invalid embedding column: {embedding_col!r}")
+
+    from psycopg2 import sql as pgsql
+    dict_cursor.execute(pgsql.SQL("""
         SELECT 
             ee.chunk_id,
             ec.chunk_text,
@@ -98,18 +105,19 @@ def get_enterprise_chunks(query_embedding, request: RAGRequest, cursor, top_k: i
             ed.id as document_id,
             ed.company_id,
             ed.cube_id,
-            ee.{embedding_col} <=> %s::vector as distance
+            ee.{col} <=> %s::vector as distance
         FROM enterprise_document_embeddings ee
         JOIN enterprise_document_chunks ec ON ee.chunk_id = ec.id
         JOIN enterprise_documents ed ON ec.document_id = ed.id
         LEFT JOIN enterprise_document_processing edp ON ed.id = edp.document_id
         WHERE ed.company_id = ANY(%s) 
           AND ed.cube_id = ANY(%s)
-          AND ee.{embedding_col} IS NOT NULL
+          AND ee.{col} IS NOT NULL
           AND (edp.status = 'completed' OR edp.status IS NULL)
-        ORDER BY ee.{embedding_col} <=> %s::vector
+        ORDER BY ee.{col} <=> %s::vector
         LIMIT %s
-    """, (vector_str, company_ids, cube_ids, vector_str, top_k))
+    """).format(col=pgsql.Identifier(embedding_col)),
+    (vector_str, company_ids, cube_ids, vector_str, top_k))
     
     for row in dict_cursor.fetchall():
         # RealDictCursor automatically deserializes JSON columns
@@ -154,6 +162,9 @@ async def rag_analyze(request: RAGRequest):
         def get_ai_completion(prompt: str, system_prompt: str = None):
             base_url = settings.OLLAMA_BASE_URL.replace("/v1", "").rstrip("/")
             full_prompt = f"system: {system_prompt}\nuser: {prompt}\nassistant:" if system_prompt else prompt
+            # OLLAMA_VERIFY_TLS=false must be set explicitly when the Ollama
+            # endpoint uses a self-signed certificate (e.g. internal dev proxy).
+            _verify_tls = os.environ.get("OLLAMA_VERIFY_TLS", "true").lower() != "false"
             resp = requests.post(
                 f"{base_url}/generate",
                 json={
@@ -164,7 +175,7 @@ async def rag_analyze(request: RAGRequest):
                 headers={
                     "x-api-key": settings.OLLAMA_API_KEY
                 },
-                verify=False
+                verify=_verify_tls,
             )
             resp.raise_for_status()
             return resp.json().get("response", "")

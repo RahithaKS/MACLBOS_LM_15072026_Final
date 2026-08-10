@@ -200,11 +200,18 @@ export class DomainAnaplanService {
 
       await fs.mkdir(destinationDir, { recursive: true });
 
-      const fileNameWithExtension = fileName.toLowerCase().endsWith('.xlsx') || fileName.toLowerCase().endsWith('.xls')
-        ? fileName
-        : `${fileName}.xlsx`;
+      // Security: strip any directory components from the API-supplied filename
+      // before joining with the local destination to prevent path traversal.
+      const safeBaseName = path.basename(fileName);
+      const fileNameWithExtension = safeBaseName.toLowerCase().endsWith('.xlsx') || safeBaseName.toLowerCase().endsWith('.xls')
+        ? safeBaseName
+        : `${safeBaseName}.xlsx`;
       
       const filePath = path.join(destinationDir, fileNameWithExtension);
+      // Guard: resolved path must stay within destinationDir
+      if (!filePath.startsWith(path.resolve(destinationDir) + path.sep)) {
+        throw new Error(`Path traversal detected in filename: ${fileName}`);
+      }
       await fs.writeFile(filePath, response.data);
 
       const fileSize = response.data.length;

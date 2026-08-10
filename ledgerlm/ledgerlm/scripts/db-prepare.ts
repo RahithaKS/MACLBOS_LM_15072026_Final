@@ -56,7 +56,8 @@ function getClientConfig(): pkg.ClientConfig {
       user:     process.env.DB_USER!,
       database: process.env.DB_NAME!,
       password: fetchEntraTokenSync(),
-      ssl:      { rejectUnauthorized: false },
+      // Set DB_TLS_REJECT_UNAUTHORIZED=false in Azure private VNet environments
+      ssl:      { rejectUnauthorized: process.env.DB_TLS_REJECT_UNAUTHORIZED !== 'false' },
       port:     5432,
     };
   }
@@ -67,7 +68,8 @@ function getClientConfig(): pkg.ClientConfig {
       user:     process.env.DB_USER!,
       database: process.env.DB_NAME!,
       password: process.env.DB_PASSWORD!,
-      ssl:      { rejectUnauthorized: false },
+      // Set DB_TLS_REJECT_UNAUTHORIZED=false in Azure private VNet environments
+      ssl:      { rejectUnauthorized: process.env.DB_TLS_REJECT_UNAUTHORIZED !== 'false' },
       port:     5432,
     };
   }

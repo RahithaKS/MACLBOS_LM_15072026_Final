@@ -406,12 +406,22 @@ def store_enterprise_chunks_and_embeddings(document_id: str, company_id: str, cu
                     model_name
                 ))
             
+            # Security: validate embedding_col against allowlist before interpolating
+            # into SQL — prevents SQL injection if value were ever externally influenced.
+            _VALID_EMBEDDING_COLS = frozenset({"embedding", "embedding_3072"})
+            if embedding_col not in _VALID_EMBEDDING_COLS:
+                raise ValueError(f"Invalid embedding column: {embedding_col!r}")
+
+            from psycopg2 import sql as pgsql
             args_str = ','.join(cur.mogrify("(%s,%s,%s,%s::vector,%s)", vals).decode('utf-8') for vals in embedding_values)
-            query = f"""
+            query = pgsql.SQL("""
                 INSERT INTO enterprise_document_embeddings 
-                (chunk_id, company_id, cube_id, {embedding_col}, model_name)
-                VALUES {args_str}
-            """
+                (chunk_id, company_id, cube_id, {col}, model_name)
+                VALUES {rows}
+            """).format(
+                col=pgsql.Identifier(embedding_col),
+                rows=pgsql.SQL(args_str),
+            )
             cur.execute(query)
             
             logger.info(f"Inserted embedding batch {batch_start}-{batch_end}")

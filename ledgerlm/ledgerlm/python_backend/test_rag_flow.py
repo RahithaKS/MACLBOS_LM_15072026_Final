@@ -45,7 +45,10 @@ def test_database_tables():
     
     for table, desc in tables:
         try:
-            cur.execute(f"SELECT COUNT(*) FROM {table}")
+            # Security: use psycopg2.sql.Identifier so the table name is properly
+        # quoted and cannot be manipulated (Trivy SQL-injection guard).
+        from psycopg2 import sql as pgsql
+        cur.execute(pgsql.SQL("SELECT COUNT(*) FROM {}").format(pgsql.Identifier(table)))
             count = cur.fetchone()['count']
             print(f"{desc:<35} {count:>10}")
         except Exception as e:

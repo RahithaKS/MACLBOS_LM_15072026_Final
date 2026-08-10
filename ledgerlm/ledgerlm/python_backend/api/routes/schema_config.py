@@ -509,12 +509,15 @@ async def sync_columns_from_data(cube_id: str):
             # Get sample values
             sample_values = []
             if row_count > 0:
-                cur.execute(f"""
-                    SELECT DISTINCT {col_name}::text as val 
+                # Security: use psycopg2.sql.Identifier for the column name so it
+                # is properly quoted and cannot be used for SQL injection.
+                from psycopg2 import sql as pgsql
+                cur.execute(pgsql.SQL("""
+                    SELECT DISTINCT {col}::text as val 
                     FROM cube_fact_data 
-                    WHERE cube_id = %s AND {col_name} IS NOT NULL
+                    WHERE cube_id = %s AND {col} IS NOT NULL
                     LIMIT 5
-                """, (cube_id,))
+                """).format(col=pgsql.Identifier(col_name)), (cube_id,))
                 sample_values = [row['val'] for row in cur.fetchall() if row['val']]
             
             # Detect column type

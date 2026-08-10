@@ -155,6 +155,10 @@ if (!process.env.SESSION_SECRET) {
 const _sessionAuthMode = (process.env.DB_AUTH_MODE || '').toLowerCase();
 let sessionPool: Pool;
 
+// DB_TLS_REJECT_UNAUTHORIZED=false must be set explicitly in Azure private VNet
+// environments where the PostgreSQL cert is signed by a private CA.
+const _dbTlsRejectUnauthorized = process.env.DB_TLS_REJECT_UNAUTHORIZED !== 'false';
+
 if (_sessionAuthMode === 'entra' || _sessionAuthMode === 'hybrid') {
   sessionPool = new Pool({
     host: process.env.DB_HOST,
@@ -162,7 +166,7 @@ if (_sessionAuthMode === 'entra' || _sessionAuthMode === 'hybrid') {
     database: process.env.DB_NAME,
     port: 5432,
     password: () => getEntraToken(),
-    ssl: { rejectUnauthorized: false },
+    ssl: { rejectUnauthorized: _dbTlsRejectUnauthorized },
   });
 } else if (_sessionAuthMode === 'postgres-azure') {
   sessionPool = new Pool({
@@ -171,7 +175,7 @@ if (_sessionAuthMode === 'entra' || _sessionAuthMode === 'hybrid') {
     database: process.env.DB_NAME,
     password: process.env.DB_PASSWORD,
     port: 5432,
-    ssl: { rejectUnauthorized: false },
+    ssl: { rejectUnauthorized: _dbTlsRejectUnauthorized },
   });
 } else {
   // Default: Neon / local (unchanged)
@@ -186,7 +190,7 @@ if (_sessionAuthMode === 'entra' || _sessionAuthMode === 'hybrid') {
     dbUrl.includes('127.0.0.1');
   sessionPool = new Pool({
     connectionString: dbUrl,
-    ssl: isLocalDb ? false : { rejectUnauthorized: false },
+    ssl: isLocalDb ? false : { rejectUnauthorized: _dbTlsRejectUnauthorized },
   });
 }
 

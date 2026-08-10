@@ -38,11 +38,14 @@ def get_ai_completion(prompt: str, ai_config: dict = None) -> str:
         return response.json()["choices"][0]["message"]["content"].strip()
     else:
         base_url = settings.OLLAMA_BASE_URL.replace("/v1", "").rstrip("/")
+        # OLLAMA_VERIFY_TLS=false must be set explicitly when the Ollama
+        # endpoint uses a self-signed certificate (e.g. internal dev proxy).
+        _verify_tls = os.environ.get("OLLAMA_VERIFY_TLS", "true").lower() != "false"
         response = requests.post(
             f"{base_url}/generate",
             json={"model": settings.OLLAMA_CHAT_MODEL, "prompt": prompt, "stream": False},
             headers={"x-api-key": settings.OLLAMA_API_KEY},
-            verify=False,
+            verify=_verify_tls,
         )
         response.raise_for_status()
         return response.json().get("response", "")

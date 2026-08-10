@@ -116,7 +116,11 @@ def store_vector_embeddings(chunk_ids: List[str], embeddings: List[List[float]],
     When use_azure=True, stores 3072-dim vectors in embedding_3072 column.
     Otherwise stores 1024-dim vectors in the standard embedding column.
     """
+    # Security: validate col against allowlist before using in SQL
+    _VALID_EMBEDDING_COLS = frozenset({"embedding", "embedding_3072"})
     col = "embedding_3072" if use_azure else "embedding"
+    if col not in _VALID_EMBEDDING_COLS:
+        raise ValueError(f"Invalid embedding column: {col!r}")
     if model_name is None:
         model_name = "text-embedding-3-large" if use_azure else "mxbai-embed-large"
 
@@ -146,12 +150,14 @@ def store_vector_embeddings(chunk_ids: List[str], embeddings: List[List[float]],
                 logger.error(f"Failed to convert embedding at index {idx} to string. Type: {type(embedding)}, Value: {str(embedding)[:100]}")
                 raise TypeError(f"Cannot iterate over embedding at index {idx}: {te}")
             
-            cur.execute(f"""
+            from psycopg2 import sql as pgsql
+            cur.execute(pgsql.SQL("""
                 INSERT INTO document_embeddings 
                 (chunk_id, {col}, model_name)
                 VALUES (%s, %s::vector, %s)
                 RETURNING id
-            """, (chunk_id, vector_str, model_name))
+            """).format(col=pgsql.Identifier(col)),
+            (chunk_id, vector_str, model_name))
         
         conn.commit()
         logger.info(f"Stored {len(chunk_ids)} embeddings using native pgvector format")
@@ -188,7 +194,14 @@ def search_similar_chunks(query_embedding: List[float], document_ids: Optional[L
             logger.info("No document IDs provided - returning empty results (not searching all documents)")
             return []
         
-        base_query = f"""
+        # Security: validate col against allowlist (already done above, but guard here too)
+        _VALID_EMBEDDING_COLS = frozenset({"embedding", "embedding_3072"})
+        if col not in _VALID_EMBEDDING_COLS:
+            raise ValueError(f"Invalid embedding column: {col!r}")
+
+        from psycopg2 import sql as pgsql
+
+        base_parts = [pgsql.SQL("""
             SELECT 
                 dc.id,
                 dc.document_id,
@@ -201,22 +214,23 @@ def search_similar_chunks(query_embedding: List[float], document_ids: Optional[L
             JOIN document_embeddings de ON dc.id = de.chunk_id
             JOIN documents d ON dc.document_id = d.id
             WHERE de.{col} IS NOT NULL
-        """
-        
+        """).format(col=pgsql.Identifier(col))]
+
         params = [vector_str]
-        
+
         if document_ids:
-            placeholders = ','.join(['%s'] * len(document_ids))
-            base_query += f" AND dc.document_id IN ({placeholders})"
+            base_parts.append(pgsql.SQL(" AND dc.document_id IN ({})").format(
+                pgsql.SQL(', ').join(pgsql.Placeholder() for _ in document_ids)
+            ))
             params.extend(document_ids)
-        
-        base_query += f"""
+
+        base_parts.append(pgsql.SQL("""
             ORDER BY de.{col} <=> %s::vector
             LIMIT %s
-        """
+        """).format(col=pgsql.Identifier(col)))
         params.extend([vector_str, top_k])
-        
-        cur.execute(base_query, params)
+
+        cur.execute(pgsql.SQL('').join(base_parts), params)
         results = cur.fetchall()
         
         # Convert to list of dicts
@@ -247,8 +261,10 @@ def update_processing_status(document_id: str, status: str, **kwargs):
         fields = ['status = %s']
         values = [status]
         
+        # Security: allowlisted column names only — never interpolate arbitrary kwargs keys
+        _ALLOWED_UPDATE_FIELDS = frozenset({'total_chunks', 'processed_chunks', 'company_name', 'error_message'})
         for key, value in kwargs.items():
-            if key in ['total_chunks', 'processed_chunks', 'company_name', 'error_message']:
+            if key in _ALLOWED_UPDATE_FIELDS:
                 fields.append(f"{key} = %s")
                 values.append(value)
         
@@ -259,12 +275,15 @@ def update_processing_status(document_id: str, status: str, **kwargs):
         
         values.append(document_id)
         
-        query = f"""
+        # fields list contains only whitelisted column names (validated above) and
+        # literal SQL fragments (e.g. "started_at = NOW()") — safe to join.
+        from psycopg2 import sql as pgsql
+        query = pgsql.SQL("""
             UPDATE document_processing 
-            SET {', '.join(fields)}
+            SET {fields}
             WHERE document_id = %s
-        """
-        
+        """).format(fields=pgsql.SQL(', '.join(fields)))
+
         cur.execute(query, values)
         
         # If no rows updated, insert new record

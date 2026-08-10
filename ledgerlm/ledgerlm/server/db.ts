@@ -43,7 +43,9 @@ if (authMode === 'entra' || authMode === 'hybrid') {
     port: 5432,
     // pg calls this async function per new connection → auto-refreshes token
     password: () => getEntraToken(),
-    ssl: { rejectUnauthorized: false },
+    // DB_TLS_REJECT_UNAUTHORIZED=false must be set explicitly in Azure private VNet environments
+    // where the PostgreSQL cert is signed by a private CA not in the container trust store.
+    ssl: { rejectUnauthorized: process.env.DB_TLS_REJECT_UNAUTHORIZED !== 'false' },
   });
 
   db = drizzlePg(pool, { schema });
@@ -70,7 +72,8 @@ if (authMode === 'entra' || authMode === 'hybrid') {
     database: dbName,
     password: dbPass,
     port: 5432,
-    ssl: { rejectUnauthorized: false },
+    // DB_TLS_REJECT_UNAUTHORIZED=false must be set explicitly in Azure private VNet environments
+    ssl: { rejectUnauthorized: process.env.DB_TLS_REJECT_UNAUTHORIZED !== 'false' },
   });
 
   db = drizzlePg(pool, { schema });
