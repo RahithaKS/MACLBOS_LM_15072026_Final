@@ -42,15 +42,9 @@ const SSO_ERROR_MESSAGES: Record<string, string> = {
 };
 
 const CAROUSEL_SLIDES = [
-  {
-    text: 'Connect, analyze, and summarize financial reports, balance sheets, and audits—all in one secure workspace.',
-  },
-  {
-    text: 'Ask questions in plain language and get instant answers from your financial data—no SQL, no exports.',
-  },
-  {
-    text: 'Enterprise-grade security with Microsoft SSO, role-based access, and full audit logging built in.',
-  },
+  'Connect, analyze, and summarize financial reports, balance sheets, and audits—all in one secure workspace.',
+  'Ask questions in plain language and get instant answers from your financial data—no SQL, no exports.',
+  'Enterprise-grade security with Microsoft SSO, role-based access, and full audit logging built in.',
 ];
 
 export default function Welcome() {
@@ -88,13 +82,10 @@ export default function Welcome() {
     }
   }, [search]);
 
-  // Update detected domain as user types email
   useEffect(() => {
-    const domain = extractDomain(email);
-    setDetectedDomain(domain);
+    setDetectedDomain(extractDomain(email));
   }, [email]);
 
-  // Fetch SSO config for the detected domain (only when domain looks valid)
   const hasDomain = detectedDomain.length > 0 && detectedDomain.includes('.');
   const { data: ssoConfig, isLoading: ssoConfigLoading } = useQuery<SsoConfigResponse>({
     queryKey: ['/api/auth/sso/config', detectedDomain],
@@ -111,16 +102,12 @@ export default function Welcome() {
   const isResolvingAuthMethod = hasDomain && ssoConfigLoading;
 
   const signInMutation = useMutation({
-    mutationFn: async (data: { email: string; deviceToken?: string }) => {
-      return await apiRequest<AuthResponse>('POST', '/api/auth/signin', data);
-    },
+    mutationFn: async (data: { email: string; deviceToken?: string }) =>
+      apiRequest<AuthResponse>('POST', '/api/auth/signin', data),
     onSuccess: (data, variables) => {
       if (data.requiresOtp) {
         sessionStorage.setItem('otp_email', variables.email);
-        toast({
-          title: 'Verification required',
-          description: 'We\'ve sent a verification code to your email.',
-        });
+        toast({ title: 'Verification required', description: "We've sent a verification code to your email." });
         setLocation('/verify-otp');
       } else if (data.user) {
         setAuthUser(data.user);
@@ -129,11 +116,7 @@ export default function Welcome() {
       }
     },
     onError: () => {
-      toast({
-        title: 'Sign in failed',
-        description: 'Please check your credentials and try again.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Sign in failed', description: 'Please check your credentials and try again.', variant: 'destructive' });
     },
   });
 
@@ -153,46 +136,43 @@ export default function Welcome() {
   return (
     <div className="flex h-screen w-screen overflow-hidden">
 
-      {/* ── Left Panel ────────────────────────────────────────────────────── */}
-      <div className="relative w-full lg:w-1/2 flex flex-col bg-white">
+      {/* ── Left Panel ── */}
+      <div className="relative w-full lg:w-1/2 flex flex-col h-full bg-white">
 
-        {/* Teal accent line — ties left panel to the right panel colour */}
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#0d4a47] via-[#1a6b66] to-[#0d4a47]" />
+        {/* Teal accent bar on left edge */}
+        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#0d4a47] via-[#1a8a82] to-[#0d4a47] z-10" />
 
-        {/* Main centred content */}
-        <div className="flex-1 flex items-center justify-center px-12 lg:px-16">
-          <div className="w-full max-w-sm">
+        {/* Centred content area */}
+        <div className="flex-1 flex items-center justify-center px-10 lg:px-20 py-10">
+          <div className="w-full max-w-[420px]">
 
-            {/* Logo block with bottom separator */}
-            <div className="pb-6 mb-8 border-b border-gray-100">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/Images - Logo/PNGs/120px.png"
-                  alt="LedgerLM Logo"
-                  className="h-9 w-9 flex-shrink-0"
-                />
-                <span className="text-xl font-bold text-foreground tracking-tight">LedgerLM</span>
-              </div>
+            {/* Logo row */}
+            <div className="flex items-center gap-3 mb-10">
+              <img
+                src="/Images - Logo/PNGs/120px.png"
+                alt="LedgerLM Logo"
+                className="h-10 w-10 flex-shrink-0"
+              />
+              <span className="text-2xl font-bold text-foreground tracking-tight">LedgerLM</span>
             </div>
 
             {/* Headline */}
-            <div className="mb-8">
-              <h1 className="text-4xl font-bold text-foreground leading-tight tracking-tight">
-                Turn Financial Data<br />
-                <span className="text-[#1a6b66]">into Clarity.</span>
-              </h1>
-            </div>
+            <h1 className="text-[42px] font-bold leading-[1.15] tracking-tight text-foreground mb-8">
+              Turn Financial Data<br />
+              <span className="text-[#1a6b66]">into Clarity.</span>
+            </h1>
+
+            {/* Divider */}
+            <div className="w-12 h-1 rounded-full bg-[#1a6b66] mb-8" />
 
             {/* Form card */}
-            <div className="bg-gray-50 rounded-xl border border-gray-100 shadow-sm p-6 space-y-5">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                  Sign in
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Enter your work email address to get started
-                </p>
-              </div>
+            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-7 shadow-sm">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">
+                Sign in
+              </p>
+              <p className="text-sm text-muted-foreground mb-5">
+                Enter your work email address to get started
+              </p>
 
               <form
                 onSubmit={isSsoEnabled ? (e) => { e.preventDefault(); handleMicrosoftSignIn(); } : handleContinue}
@@ -203,7 +183,7 @@ export default function Welcome() {
                   placeholder="you@domain.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="h-11 text-sm bg-white border-gray-200 placeholder:text-gray-400"
+                  className="h-12 text-sm bg-white border-gray-300 placeholder:text-gray-400 focus:border-[#1a6b66] focus:ring-[#1a6b66]"
                   required
                   autoFocus
                   data-testid="input-email"
@@ -212,7 +192,7 @@ export default function Welcome() {
                 {isSsoEnabled ? (
                   <Button
                     type="submit"
-                    className="w-full h-11 text-sm font-medium flex items-center justify-center gap-3"
+                    className="w-full h-12 text-sm font-semibold flex items-center justify-center gap-2.5"
                     disabled={!email || isResolvingAuthMethod}
                     data-testid="button-microsoft-signin"
                   >
@@ -222,11 +202,15 @@ export default function Welcome() {
                 ) : (
                   <Button
                     type="submit"
-                    className="w-full bg-primary hover:bg-primary/90 text-primary-foreground h-11 text-sm font-medium"
+                    className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold"
                     disabled={!email || signInMutation.isPending || isResolvingAuthMethod}
                     data-testid="button-signin"
                   >
-                    {isResolvingAuthMethod ? 'Checking...' : signInMutation.isPending ? 'Sending code...' : 'Continue with email'}
+                    {isResolvingAuthMethod
+                      ? 'Checking…'
+                      : signInMutation.isPending
+                      ? 'Sending code…'
+                      : 'Continue with email'}
                     {!isResolvingAuthMethod && <ArrowRight className="ml-2 h-4 w-4" />}
                   </Button>
                 )}
@@ -235,9 +219,9 @@ export default function Welcome() {
           </div>
         </div>
 
-        {/* Footer — trust badges pinned to bottom */}
-        <div className="px-12 lg:px-16 py-5 border-t border-gray-100">
-          <div className="flex items-center gap-5 text-xs text-muted-foreground">
+        {/* Footer — trust badges */}
+        <div className="px-10 lg:px-20 py-4 border-t border-gray-100">
+          <div className="flex items-center gap-6 text-[11px] text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-[#1a6b66]" />
               Enterprise Grade
@@ -254,39 +238,45 @@ export default function Welcome() {
         </div>
       </div>
 
-      {/* ── Right Panel ───────────────────────────────────────────────────── */}
+      {/* ── Right Panel ── */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
         <NetworkBackground theme="teal" />
 
-        <div className="relative z-10 flex flex-col items-center justify-center w-full h-full p-14">
-          <div className="max-w-md text-center">
+        <div className="relative z-10 flex flex-col items-center justify-center w-full h-full px-16">
+          <div className="max-w-lg text-center">
 
-            {/* Decorative quotation mark */}
+            {/* Decorative quote */}
             <div
-              className="text-[120px] leading-none font-serif text-white/10 select-none mb-[-32px]"
+              className="text-[100px] leading-none font-serif text-white/10 select-none mb-[-28px]"
               aria-hidden="true"
             >
               &ldquo;
             </div>
 
-            {/* Carousel text */}
+            {/* Carousel text with fade */}
             <p
-              className="text-xl text-white leading-relaxed transition-opacity duration-350"
-              style={{ opacity: fadeIn ? 1 : 0 }}
+              className="text-2xl font-light text-white leading-relaxed"
+              style={{
+                opacity: fadeIn ? 1 : 0,
+                transition: 'opacity 350ms ease-in-out',
+              }}
             >
-              {CAROUSEL_SLIDES[slideIndex].text}
+              {CAROUSEL_SLIDES[slideIndex]}
             </p>
 
-            {/* Animated pagination dots */}
-            <div className="flex items-center justify-center gap-2 mt-8">
+            {/* Animated dots */}
+            <div className="flex items-center justify-center gap-2 mt-10">
               {CAROUSEL_SLIDES.map((_, i) => (
                 <button
                   key={i}
-                  onClick={() => { setFadeIn(false); setTimeout(() => { setSlideIndex(i); setFadeIn(true); }, 350); }}
+                  onClick={() => {
+                    setFadeIn(false);
+                    setTimeout(() => { setSlideIndex(i); setFadeIn(true); }, 350);
+                  }}
                   className={`rounded-full transition-all duration-300 ${
                     i === slideIndex
-                      ? 'w-5 h-2 bg-white'
-                      : 'w-2 h-2 bg-white/40 hover:bg-white/60'
+                      ? 'w-6 h-2 bg-white'
+                      : 'w-2 h-2 bg-white/35 hover:bg-white/60'
                   }`}
                   aria-label={`Slide ${i + 1}`}
                   data-testid={`pagination-dot-${i + 1}`}
