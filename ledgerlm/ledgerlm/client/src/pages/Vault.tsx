@@ -256,12 +256,21 @@ export default function Vault() {
     });
   };
 
+  const MAX_UPLOAD_BYTES = 250 * 1024 * 1024; // 250MB — matches server multer limit
+
   const handleFileSelect = (files: FileList | null) => {
     const file = files?.[0];
-    if (file) {
-      setUploading(true);
-      uploadMutation.mutate(file);
+    if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast({
+        title: "File too large",
+        description: `"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)} MB. Maximum allowed size is 250 MB.`,
+        variant: "destructive",
+      });
+      return;
     }
+    setUploading(true);
+    uploadMutation.mutate(file);
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -557,6 +566,9 @@ export default function Vault() {
                           Click to Browse
                         </button>{" "}
                         or drag and drop your files
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        PDF, Word, Excel, CSV, TXT — up to 250 MB per file
                       </p>
                     </div>
                     <div className="text-xs text-muted-foreground">or</div>

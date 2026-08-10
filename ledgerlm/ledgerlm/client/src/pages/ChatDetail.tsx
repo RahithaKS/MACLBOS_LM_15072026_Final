@@ -869,16 +869,38 @@ export default function ChatDetail() {
     sendStreamingMessage(question, queryContext);
   };
 
+  const MAX_UPLOAD_BYTES = 250 * 1024 * 1024; // 250MB — matches server multer limit
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    // Add all files to uploading state
-    const fileNames = Array.from(files).map((f) => f.name);
+    // Validate size before touching the network
+    const oversized = Array.from(files).filter(f => f.size > MAX_UPLOAD_BYTES);
+    if (oversized.length > 0) {
+      oversized.forEach(f => {
+        toast({
+          title: "File too large",
+          description: `"${f.name}" is ${(f.size / 1024 / 1024).toFixed(1)} MB. Maximum allowed size is 250 MB.`,
+          variant: "destructive",
+        });
+      });
+      // Only proceed with files that are within the limit
+      const valid = Array.from(files).filter(f => f.size <= MAX_UPLOAD_BYTES);
+      if (valid.length === 0) {
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+    }
+
+    const validFiles = Array.from(files).filter(f => f.size <= MAX_UPLOAD_BYTES);
+
+    // Add valid files to uploading state
+    const fileNames = validFiles.map((f) => f.name);
     setUploadingFiles((prev) => [...prev, ...fileNames]);
 
-    // Upload all files in parallel
-    const uploadPromises = Array.from(files).map(async (file) => {
+    // Upload all valid files in parallel
+    const uploadPromises = validFiles.map(async (file) => {
       try {
         await uploadFileMutation.mutateAsync(file);
       } catch (error) {
