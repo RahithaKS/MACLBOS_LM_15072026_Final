@@ -34,7 +34,7 @@ import {
 } from 'recharts';
 import { Download, FileSpreadsheet, ArrowLeftRight, ArrowUpDown, Lock } from 'lucide-react';
 import html2canvas from 'html2canvas';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import type { ChartSpec } from '@/lib/chartParser';
 
 interface ChartRendererProps {
@@ -110,13 +110,22 @@ function computeLineDomain(
   ];
 }
 
-function downloadXLSX(data: Array<Record<string, string | number>>, title: string) {
+async function downloadXLSX(data: Array<Record<string, string | number>>, title: string) {
   if (!data.length) return;
-  const ws = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Chart Data');
-  const fileName = `${(title || 'chart_data').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.xlsx`;
-  XLSX.writeFile(wb, fileName);
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Chart Data');
+  worksheet.columns = Object.keys(data[0]).map((key) => ({ header: key, key }));
+  worksheet.addRows(data);
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${(title || 'chart_data').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function downloadCSV(data: Array<Record<string, string | number>>, title: string) {

@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { Filter, X, Download, ChevronDown, ChevronUp } from "lucide-react";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -168,7 +168,7 @@ export function InteractiveDataTable({ headers, rows }: InteractiveDataTableProp
   const exportHeaders = colIndices.map((i) => headers[i]);
   const exportRows = filteredRows.map((row) => colIndices.map((i) => row[i] ?? ""));
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     const ts = new Date().toISOString().slice(0, 10);
     const filename = `table-export-${ts}`;
 
@@ -183,15 +183,21 @@ export function InteractiveDataTable({ headers, rows }: InteractiveDataTableProp
         .join("\n");
       triggerDownload(lines, `${filename}.txt`, "text/plain;charset=utf-8;");
     } else {
-      const ws = XLSX.utils.aoa_to_sheet([exportHeaders, ...exportRows]);
-      // Bold the header row
-      exportHeaders.forEach((_, cIdx) => {
-        const cellRef = XLSX.utils.encode_cell({ r: 0, c: cIdx });
-        if (ws[cellRef]) ws[cellRef].s = { font: { bold: true } };
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Data");
+      const headerRow = worksheet.addRow(exportHeaders);
+      headerRow.font = { bold: true };
+      exportRows.forEach((row) => worksheet.addRow(row));
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Data");
-      XLSX.writeFile(wb, `${filename}.xlsx`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${filename}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
     }
     setDownloadOpen(false);
   }, [downloadFormat, exportHeaders, exportRows]);
