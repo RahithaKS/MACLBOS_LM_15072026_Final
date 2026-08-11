@@ -476,7 +476,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // on every state-changing request.
   app.get("/api/auth/csrf-token", (req, res) => {
     if (!(req.session as any).csrfToken) {
-      (req.session as any).csrfToken = require('crypto').randomBytes(32).toString('hex');
+      (req.session as any).csrfToken = randomBytes(32).toString('hex');
     }
     res.json({ csrfToken: (req.session as any).csrfToken });
   });
