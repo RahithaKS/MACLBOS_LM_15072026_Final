@@ -246,7 +246,11 @@ const uploadApiLimiter = rateLimit({
 
 app.use('/api/', globalApiLimiter);
 app.use('/api/chats', chatApiLimiter);
-app.use('/api/documents', uploadApiLimiter);
+// Only rate-limit uploads (POST), never reads — GET /api/documents must always work
+app.use('/api/documents', (req: Request, res: Response, next: NextFunction) => {
+  if (req.method === 'GET' || req.method === 'HEAD') return next();
+  return uploadApiLimiter(req, res, next);
+});
 
 // ── SG-35: Geo-fencing (India only) ──────────────────────────────────────────
 // Azure Application Gateway / WAF sets X-Country-Code on each request once the
