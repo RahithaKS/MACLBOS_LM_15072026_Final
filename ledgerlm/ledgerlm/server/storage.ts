@@ -220,7 +220,10 @@ export class DbStorage implements IStorage {
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const hashedPassword = await bcrypt.hash(insertUser.password, 10);
+    // password may be null for SSO users who authenticate via provider, not password
+    const hashedPassword = insertUser.password
+      ? await bcrypt.hash(insertUser.password, 10)
+      : null;
     // Normalize username (email) to lowercase for case-insensitive login
     const result = await db.insert(users).values({
       ...insertUser,
@@ -234,7 +237,8 @@ export class DbStorage implements IStorage {
     // getUserByUsername already normalizes to lowercase
     const user = await this.getUserByUsername(username);
     if (!user) return null;
-    
+    // SSO users have no stored password — they cannot log in via password
+    if (!user.password) return null;
     const isValid = await bcrypt.compare(password, user.password);
     return isValid ? user : null;
   }
