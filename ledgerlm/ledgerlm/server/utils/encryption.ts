@@ -13,9 +13,17 @@ function getEncryptionKey(): Buffer {
     return crypto.scryptSync(process.env.ENCRYPTION_KEY, 'salt', 32);
   }
   if (process.env.SESSION_SECRET) {
-    // SESSION_SECRET is an acceptable fallback in development, but a dedicated
-    // ENCRYPTION_KEY must be set in production so rotating session secrets
-    // does not break decryption of stored credentials.
+    // In production, refuse the fallback: rotating SESSION_SECRET would silently
+    // break decryption of every stored connector credential. Fail fast so the
+    // operator sets a dedicated key before going live.
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        '[SECURITY] ENCRYPTION_KEY is required in production. ' +
+        'SESSION_SECRET cannot be used as a fallback — rotating it would silently ' +
+        'corrupt all stored connector credentials. ' +
+        'Add a dedicated ENCRYPTION_KEY (32+ random chars) to your environment variables.'
+      );
+    }
     console.warn(
       '[SECURITY] ENCRYPTION_KEY is not set — falling back to SESSION_SECRET. ' +
       'Set a dedicated ENCRYPTION_KEY (32+ random chars) in your environment config for production.'

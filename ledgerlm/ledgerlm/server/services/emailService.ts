@@ -74,7 +74,8 @@ class EmailService {
           user: config.emailSmtpUser!,
           pass: config.emailSmtpPass!,
         },
-        tls: { rejectUnauthorized: false },
+        // tls.rejectUnauthorized intentionally omitted — defaults to true (secure).
+        // Disabling it would allow MITM attacks against outbound email.
       });
     }
 
@@ -87,7 +88,7 @@ class EmailService {
           user: config.emailSmtpUser!,
           pass: config.emailSmtpPass!,
         },
-        tls: { rejectUnauthorized: false },
+        // tls.rejectUnauthorized intentionally omitted — defaults to true (secure).
       });
     }
 

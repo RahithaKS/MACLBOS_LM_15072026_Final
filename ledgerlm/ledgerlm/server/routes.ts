@@ -450,9 +450,7 @@ async function ensureUserAccountForDomainUser(
   if (!user) {
     // Create user in the main users table
     // Use a random password since domain users use OTP-based login
-    const randomPassword =
-      Math.random().toString(36).slice(-16) +
-      Math.random().toString(36).slice(-16);
+    const randomPassword = randomBytes(32).toString('hex');
     const name = displayName || emailLower.split("@")[0];
 
     user = await storage.createUser({
@@ -512,7 +510,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // CSRF state: encode domain name so callback knows which domain this belongs to
       const csrfToken = Buffer.from(
-        JSON.stringify({ domain: domainName, nonce: Math.random().toString(36).slice(2) })
+        JSON.stringify({ domain: domainName, nonce: randomBytes(16).toString('hex') })
       ).toString('base64url');
 
       (req.session as any).ssoState = csrfToken;
@@ -1705,6 +1703,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({
           error: "File content does not match its declared type. Upload rejected.",
         });
+      }
+
+      // Gate 4 — server-side size cap (100 MB for vault/chat uploads).
+      // The global multer ceiling is 500 MB (covers Enterprise); enforce the
+      // tighter Vault/Chat limit here so the server rejects oversized files
+      // regardless of what the client allows through.
+      const VAULT_MAX_BYTES = 100 * 1024 * 1024;
+      if (req.file.size > VAULT_MAX_BYTES) {
+        await fs.unlink(req.file.path).catch(() => {});
+        return res.status(413).json({ error: 'File too large. Maximum upload size is 100 MB.' });
       }
 
       // Sanitise the display name stored in DB (never use raw originalname)
@@ -9172,7 +9180,7 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
   // Proxy semantic-sql requests to Python backend
   // ==========================================
 
-  app.all("/api/v2/semantic-sql/*", async (req, res) => {
+  app.all("/api/v2/semantic-sql/*", requireAuth, async (req, res) => {
     try {
       const PYTHON_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
       const targetPath = req.originalUrl;
@@ -9222,7 +9230,7 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
   // Proxy schema-config requests to Python backend
   // ==========================================
 
-  app.all("/api/v2/schema-config/*", async (req, res) => {
+  app.all("/api/v2/schema-config/*", requireDomainAdmin, async (req, res) => {
     try {
       const PYTHON_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
       const targetPath = req.originalUrl;
