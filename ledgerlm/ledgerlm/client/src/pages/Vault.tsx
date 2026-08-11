@@ -336,6 +336,11 @@ export default function Vault() {
     }
   };
 
+  const handleView = (doc: Document) => {
+    // Open the file in a new browser tab — PDFs render inline, others prompt download
+    window.open(`/api/documents/${doc.id}/download`, "_blank", "noopener,noreferrer");
+  };
+
   const formatFileSize = (bytes: string) => {
     const size = parseInt(bytes);
     if (size < 1024) return `${size} B`;
@@ -833,14 +838,6 @@ export default function Vault() {
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleDownload(doc)}
-                                  data-testid={`button-download-${doc.id}`}
-                                >
-                                  <Download className="w-4 h-4" />
-                                </Button>
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
                                     <Button
@@ -862,13 +859,14 @@ export default function Vault() {
                                       Process Document
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
+                                      onClick={() => createAnalysisMutation.mutate([doc.id])}
                                       data-testid={`menu-start-analysis-${doc.id}`}
                                     >
                                       <Sparkles className="w-4 h-4 mr-2" />
                                       Start New Analysis
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
-                                      onClick={() => handleDownload(doc)}
+                                      onClick={() => handleView(doc)}
                                       data-testid={`menu-view-file-${doc.id}`}
                                     >
                                       <Eye className="w-4 h-4 mr-2" />
@@ -1038,14 +1036,6 @@ export default function Vault() {
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleDownload(doc)}
-                                    data-testid={`button-download-${doc.id}`}
-                                  >
-                                    <Download className="w-4 h-4" />
-                                  </Button>
                                   <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                       <Button
@@ -1067,13 +1057,14 @@ export default function Vault() {
                                         Process Document
                                       </DropdownMenuItem>
                                       <DropdownMenuItem
+                                        onClick={() => createAnalysisMutation.mutate([doc.id])}
                                         data-testid={`menu-start-analysis-${doc.id}`}
                                       >
                                         <Sparkles className="w-4 h-4 mr-2" />
                                         Start New Analysis
                                       </DropdownMenuItem>
                                       <DropdownMenuItem
-                                        onClick={() => handleDownload(doc)}
+                                        onClick={() => handleView(doc)}
                                         data-testid={`menu-view-file-${doc.id}`}
                                       >
                                         <Eye className="w-4 h-4 mr-2" />
