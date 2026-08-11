@@ -84,7 +84,7 @@ const menuItems = [
     title: "Boards",
     url: "/boards",
     icon: LuLayoutDashboard,
-    comingSoon: false,
+    comingSoon: true,
   },
   // {
   //   title: "Market Intelligence",

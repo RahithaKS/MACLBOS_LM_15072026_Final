@@ -1794,10 +1794,10 @@ export default function ChatDetail() {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 flex-shrink-0"
+                    className="h-8 w-8 flex-shrink-0 opacity-50 cursor-not-allowed"
                     data-testid="button-attach-folder"
-                    onClick={() => setLocation("/boards")}
-                    title="Boards"
+                    onClick={() => toast({ title: "🚧 Boards — Coming Soon", description: "This feature is on its way!", duration: 3000 })}
+                    title="Boards — Coming Soon"
                   >
                     <Folder className="w-4 h-4 text-muted-foreground" />
                   </Button>
