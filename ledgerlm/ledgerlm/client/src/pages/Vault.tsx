@@ -36,7 +36,7 @@ import {
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, getCsrfHeaders } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { getAuthUser } from "@/lib/auth";
 import type { Document } from "@shared/schema";
@@ -68,7 +68,9 @@ export default function Vault() {
         method: "POST",
         headers: {
           "x-user-id": user?.id || "",
+          ...getCsrfHeaders(),
         },
+        credentials: "include",
         body: formData,
       });
 
@@ -97,7 +99,9 @@ export default function Vault() {
             headers: {
               "x-user-id": user?.id || "",
               "Content-Type": "application/json",
+              ...getCsrfHeaders(),
             },
+            credentials: "include",
           });
         } catch (error) {
           console.error("Auto-process failed:", error);
@@ -121,7 +125,9 @@ export default function Vault() {
         method: "DELETE",
         headers: {
           "x-user-id": user?.id || "",
+          ...getCsrfHeaders(),
         },
+        credentials: "include",
       });
 
       if (!response.ok) {
@@ -152,7 +158,9 @@ export default function Vault() {
         headers: {
           "x-user-id": user?.id || "",
           "Content-Type": "application/json",
+          ...getCsrfHeaders(),
         },
+        credentials: "include",
       });
 
       if (!response.ok) {
@@ -197,7 +205,9 @@ export default function Vault() {
         headers: {
           "x-user-id": user?.id || "",
           "Content-Type": "application/json",
+          ...getCsrfHeaders(),
         },
+        credentials: "include",
         body: JSON.stringify({
           title: chatTitle,
           preview: `Analysis session with ${documentIds.length} document${documentIds.length > 1 ? "s" : ""}`,
@@ -218,7 +228,9 @@ export default function Vault() {
             headers: {
               "x-user-id": user?.id || "",
               "Content-Type": "application/json",
+              ...getCsrfHeaders(),
             },
+            credentials: "include",
             body: JSON.stringify({ documentId: docId }),
           },
         );

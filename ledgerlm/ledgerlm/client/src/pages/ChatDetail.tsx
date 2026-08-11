@@ -45,7 +45,7 @@ import {
   AlertTriangle,
   ChevronDown,
 } from "lucide-react";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, getCsrfHeaders } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthUser } from "@/lib/auth";
 import type { Chat, Message, Document } from "@shared/schema";
@@ -565,6 +565,7 @@ export default function ChatDetail() {
           chatDocuments.map(async (doc) => {
             try {
               const response = await fetch(`/api/documents/${doc.id}/status`, {
+                credentials: "include",
                 headers: {
                   "x-user-id": currentUser.id,
                 },
@@ -641,7 +642,9 @@ export default function ChatDetail() {
         headers: {
           "Content-Type": "application/json",
           "x-user-id": currentUser.id,
+          ...getCsrfHeaders(),
         },
+        credentials: "include",
         body: JSON.stringify({ content, role: "user", ...(queryContext ? { queryContext } : {}) }),
         signal: controller.signal,
       });
@@ -806,7 +809,9 @@ export default function ChatDetail() {
         method: "POST",
         headers: {
           "x-user-id": currentUser.id,
+          ...getCsrfHeaders(),
         },
+        credentials: "include",
         body: formData,
       });
 
@@ -826,7 +831,9 @@ export default function ChatDetail() {
         method: "POST",
         headers: {
           "x-user-id": currentUser.id,
+          ...getCsrfHeaders(),
         },
+        credentials: "include",
       });
 
       return document;
