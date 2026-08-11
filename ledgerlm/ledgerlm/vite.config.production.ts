@@ -17,5 +17,6 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "server", "public"),
     emptyOutDir: true,
+    cssMinify: "esbuild",
   },
 });

@@ -30,6 +30,9 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // vite 8 uses lightningcss by default; switch to esbuild (vite 5 behaviour)
+    // to stay compatible with the pseudo-element patterns in Tailwind-generated CSS.
+    cssMinify: "esbuild",
   },
   server: {
     fs: {
