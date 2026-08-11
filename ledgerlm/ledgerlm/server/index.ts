@@ -72,6 +72,7 @@ app.use(helmet({
     },
   } : false,   // Disabled in dev — Vite HMR needs relaxed CSP
   crossOriginEmbedderPolicy: false,  // Required for PDF rendering
+  frameguard: process.env.NODE_ENV === 'production' ? { action: 'sameorigin' } : false, // Dev: allow Replit preview iframe
   hsts: process.env.NODE_ENV === 'production' ? {
     maxAge: 31536000,
     includeSubDomains: true,
