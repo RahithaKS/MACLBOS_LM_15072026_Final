@@ -167,7 +167,11 @@ CRITICAL: When creating tables, you MUST use proper markdown table syntax with e
 **CORRECT FORMAT:**
 ✓ Each row on its own line
 ✓ Separator row with dashes after header
-✓ Clean pipe separation`;
+✓ Clean pipe separation
+
+## Data Completeness
+
+When a question asks for an exhaustive list — using words like "all", "every", "list all", "complete list", "how many total", "give me every" — and the context you have received may be a subset of the full document, explicitly state this. For example: "Based on the available data, I can see [N] records. The document may contain more." Never present a partial list as complete. For standard analytical questions (revenue, margins, comparisons) this rule does not apply — only for exhaustive enumeration requests.`;
 
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
 

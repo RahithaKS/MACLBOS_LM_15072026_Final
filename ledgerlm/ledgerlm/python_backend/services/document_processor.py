@@ -636,20 +636,44 @@ def process_single_document(file_content: bytes, filename: str) -> Dict[str, Any
         elif file_format == 'docx':
             from docx import Document as DocxDocument
             doc = DocxDocument(temp_path)
-            paragraphs = []
-            # Extract paragraph text
-            for para in doc.paragraphs:
-                if para.text.strip():
-                    paragraphs.append(para.text)
-            # Extract table text
+
+            # --- Non-table paragraphs ---
+            para_lines = [p.text for p in doc.paragraphs if p.text.strip()]
+
+            # --- Table sections: repeat column header at top of every N-row block ---
+            # Each section becomes a natural \n\n-separated segment so chunk_text()
+            # breaks cleanly between them rather than cutting mid-row.
+            TABLE_ROWS_PER_SECTION = 25  # ~25 student rows per chunk ≈ 1 500 chars
+            table_sections = []
             for table in doc.tables:
-                for row in table.rows:
+                if not table.rows:
+                    continue
+                header = ' | '.join(
+                    cell.text.strip() for cell in table.rows[0].cells
+                )
+                data_rows = []
+                for row in table.rows[1:]:
                     row_text = ' | '.join(
                         cell.text.strip() for cell in row.cells if cell.text.strip()
                     )
                     if row_text:
-                        paragraphs.append(row_text)
-            text = '\n\n'.join(paragraphs)
+                        data_rows.append(row_text)
+
+                # Batch data rows into sections, each prefixed with the header
+                for i in range(0, max(len(data_rows), 1), TABLE_ROWS_PER_SECTION):
+                    batch = data_rows[i:i + TABLE_ROWS_PER_SECTION]
+                    if batch:
+                        section_text = header + '\n' + '\n'.join(batch)
+                        table_sections.append(section_text)
+
+            # Combine: prose first, then table sections — separated by double newlines
+            # so chunk_text() treats each as a natural breakpoint.
+            all_sections = []
+            if para_lines:
+                all_sections.append('\n'.join(para_lines))
+            all_sections.extend(table_sections)
+
+            text = '\n\n'.join(all_sections)
             if not text.strip():
                 logger.warning(f"No text extracted from Word document: {temp_path}")
             content = [{'text': text, 'page': 1, 'format': 'docx'}]

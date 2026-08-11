@@ -46,6 +46,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ── Exhaustive retrieval ──────────────────────────────────────────────────────
+# When the user's question asks for a complete enumeration, return ALL chunks
+# for the attached documents instead of the top-k most similar ones.
+# Cap at EXHAUSTIVE_CHUNK_CAP chunks so we never overflow the LLM context window.
+EXHAUSTIVE_CHUNK_CAP = 100
+
+_EXHAUSTIVE_KEYWORDS = {
+    "all ", "every ", "all students", "all records", "all entries", "all rows",
+    "list all", "list every", "give me all", "give me every", "give me the complete",
+    "complete list", "full list", "entire list", "how many total", "how many students",
+    "total students", "all emails", "all names", "all contacts",
+}
+
+def _is_exhaustive_query(query: str) -> bool:
+    """Return True when the query is asking for a complete enumeration of records."""
+    q = query.lower()
+    return any(kw in q for kw in _EXHAUSTIVE_KEYWORDS)
+
 class RAGRequest(BaseModel):
     query: str
     user_id: str
@@ -204,7 +222,7 @@ async def rag_analyze(request: RAGRequest):
             resp.raise_for_status()
             return resp.json().get("response", "")
 
-        from database import search_similar_chunks, get_db_connection
+        from database import search_similar_chunks, get_db_connection, get_all_chunks_for_documents
         
         # Generate query embedding
         query_embedding, _ = get_embeddings([request.query])
@@ -214,13 +232,24 @@ async def rag_analyze(request: RAGRequest):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Search personal document chunks
-        personal_chunks = search_similar_chunks(
-            query_embedding,
-            document_ids=request.document_ids,
-            top_k=5
-        )
-        
+        # Search personal document chunks — use exhaustive mode for list/roster queries
+        if _is_exhaustive_query(request.query) and request.document_ids:
+            personal_chunks = get_all_chunks_for_documents(request.document_ids)
+            if len(personal_chunks) > EXHAUSTIVE_CHUNK_CAP:
+                # Document too large for exhaustive mode — fall back to high top_k
+                logger.info(f"Exhaustive mode: {len(personal_chunks)} chunks exceeds cap, using top_k={EXHAUSTIVE_CHUNK_CAP}")
+                personal_chunks = search_similar_chunks(
+                    query_embedding, document_ids=request.document_ids, top_k=EXHAUSTIVE_CHUNK_CAP
+                )
+            else:
+                logger.info(f"Exhaustive mode: returning all {len(personal_chunks)} chunks for list query")
+        else:
+            personal_chunks = search_similar_chunks(
+                query_embedding,
+                document_ids=request.document_ids,
+                top_k=5
+            )
+
         # FIX: Increase top_k to 40 for enterprise chunks to ensure all entities (Korea, Japan, Taiwan, etc.) 
         # are included in context for large Excel files - more chunks needed with 20 rows/chunk setting
         enterprise_chunks = get_enterprise_chunks(query_embedding, request, cursor, top_k=40)
@@ -331,7 +360,7 @@ async def rag_query(request: RAGRequest):
     """
     try:
         from services.vector_store import get_embeddings
-        from database import search_similar_chunks, get_db_connection
+        from database import search_similar_chunks, get_db_connection, get_all_chunks_for_documents
         
         # Use domain AI config to embed the query (Azure 3072-dim or Ollama 1024-dim)
         query_embeddings, _ = get_embeddings([request.query], ai_config=request.ai_config)
@@ -348,17 +377,33 @@ async def rag_query(request: RAGRequest):
             and request.ai_config.get("provider") == "azure_openai"
             and request.ai_config.get("embedding_model")
         )
-        personal_chunks = search_similar_chunks(
-            query_embedding,
-            document_ids=request.document_ids,
-            top_k=5,
-            use_azure=use_azure_personal,
-        )
+        if _is_exhaustive_query(request.query) and request.document_ids:
+            personal_chunks = get_all_chunks_for_documents(request.document_ids)
+            if len(personal_chunks) > EXHAUSTIVE_CHUNK_CAP:
+                logger.info(f"Exhaustive mode: {len(personal_chunks)} chunks exceeds cap, using top_k={EXHAUSTIVE_CHUNK_CAP}")
+                personal_chunks = search_similar_chunks(
+                    query_embedding, document_ids=request.document_ids,
+                    top_k=EXHAUSTIVE_CHUNK_CAP, use_azure=use_azure_personal,
+                )
+            else:
+                logger.info(f"Exhaustive mode: returning all {len(personal_chunks)} chunks for list query")
+        else:
+            personal_chunks = search_similar_chunks(
+                query_embedding,
+                document_ids=request.document_ids,
+                top_k=5,
+                use_azure=use_azure_personal,
+            )
         enterprise_chunks = get_enterprise_chunks(query_embedding, request, cursor, top_k=40)
         cursor.close()
         conn.close()
-        
-        chunks = sorted(personal_chunks + enterprise_chunks, key=lambda x: x.get('distance', 1.0 - x.get('similarity', 0)))[:30]
+
+        # For exhaustive personal queries don't slice — keep all personal chunks;
+        # for mixed queries keep the sorted top-30 as before.
+        if _is_exhaustive_query(request.query) and request.document_ids and not request.cube_ids:
+            chunks = personal_chunks  # enterprise is empty anyway (no cube_ids)
+        else:
+            chunks = sorted(personal_chunks + enterprise_chunks, key=lambda x: x.get('distance', 1.0 - x.get('similarity', 0)))[:30]
         
         if not chunks:
             return {"success": True, "context": "", "chunks": [], "found_chunks": 0}

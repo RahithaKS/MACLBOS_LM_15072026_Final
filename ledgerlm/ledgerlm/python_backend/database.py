@@ -260,6 +260,54 @@ def search_similar_chunks(query_embedding: List[float], document_ids: Optional[L
         cur.close()
         conn.close()
 
+def get_all_chunks_for_documents(document_ids: List[str]) -> List[Dict[str, Any]]:
+    """
+    Return ALL stored chunks for the given document IDs, ordered by document then chunk index.
+    Used by exhaustive retrieval mode so the LLM sees every row in list/roster documents
+    rather than only the top-k most similar chunks.
+    """
+    if not document_ids:
+        return []
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        from psycopg2 import sql as pgsql
+        query = pgsql.SQL("""
+            SELECT
+                dc.id,
+                dc.document_id,
+                dc.chunk_text,
+                dc.chunk_index,
+                dc.metadata,
+                d.name AS document_name,
+                1.0 AS similarity
+            FROM document_chunks dc
+            JOIN documents d ON dc.document_id = d.id
+            WHERE dc.document_id IN ({placeholders})
+            ORDER BY dc.document_id, dc.chunk_index
+        """).format(
+            placeholders=pgsql.SQL(', ').join(pgsql.Placeholder() for _ in document_ids)
+        )
+        cur.execute(query, document_ids)
+        results = cur.fetchall()
+        return [{
+            'id': row['id'],
+            'document_id': row['document_id'],
+            'chunk_text': row['chunk_text'],
+            'chunk_index': row['chunk_index'],
+            'metadata': row['metadata'],
+            'document_name': row['document_name'],
+            'similarity': 1.0
+        } for row in results]
+    except Exception as e:
+        logger.error(f"Failed to get all chunks: {e}", exc_info=True)
+        return []
+    finally:
+        cur.close()
+        conn.close()
+
+
 def update_processing_status(document_id: str, status: str, **kwargs):
     """Update document processing status"""
     conn = get_db_connection()
