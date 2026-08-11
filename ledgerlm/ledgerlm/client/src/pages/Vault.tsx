@@ -35,6 +35,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  RefreshCw,
 } from "lucide-react";
 import { queryClient, getCsrfHeaders } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -442,13 +443,19 @@ export default function Vault() {
     }
 
     if (!sessionData || sessionData.count === 0) {
-      return <span className="text-sm text-foreground">N/A</span>;
+      return <span className="text-sm text-muted-foreground">—</span>;
     }
 
-    return <span className="text-sm text-foreground">{sessionData.count}</span>;
+    return <span className="text-sm font-medium text-foreground">{sessionData.count}</span>;
   }
 
-  function ProcessingStatusBadge({ documentId }: { documentId: string }) {
+  function ProcessingStatusCell({
+    documentId,
+    onRetry,
+  }: {
+    documentId: string;
+    onRetry: () => void;
+  }) {
     const { toast } = useToast();
     const prevStatusRef = useRef<string | null>(null);
 
@@ -464,18 +471,14 @@ export default function Vault() {
       },
     });
 
-    // Show a destructive toast only when status transitions processing → failed
+    // Toast only on processing → failed transition
     useEffect(() => {
-      if (
-        statusData?.status === "failed" &&
-        prevStatusRef.current === "processing"
-      ) {
+      if (statusData?.status === "failed" && prevStatusRef.current === "processing") {
         toast({
           title: "Processing Failed",
-          description: "Document could not be indexed. Use ⋮ → Process Document to retry.",
+          description: "Document could not be indexed. Click Retry to try again.",
           variant: "destructive",
         });
-        // Refresh stats so counters stay accurate
         queryClient.invalidateQueries({ queryKey: ["/api/vault/stats"] });
       }
       if (statusData?.status) {
@@ -483,55 +486,63 @@ export default function Vault() {
       }
     }, [statusData?.status]);
 
-    // Also refresh stats when processing completes successfully
+    // Refresh stats on completion
     useEffect(() => {
       if (statusData?.status === "completed") {
         queryClient.invalidateQueries({ queryKey: ["/api/vault/stats"] });
       }
     }, [statusData?.status]);
 
-    if (!statusData) return null;
+    if (!statusData) {
+      return <span className="text-xs text-muted-foreground">—</span>;
+    }
 
     if (statusData.status === "processing" || statusData.status === "pending") {
       return (
-        <Badge
-          variant="secondary"
-          className="ml-2 bg-yellow-500/10 text-yellow-700 border-yellow-500/20"
+        <div
+          className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-200"
           data-testid={`badge-processing-${documentId}`}
         >
-          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+          <Loader2 className="w-3 h-3 animate-spin" />
           Processing…
-        </Badge>
+        </div>
       );
     }
 
     if (statusData.status === "failed") {
       return (
-        <Badge
-          variant="secondary"
-          className="ml-2 bg-red-500/10 text-red-600 border-red-500/20"
-          data-testid={`badge-failed-${documentId}`}
-        >
-          <XCircle className="w-3 h-3 mr-1" />
-          Failed
-        </Badge>
+        <div className="flex items-center gap-2" data-testid={`badge-failed-${documentId}`}>
+          <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-red-50 text-red-600 border border-red-200">
+            <XCircle className="w-3 h-3" />
+            Failed
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-primary gap-1"
+            onClick={onRetry}
+            data-testid={`button-retry-${documentId}`}
+          >
+            <RefreshCw className="w-3 h-3" />
+            Retry
+          </Button>
+        </div>
       );
     }
 
     if (statusData.status === "completed") {
       return (
-        <Badge
-          variant="secondary"
-          className="ml-2 bg-blue-500/10 text-blue-600 border-blue-500/20 hover:bg-blue-500/20"
+        <div
+          className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"
           data-testid={`badge-processed-${documentId}`}
         >
-          <CheckCircle2 className="w-3 h-3 mr-1" />
-          {statusData.processedChunks} chunks
-        </Badge>
+          <CheckCircle2 className="w-3 h-3" />
+          Indexed · {statusData.processedChunks} chunks
+        </div>
       );
     }
 
-    return null;
+    return <span className="text-xs text-muted-foreground">—</span>;
   }
 
   return (
@@ -933,6 +944,9 @@ export default function Vault() {
                             </div>
                           </th>
                           <th className="text-left px-4 py-3 font-medium text-sm text-muted-foreground">
+                            Status
+                          </th>
+                          <th className="text-left px-4 py-3 font-medium text-sm text-muted-foreground">
                             Sessions
                           </th>
                           <th className="text-left px-4 py-3 font-medium text-sm text-muted-foreground">
@@ -945,7 +959,7 @@ export default function Vault() {
                         {isLoading ? (
                           <tr>
                             <td
-                              colSpan={5}
+                              colSpan={6}
                               className="text-center py-12 text-muted-foreground text-sm"
                             >
                               Loading documents...
@@ -954,7 +968,7 @@ export default function Vault() {
                         ) : filteredDocuments.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={5}
+                              colSpan={6}
                               className="text-center py-12 text-muted-foreground text-sm"
                             >
                               {searchQuery
@@ -980,17 +994,12 @@ export default function Vault() {
                                 <div className="flex items-center gap-3">
                                   {getFileIcon(doc.name)}
                                   <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-1">
-                                      <p
-                                        className="font-medium text-sm text-foreground truncate"
-                                        data-testid={`text-document-name-${doc.id}`}
-                                      >
-                                        {doc.name}
-                                      </p>
-                                      <ProcessingStatusBadge
-                                        documentId={doc.id}
-                                      />
-                                    </div>
+                                    <p
+                                      className="font-medium text-sm text-foreground truncate"
+                                      data-testid={`text-document-name-${doc.id}`}
+                                    >
+                                      {doc.name}
+                                    </p>
                                     <p className="text-xs text-muted-foreground">
                                       {formatFileSize(doc.fileSize)}
                                     </p>
@@ -1002,6 +1011,12 @@ export default function Vault() {
                                 data-testid={`text-upload-date-${doc.id}`}
                               >
                                 {formatDate(doc.uploadedAt)}
+                              </td>
+                              <td className="px-4 py-3" data-testid={`text-status-${doc.id}`}>
+                                <ProcessingStatusCell
+                                  documentId={doc.id}
+                                  onRetry={() => processMutation.mutate(doc.id)}
+                                />
                               </td>
                               <td
                                 className="px-4 py-3"
