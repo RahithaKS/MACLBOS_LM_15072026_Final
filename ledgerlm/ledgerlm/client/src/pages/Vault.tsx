@@ -850,6 +850,13 @@ export default function Vault() {
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
                                     <DropdownMenuItem
+                                      onClick={() => createAnalysisMutation.mutate([doc.id])}
+                                      data-testid={`menu-start-analysis-${doc.id}`}
+                                    >
+                                      <Sparkles className="w-4 h-4 mr-2" />
+                                      Start New Analysis
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
                                       onClick={() => handleView(doc)}
                                       data-testid={`menu-view-file-${doc.id}`}
                                     >
@@ -1031,6 +1038,13 @@ export default function Vault() {
                                       </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end">
+                                      <DropdownMenuItem
+                                        onClick={() => createAnalysisMutation.mutate([doc.id])}
+                                        data-testid={`menu-start-analysis-${doc.id}`}
+                                      >
+                                        <Sparkles className="w-4 h-4 mr-2" />
+                                        Start New Analysis
+                                      </DropdownMenuItem>
                                       <DropdownMenuItem
                                         onClick={() => handleView(doc)}
                                         data-testid={`menu-view-file-${doc.id}`}
