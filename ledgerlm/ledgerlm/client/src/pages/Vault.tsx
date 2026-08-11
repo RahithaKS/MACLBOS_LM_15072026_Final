@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -82,6 +82,7 @@ export default function Vault() {
     },
     onSuccess: async (data) => {
       queryClient.refetchQueries({ queryKey: ["/api/documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vault/stats"] });
       toast({
         title: "Success",
         description: "Document uploaded successfully. Processing started...",
@@ -175,6 +176,7 @@ export default function Vault() {
         description: "Document processing has been initiated",
       });
       queryClient.refetchQueries({ queryKey: ["/api/documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vault/stats"] });
     },
     onError: () => {
       toast({
@@ -447,28 +449,89 @@ export default function Vault() {
   }
 
   function ProcessingStatusBadge({ documentId }: { documentId: string }) {
+    const { toast } = useToast();
+    const prevStatusRef = useRef<string | null>(null);
+
     const { data: statusData } = useQuery<{
       status: string;
       processedChunks: number;
     }>({
       queryKey: ["/api/documents", documentId, "status"],
-      refetchInterval: 5000,
+      refetchInterval: (query) => {
+        const status = (query.state.data as any)?.status;
+        if (!status || status === "processing" || status === "pending") return 3000;
+        return false;
+      },
     });
 
-    if (!statusData || statusData.status !== "completed") {
-      return null;
+    // Show a destructive toast only when status transitions processing → failed
+    useEffect(() => {
+      if (
+        statusData?.status === "failed" &&
+        prevStatusRef.current === "processing"
+      ) {
+        toast({
+          title: "Processing Failed",
+          description: "Document could not be indexed. Use ⋮ → Process Document to retry.",
+          variant: "destructive",
+        });
+        // Refresh stats so counters stay accurate
+        queryClient.invalidateQueries({ queryKey: ["/api/vault/stats"] });
+      }
+      if (statusData?.status) {
+        prevStatusRef.current = statusData.status;
+      }
+    }, [statusData?.status]);
+
+    // Also refresh stats when processing completes successfully
+    useEffect(() => {
+      if (statusData?.status === "completed") {
+        queryClient.invalidateQueries({ queryKey: ["/api/vault/stats"] });
+      }
+    }, [statusData?.status]);
+
+    if (!statusData) return null;
+
+    if (statusData.status === "processing" || statusData.status === "pending") {
+      return (
+        <Badge
+          variant="secondary"
+          className="ml-2 bg-yellow-500/10 text-yellow-700 border-yellow-500/20"
+          data-testid={`badge-processing-${documentId}`}
+        >
+          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+          Processing…
+        </Badge>
+      );
     }
 
-    return (
-      <Badge
-        variant="secondary"
-        className="ml-2 bg-blue-500/10 text-blue-600 border-blue-500/20 hover:bg-blue-500/20"
-        data-testid={`badge-processed-${documentId}`}
-      >
-        <CheckCircle2 className="w-3 h-3 mr-1" />
-        {statusData.processedChunks} chunks
-      </Badge>
-    );
+    if (statusData.status === "failed") {
+      return (
+        <Badge
+          variant="secondary"
+          className="ml-2 bg-red-500/10 text-red-600 border-red-500/20"
+          data-testid={`badge-failed-${documentId}`}
+        >
+          <XCircle className="w-3 h-3 mr-1" />
+          Failed
+        </Badge>
+      );
+    }
+
+    if (statusData.status === "completed") {
+      return (
+        <Badge
+          variant="secondary"
+          className="ml-2 bg-blue-500/10 text-blue-600 border-blue-500/20 hover:bg-blue-500/20"
+          data-testid={`badge-processed-${documentId}`}
+        >
+          <CheckCircle2 className="w-3 h-3 mr-1" />
+          {statusData.processedChunks} chunks
+        </Badge>
+      );
+    }
+
+    return null;
   }
 
   return (
@@ -561,42 +624,54 @@ export default function Vault() {
                   onDragOver={handleDrag}
                   onDrop={handleDrop}
                 >
-                  <div className="flex flex-col items-center gap-2 text-center w-full">
-                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Upload className="w-4 h-4 text-primary" />
+                  {uploading ? (
+                    <div className="flex flex-col items-center gap-3 text-center w-full py-4">
+                      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="font-medium text-sm text-foreground">Uploading…</p>
+                        <p className="text-xs text-muted-foreground">Please wait while your file is being uploaded</p>
+                      </div>
                     </div>
-                    <div className="space-y-0.5">
-                      <p className="font-medium text-sm text-foreground">
-                        Upload Files
-                      </p>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 text-center w-full">
+                      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Upload className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="font-medium text-sm text-foreground">
+                          Upload Files
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="text-primary hover:underline"
+                            data-testid="button-browse-files"
+                          >
+                            Click to Browse
+                          </button>{" "}
+                          or drag and drop your files
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          PDF, Word, Excel, CSV, TXT — up to 100 MB per file
+                        </p>
+                      </div>
+                      <div className="text-xs text-muted-foreground">or</div>
                       <p className="text-xs text-muted-foreground">
-                        <button
-                          onClick={() => fileInputRef.current?.click()}
-                          className="text-primary hover:underline"
-                          data-testid="button-browse-files"
-                        >
-                          Click to Browse
-                        </button>{" "}
-                        or drag and drop your files
+                        Connect a Public Drive link to analyze documents
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        PDF, Word, Excel, CSV, TXT — up to 100 MB per file
-                      </p>
+                      <Button
+                        className="bg-primary text-primary-foreground"
+                        size="sm"
+                        onClick={() => setShowConnectDrive(true)}
+                        data-testid="button-connect-drive"
+                      >
+                        <LinkIcon className="w-4 h-4 mr-2" />
+                        Connect Drive
+                      </Button>
                     </div>
-                    <div className="text-xs text-muted-foreground">or</div>
-                    <p className="text-xs text-muted-foreground">
-                      Connect a Public Drive link to analyze documents
-                    </p>
-                    <Button
-                      className="bg-primary text-primary-foreground"
-                      size="sm"
-                      onClick={() => setShowConnectDrive(true)}
-                      data-testid="button-connect-drive"
-                    >
-                      <LinkIcon className="w-4 h-4 mr-2" />
-                      Connect Drive
-                    </Button>
-                  </div>
+                  )}
                   <input
                     ref={fileInputRef}
                     type="file"
