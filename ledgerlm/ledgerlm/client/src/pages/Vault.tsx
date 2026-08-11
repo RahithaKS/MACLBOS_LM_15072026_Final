@@ -36,6 +36,10 @@ import {
   ArrowUp,
   ArrowDown,
   RefreshCw,
+  BarChart2,
+  MessageSquare,
+  Cpu,
+  FolderOpen,
 } from "lucide-react";
 import { queryClient, getCsrfHeaders } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -349,12 +353,29 @@ export default function Vault() {
   };
 
   const formatDate = (date: string | Date) => {
-    return new Date(date).toLocaleDateString("en-US", {
-      month: "2-digit",
-      day: "2-digit",
-      year: "numeric",
+    const d = new Date(date);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: diffDays > 365 ? "numeric" : undefined,
     });
   };
+
+  const formatDateFull = (date: string | Date) =>
+    new Date(date).toLocaleDateString("en-US", {
+      month: "long", day: "numeric", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
 
   const getFileIcon = (fileName: string) => {
     const ext = fileName.split(".").pop()?.toLowerCase();
@@ -444,7 +465,7 @@ export default function Vault() {
     });
 
     if (isLoading) {
-      return <span className="text-sm text-muted-foreground">...</span>;
+      return <span className="text-sm text-muted-foreground animate-pulse">·· ·</span>;
     }
 
     if (!sessionData || sessionData.count === 0) {
@@ -591,126 +612,114 @@ export default function Vault() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-6 lg:px-8 py-6 space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:items-start">
-              <div className="space-y-3 flex flex-col">
-                <h2
-                  className="text-sm font-medium text-foreground"
-                  data-testid="text-document-history"
-                >
-                  Document History
-                </h2>
-                <div className="grid grid-cols-2 gap-3 flex-1">
-                  <Card className="p-4" data-testid="card-total-documents">
-                    <div className="text-xs text-muted-foreground mb-2">
-                      Total Documents
-                    </div>
-                    <div className="text-3xl font-bold text-foreground">
-                      {statsLoading ? '...' : stats.totalDocuments}
-                    </div>
-                  </Card>
-                  <Card className="p-4" data-testid="card-vector-indexed">
-                    <div className="text-xs text-muted-foreground mb-2">
-                      Vector Indexed
-                    </div>
-                    <div className="text-3xl font-bold text-foreground">
-                      {statsLoading ? '...' : stats.vectorIndexed}
-                    </div>
-                  </Card>
-                  <Card className="p-4" data-testid="card-current-sessions">
-                    <div className="text-xs text-muted-foreground mb-2">
-                      Current Sessions
-                    </div>
-                    <div className="text-3xl font-bold text-foreground">
-                      {statsLoading ? '...' : stats.currentSessions}
-                    </div>
-                  </Card>
-                  <Card className="p-4" data-testid="card-total-sessions">
-                    <div className="text-xs text-muted-foreground mb-2">
-                      Total Sessions
-                    </div>
-                    <div className="text-3xl font-bold text-foreground">
-                      {statsLoading ? '...' : stats.totalSessions}
-                    </div>
-                  </Card>
-                </div>
-              </div>
+          <div className="flex-1 overflow-y-auto px-6 lg:px-8 py-6 space-y-4">
 
-              <div className="space-y-3 flex flex-col">
-                <h2
-                  className="text-sm font-medium text-foreground"
-                  data-testid="text-file-upload"
-                >
-                  File Upload
-                </h2>
-                <Card
-                  className={`p-4 border-2 border-dashed transition-colors flex-1 flex items-center justify-center ${
-                    dragActive ? "border-primary bg-primary/5" : "border-border"
-                  }`}
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                >
-                  {uploading ? (
-                    <div className="flex flex-col items-center gap-3 text-center w-full py-4">
-                      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Loader2 className="w-4 h-4 text-primary animate-spin" />
-                      </div>
-                      <div className="space-y-0.5">
-                        <p className="font-medium text-sm text-foreground">Uploading…</p>
-                        <p className="text-xs text-muted-foreground">Please wait while your file is being uploaded</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-2 text-center w-full">
-                      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Upload className="w-4 h-4 text-primary" />
-                      </div>
-                      <div className="space-y-0.5">
-                        <p className="font-medium text-sm text-foreground">
-                          Upload Files
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          <button
-                            onClick={() => fileInputRef.current?.click()}
-                            className="text-primary hover:underline"
-                            data-testid="button-browse-files"
-                          >
-                            Click to Browse
-                          </button>{" "}
-                          or drag and drop your files
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          PDF, Word, Excel, CSV, TXT — up to 100 MB per file
-                        </p>
-                      </div>
-                      <div className="text-xs text-muted-foreground">or</div>
-                      <p className="text-xs text-muted-foreground">
-                        Connect a Public Drive link to analyze documents
-                      </p>
-                      <Button
-                        className="bg-primary text-primary-foreground"
-                        size="sm"
-                        onClick={() => setShowConnectDrive(true)}
-                        data-testid="button-connect-drive"
-                      >
-                        <LinkIcon className="w-4 h-4 mr-2" />
-                        Connect Drive
-                      </Button>
-                    </div>
-                  )}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="hidden"
-                    onChange={(e) => handleFileSelect(e.target.files)}
-                    accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-                    data-testid="input-file-upload"
-                  />
-                </Card>
-              </div>
+            {/* ── Stat strip ── */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Card className="p-4 flex items-center gap-3" data-testid="card-total-documents">
+                <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                  <FolderOpen className="w-4 h-4 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground leading-none mb-1">Documents</p>
+                  <p className="text-2xl font-bold text-foreground leading-none">
+                    {statsLoading ? "—" : stats.totalDocuments}
+                  </p>
+                </div>
+              </Card>
+              <Card className="p-4 flex items-center gap-3" data-testid="card-vector-indexed">
+                <div className="w-9 h-9 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                  <Cpu className="w-4 h-4 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground leading-none mb-1">Indexed</p>
+                  <p className="text-2xl font-bold text-foreground leading-none">
+                    {statsLoading ? "—" : stats.vectorIndexed}
+                  </p>
+                </div>
+              </Card>
+              <Card className="p-4 flex items-center gap-3" data-testid="card-current-sessions">
+                <div className="w-9 h-9 rounded-lg bg-violet-50 flex items-center justify-center flex-shrink-0">
+                  <MessageSquare className="w-4 h-4 text-violet-600" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground leading-none mb-1">Active Sessions</p>
+                  <p className="text-2xl font-bold text-foreground leading-none">
+                    {statsLoading ? "—" : stats.currentSessions}
+                  </p>
+                </div>
+              </Card>
+              <Card className="p-4 flex items-center gap-3" data-testid="card-total-sessions">
+                <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                  <BarChart2 className="w-4 h-4 text-slate-600" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground leading-none mb-1">Total Sessions</p>
+                  <p className="text-2xl font-bold text-foreground leading-none">
+                    {statsLoading ? "—" : stats.totalSessions}
+                  </p>
+                </div>
+              </Card>
             </div>
+
+            {/* ── Upload zone ── */}
+            <Card
+              className={`border-2 border-dashed transition-colors ${
+                dragActive ? "border-primary bg-primary/5" : "border-border"
+              }`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+            >
+              {uploading ? (
+                <div className="flex items-center gap-4 px-6 py-4">
+                  <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm text-foreground">Uploading…</p>
+                    <p className="text-xs text-muted-foreground">Please wait</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between px-6 py-4 gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <Upload className="w-4 h-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm text-foreground">Drop files here or{" "}
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="text-primary hover:underline"
+                          data-testid="button-browse-files"
+                        >
+                          browse
+                        </button>
+                      </p>
+                      <p className="text-xs text-muted-foreground">PDF, Word, Excel, CSV, TXT — up to 100 MB</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowConnectDrive(true)}
+                    className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 flex-shrink-0"
+                    data-testid="button-connect-drive"
+                  >
+                    <LinkIcon className="w-3 h-3 inline mr-1" />
+                    Connect Drive
+                  </button>
+                </div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => handleFileSelect(e.target.files)}
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                data-testid="input-file-upload"
+              />
+            </Card>
 
             <div className="space-y-3 bg-white -mx-6 lg:-mx-8 px-6 lg:px-8 py-5 -mb-6">
               <div className="flex items-center justify-between">
@@ -981,7 +990,7 @@ export default function Vault() {
                           filteredDocuments.map((doc) => (
                             <tr
                               key={doc.id}
-                              className="border-b last:border-b-0 hover:bg-muted/50 transition-colors"
+                              className="border-b last:border-b-0 hover:bg-muted/40 transition-colors group"
                               data-testid={`row-document-${doc.id}`}
                             >
                               <td className="px-4 py-3">
@@ -1008,8 +1017,9 @@ export default function Vault() {
                                 </div>
                               </td>
                               <td
-                                className="px-4 py-3 text-sm text-foreground"
+                                className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap"
                                 data-testid={`text-upload-date-${doc.id}`}
+                                title={formatDateFull(doc.uploadedAt)}
                               >
                                 {formatDate(doc.uploadedAt)}
                               </td>
@@ -1026,51 +1036,48 @@ export default function Vault() {
                                 <SessionCount documentId={doc.id} />
                               </td>
                               <td className="px-4 py-3">
-                                <div className="flex items-center gap-1">
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        data-testid={`button-menu-${doc.id}`}
-                                      >
-                                        <MoreVertical className="w-4 h-4" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      <DropdownMenuItem
-                                        onClick={() => createAnalysisMutation.mutate([doc.id])}
-                                        data-testid={`menu-start-analysis-${doc.id}`}
-                                      >
-                                        <Sparkles className="w-4 h-4 mr-2" />
-                                        Start New Analysis
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() => handleView(doc)}
-                                        data-testid={`menu-view-file-${doc.id}`}
-                                      >
-                                        <Eye className="w-4 h-4 mr-2" />
-                                        View File
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() => handleDownload(doc)}
-                                        data-testid={`menu-download-${doc.id}`}
-                                      >
-                                        <Download className="w-4 h-4 mr-2" />
-                                        Download File
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() =>
-                                          deleteMutation.mutate(doc.id)
-                                        }
-                                        className="text-destructive focus:text-destructive"
-                                        data-testid={`menu-delete-${doc.id}`}
-                                      >
-                                        <Trash2 className="w-4 h-4 mr-2" />
-                                        Delete File
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
+                                {/* Inline hover actions + overflow menu */}
+                                <div className="flex items-center gap-0.5">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                                    onClick={() => createAnalysisMutation.mutate([doc.id])}
+                                    title="Start New Analysis"
+                                    data-testid={`button-analysis-${doc.id}`}
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                                    onClick={() => handleView(doc)}
+                                    title="View File"
+                                    data-testid={`button-view-${doc.id}`}
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                                    onClick={() => handleDownload(doc)}
+                                    title="Download File"
+                                    data-testid={`button-download-inline-${doc.id}`}
+                                  >
+                                    <Download className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                                    onClick={() => deleteMutation.mutate(doc.id)}
+                                    title="Delete File"
+                                    data-testid={`button-delete-inline-${doc.id}`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
                                 </div>
                               </td>
                             </tr>
