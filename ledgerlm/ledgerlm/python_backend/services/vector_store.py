@@ -51,6 +51,10 @@ def chunk_text(text, doc_id="", chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERL
     Each chunk includes metadata about its source document.
     Enhanced for better handling of large documents with smarter text splitting.
     """
+    # Refuse to create empty chunks — they pollute the vector store
+    if not text or not text.strip():
+        return []
+
     # For very short texts, just return as a single chunk
     if len(text) <= chunk_size:
         return [{"text": text, "doc_id": doc_id, "chunk_num": 0, "page_info": "full document"}]

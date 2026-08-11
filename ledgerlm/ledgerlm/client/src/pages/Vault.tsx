@@ -461,7 +461,8 @@ export default function Vault() {
 
     const { data: statusData } = useQuery<{
       status: string;
-      processedChunks: number;
+      processed_chunks: number;
+      total_chunks: number;
     }>({
       queryKey: ["/api/documents", documentId, "status"],
       refetchInterval: (query) => {
@@ -498,13 +499,23 @@ export default function Vault() {
     }
 
     if (statusData.status === "processing" || statusData.status === "pending") {
+      const total = statusData.total_chunks ?? 0;
+      const done = statusData.processed_chunks ?? 0;
+      const pct = total > 0 ? Math.round((done / total) * 100) : null;
       return (
-        <div
-          className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-200"
-          data-testid={`badge-processing-${documentId}`}
-        >
-          <Loader2 className="w-3 h-3 animate-spin" />
-          Processing…
+        <div className="flex flex-col gap-1 min-w-[120px]" data-testid={`badge-processing-${documentId}`}>
+          <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-200 w-fit">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            {pct !== null ? `Indexing… ${done}/${total}` : "Processing…"}
+          </div>
+          {total > 0 && (
+            <div className="h-1 w-24 rounded-full bg-yellow-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-yellow-400 transition-all duration-500"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          )}
         </div>
       );
     }
@@ -531,13 +542,14 @@ export default function Vault() {
     }
 
     if (statusData.status === "completed") {
+      const chunks = statusData.processed_chunks ?? statusData.total_chunks ?? 0;
       return (
         <div
           className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"
           data-testid={`badge-processed-${documentId}`}
         >
           <CheckCircle2 className="w-3 h-3" />
-          Indexed · {statusData.processedChunks} chunks
+          Indexed · {chunks} chunks
         </div>
       );
     }

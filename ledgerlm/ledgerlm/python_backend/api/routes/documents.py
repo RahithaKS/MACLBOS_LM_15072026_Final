@@ -120,6 +120,11 @@ async def process_document_background(document_id: str, file_path: str, ai_confi
         
         # Process document (expects bytes content and filename)
         processed_data = process_document(file_content, filename)
+
+        # Fail fast if the processor couldn't handle this file format
+        if not processed_data.get('success', False):
+            err = processed_data.get('error', 'Unsupported or unreadable file format')
+            raise ValueError(f"Document processing failed: {err}")
         
         # Extract company name
         extractor = CompanyExtractor()
@@ -135,17 +140,22 @@ async def process_document_background(document_id: str, file_path: str, ai_confi
                 full_text = content
         elif isinstance(processed_data, list):
             full_text = '\n\n'.join([item.get('text', '') for item in processed_data if isinstance(item, dict)])
+
+        if not full_text.strip():
+            raise ValueError("No readable text could be extracted from this document.")
         
         company_info = extractor.extract_company_name(full_text, filename, ai_config=effective_ai_config)
         company_name = company_info.get('primary_company')
         
         # Chunk the text
         chunks = chunk_text(full_text, doc_id=document_id)
+        if not chunks:
+            raise ValueError("Document produced no text chunks after extraction.")
         
         # Store chunks in database
         chunk_ids = store_document_chunks(document_id, chunks)
         
-        # Update processing status with chunk count
+        # Update status: extraction done, starting embedding
         update_processing_status(
             document_id,
             'processing',
@@ -154,15 +164,28 @@ async def process_document_background(document_id: str, file_path: str, ai_confi
             company_name=company_name
         )
         
-        # Generate and store embeddings (Azure 3072-dim or Ollama 1024-dim depending on config)
-        texts = [chunk['text'] for chunk in chunks]
-        embeddings, _ = get_embeddings(texts, ai_config=effective_ai_config)
         use_azure = (
             effective_ai_config is not None
             and effective_ai_config.get("provider") == "azure_openai"
             and effective_ai_config.get("embedding_model")
         )
-        store_vector_embeddings(chunk_ids, embeddings, use_azure=use_azure)
+
+        # Generate and store embeddings in batches so processed_chunks updates live
+        EMBED_BATCH = 10
+        all_embeddings = []
+        for batch_start in range(0, len(chunks), EMBED_BATCH):
+            batch_texts = [c['text'] for c in chunks[batch_start:batch_start + EMBED_BATCH]]
+            batch_embeds, _ = get_embeddings(batch_texts, ai_config=effective_ai_config)
+            all_embeddings.extend(batch_embeds)
+            done = min(batch_start + EMBED_BATCH, len(chunks))
+            update_processing_status(
+                document_id,
+                'processing',
+                total_chunks=len(chunks),
+                processed_chunks=done,
+            )
+
+        store_vector_embeddings(chunk_ids, all_embeddings, use_azure=use_azure)
         
         # Mark as completed with final status
         update_processing_status(

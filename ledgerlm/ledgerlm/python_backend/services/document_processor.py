@@ -242,7 +242,9 @@ def get_file_format(filename: str) -> str:
         'jpeg': 'image',
         'png': 'image',
         'bmp': 'image',
-        'gif': 'image'
+        'gif': 'image',
+        'docx': 'docx',
+        'doc': 'docx',
     }
     
     return format_mapping.get(ext, 'unknown')
@@ -631,6 +633,28 @@ def process_single_document(file_content: bytes, filename: str) -> Dict[str, Any
             content = process_text_file(temp_path, file_format)
             total_text = content[0].get('text', '') if content else ''
             
+        elif file_format == 'docx':
+            from docx import Document as DocxDocument
+            doc = DocxDocument(temp_path)
+            paragraphs = []
+            # Extract paragraph text
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    paragraphs.append(para.text)
+            # Extract table text
+            for table in doc.tables:
+                for row in table.rows:
+                    row_text = ' | '.join(
+                        cell.text.strip() for cell in row.cells if cell.text.strip()
+                    )
+                    if row_text:
+                        paragraphs.append(row_text)
+            text = '\n\n'.join(paragraphs)
+            if not text.strip():
+                logger.warning(f"No text extracted from Word document: {temp_path}")
+            content = [{'text': text, 'page': 1, 'format': 'docx'}]
+            total_text = text
+
         elif file_format == 'html':
             content = process_html_file(temp_path)
             total_text = content[0].get('text', '') if content else ''
