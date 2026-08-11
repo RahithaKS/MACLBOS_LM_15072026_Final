@@ -3,10 +3,34 @@ RAG (Retrieval-Augmented Generation) API routes
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import os
 import sys
+import math
 import logging
+
+def _safe_float(v, fallback: float = 0.0) -> float:
+    """Return a JSON-safe float; replaces nan/inf with fallback."""
+    try:
+        f = float(v)
+        return fallback if (math.isnan(f) or math.isinf(f)) else f
+    except (TypeError, ValueError):
+        return fallback
+
+def _sanitize_chunks(chunks: list) -> list:
+    """Recursively replace nan/inf floats in chunk dicts before JSON serialisation."""
+    sanitized = []
+    for chunk in chunks:
+        clean = {}
+        for k, v in chunk.items():
+            if isinstance(v, float):
+                clean[k] = _safe_float(v)
+            elif isinstance(v, dict):
+                clean[k] = {ck: (_safe_float(cv) if isinstance(cv, float) else cv) for ck, cv in v.items()}
+            else:
+                clean[k] = v
+        sanitized.append(clean)
+    return sanitized
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../attached_assets'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
@@ -137,8 +161,8 @@ def get_enterprise_chunks(query_embedding, request: RAGRequest, cursor, top_k: i
             'document_name': f"[Enterprise] {row['document_name']}",
             'document_id': row['document_id'],
             'company_id': row['company_id'],
-            'distance': float(row['distance']),
-            'similarity': 1.0 - float(row['distance'])
+            'distance': _safe_float(row['distance']),
+            'similarity': _safe_float(1.0 - _safe_float(row['distance']))
         })
     
     dict_cursor.close()
@@ -292,7 +316,7 @@ async def rag_analyze(request: RAGRequest):
                 "document_chunks": len(chunks),
                 "web_results": len(web_results)
             },
-            "chunks": chunks[:3],
+            "chunks": _sanitize_chunks(chunks[:3]),
             "web_enhanced": len(web_results) > 0
         }
     except Exception as e:
@@ -362,7 +386,7 @@ async def rag_query(request: RAGRequest):
         if metadata_summary['all_scenarios']: summary_header += f"Available Entities: {', '.join(list(metadata_summary['all_scenarios'])[:10])}\n"
         
         context = summary_header + "\n\n---\n\n".join(context_parts)
-        return {"success": True, "context": context, "chunks": chunks, "found_chunks": len(chunks)}
+        return {"success": True, "context": context, "chunks": _sanitize_chunks(chunks), "found_chunks": len(chunks)}
     except Exception as e:
         logger.error(f"RAG query failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

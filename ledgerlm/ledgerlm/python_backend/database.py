@@ -1,11 +1,20 @@
 """Database utilities for PostgreSQL + pgvector"""
 import os
+import math
 import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 import json
 from typing import List, Dict, Any, Optional
 from config import settings
+
+def _safe_float(v, fallback: float = 0.0) -> float:
+    """Return a JSON-safe float; replaces nan/inf with fallback."""
+    try:
+        f = float(v)
+        return fallback if (math.isnan(f) or math.isinf(f)) else f
+    except (TypeError, ValueError):
+        return fallback
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -241,7 +250,7 @@ def search_similar_chunks(query_embedding: List[float], document_ids: Optional[L
             'chunk_index': row['chunk_index'],
             'metadata': row['metadata'],
             'document_name': row['document_name'],
-            'similarity': float(row['similarity'])
+            'similarity': _safe_float(row['similarity'])
         } for row in results]
         
     except Exception as e:
