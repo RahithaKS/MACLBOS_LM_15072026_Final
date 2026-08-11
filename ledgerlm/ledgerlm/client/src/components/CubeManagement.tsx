@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { apiRequest, queryClient } from '@/lib/queryClient';
+import { apiRequest, queryClient, getCsrfHeaders } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -2078,7 +2078,7 @@ function CubeSqlQueryDialog({ cube, open, onOpenChange }: CubeSqlQueryDialogProp
     try {
       const res = await fetch(`/api/domain-admin/cubes/${cube.id}/sql-query`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getCsrfHeaders() },
         credentials: 'include',
         body: JSON.stringify({ query: sqlText }),
       });

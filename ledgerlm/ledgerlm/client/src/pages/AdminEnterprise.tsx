@@ -15,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfHeaders } from "@/lib/queryClient";
 import { getAuthUser } from "@/lib/auth";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -331,6 +331,7 @@ export default function AdminEnterprise() {
 
       const response = await fetch(`/api/domain-admin/enterprise-documents`, {
         method: "POST",
+        headers: { ...getCsrfHeaders() },
         credentials: "include",
         body: formData,
       });
@@ -361,7 +362,8 @@ export default function AdminEnterprise() {
       if (!currentUser) throw new Error("Not authenticated");
       const res = await fetch(`/api/domain-admin/enterprise-documents/${documentId}/process`, {
         method: "POST",
-        headers: { "x-user-id": currentUser.id },
+        headers: { "x-user-id": currentUser.id, ...getCsrfHeaders() },
+        credentials: "include",
       });
       if (!res.ok) throw new Error(res.statusText);
       return res.json();
@@ -383,7 +385,8 @@ export default function AdminEnterprise() {
       if (!currentUser) throw new Error("Not authenticated");
       return fetch(`/api/domain-admin/enterprise-documents/${documentId}`, {
         method: "DELETE",
-        headers: { "x-user-id": currentUser.id },
+        headers: { "x-user-id": currentUser.id, ...getCsrfHeaders() },
+        credentials: "include",
       }).then(res => res.ok ? res.json() : Promise.reject(res.statusText));
     },
     onSuccess: () => {
@@ -400,6 +403,7 @@ export default function AdminEnterprise() {
         documentIds.map(id =>
           fetch(`/api/domain-admin/enterprise-documents/${id}`, {
             method: "DELETE",
+            headers: { ...getCsrfHeaders() },
             credentials: "include",
           }).then(res => ({ id, ok: res.ok }))
         )
@@ -425,6 +429,7 @@ export default function AdminEnterprise() {
       if (!currentUser) throw new Error("Not authenticated");
       const response = await fetch(`/api/domain-admin/cubes/${cubeId}/documents`, {
         method: "DELETE",
+        headers: { ...getCsrfHeaders() },
         credentials: "include",
       });
       if (!response.ok) {

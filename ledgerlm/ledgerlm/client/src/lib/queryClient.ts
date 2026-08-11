@@ -22,6 +22,13 @@ export function clearCsrfToken(): void {
   _csrfToken = null;
 }
 
+// Returns the CSRF header dict for use in raw fetch() calls that can't go
+// through apiRequest (FormData uploads, blob downloads, custom error handling).
+// Spread into headers: { ...getCsrfHeaders(), 'Content-Type': '...' }
+export function getCsrfHeaders(): Record<string, string> {
+  return _csrfToken ? { 'x-csrf-token': _csrfToken } : {};
+}
+
 function handleSessionExpiry() {
   // Clear in-memory auth state and redirect to login.
   // Using location.replace so the expired page is removed from history.
@@ -64,19 +71,47 @@ export async function apiRequest<T = unknown>(
     headers['x-csrf-token'] = _csrfToken;
   }
 
-  const res = await fetch(url, {
+  const buildBody = () =>
+    data ? (isFormData ? (data as BodyInit) : JSON.stringify(data)) : undefined;
+
+  let res = await fetch(url, {
     method,
     headers,
-    body: data ? (isFormData ? data as BodyInit : JSON.stringify(data)) : undefined,
+    body: buildBody(),
     credentials: "include",
   });
 
+  // SG-41: If the server returns a CSRF-specific 403, the session has likely
+  // expired and been recreated (clearing the stored csrfToken). Re-fetch the
+  // token and retry the request exactly once — transparently recovers from
+  // mid-session expiry without forcing the user to refresh the page.
+  // Non-CSRF 403s (genuine auth failures) are NOT retried — the body check
+  // ensures only CSRF errors trigger the retry path.
+  if (res.status === 403) {
+    const body = await res.clone().json().catch(() => ({}));
+    const isCsrfError =
+      typeof body?.error === 'string' &&
+      body.error.toLowerCase().includes('csrf');
+    if (isCsrfError) {
+      await fetchCsrfToken();
+      if (_csrfToken) {
+        (headers as Record<string, string>)['x-csrf-token'] = _csrfToken;
+        res = await fetch(url, {
+          method,
+          headers,
+          body: buildBody(),
+          credentials: "include",
+        });
+      }
+    }
+  }
+
   await throwIfResNotOk(res);
-  
+
   if (res.status === 204) {
     return undefined as T;
   }
-  
+
   return await res.json();
 }
 
