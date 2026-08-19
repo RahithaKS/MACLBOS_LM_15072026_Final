@@ -86,12 +86,6 @@ const menuItems = [
     icon: LuLayoutDashboard,
     comingSoon: false,
   },
-  {
-    title: "Board Studio",
-    url: "/board-studio",
-    icon: Grid3x3,
-    comingSoon: false,
-  },
   // {
   //   title: "Market Intelligence",
   //   url: "/market-intelligence",
