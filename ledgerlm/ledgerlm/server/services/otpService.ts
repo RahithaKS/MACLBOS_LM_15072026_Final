@@ -20,6 +20,13 @@ export class OtpService {
 
   async createAndSendOtp(userId: string, email: string, userName: string, context: 'login' | 'password_reset', domainConfig?: DomainEmailConfig | null): Promise<void> {
     const otpCode = this.generateOtpCode();
+
+    // TEMPORARY LOCAL-ONLY DEBUGGING: remove this block before production deployment.
+    // The exact development check prevents OTP values from being logged in production.
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(`[DEV ONLY] OTP for ${email} (${context}): ${otpCode}`);
+    }
+
     const codeHash = await bcrypt.hash(otpCode, 10);
     
     const expiresAt = new Date();
