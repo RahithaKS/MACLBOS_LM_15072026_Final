@@ -19,6 +19,16 @@ The database model has five conceptual layers:
 - **Semantic control layer:** cube metadata, dimension and cost-category registrations, column mappings, schema versions, business terms, calculation rules, query patterns, filter rules, and known values/aliases. These tables are the database-backed contract for query interpretation and official Bosch reporting logic.
 - **Operations/provenance layer:** ingestion jobs, file/blob registries and connector/scheduler configuration, query jobs, chat/query audit, and application audit logs. Results should remain traceable to source, query, calculation, time filter, and execution status.
 
+Product-facing composition:
+
+- **Vault** is the personal document/RAG surface, not a separate database entity. It is composed of user-owned documents, document chunks, embeddings, processing state, chat-document links, and source/citation metadata.
+- **Boards** are analysis workspaces owned by a user. A board can use a template, persist layout/configuration in JSON, attach Vault documents, attach chats as threads, configure ordered data-source adapters, and retain generated cube-based reports with period, variance, prompt, raw analysis, and status.
+- **Enterprise** is the governed company/domain/cube surface. Enterprise documents are company/domain/cube scoped and versioned; structured cube rows are separately stored and queried through cube access and semantic configuration.
+- **Chat** is the interaction layer. Chats contain messages, can reference Vault documents and configured user data sources, and can be attached to Boards. Message metadata and query-audit records preserve citations, sources, and execution outcomes.
+- **Kiosk** is a separate domain-scoped FAQ chatbot path with its own uploaded FAQ documents, parsed FAQ entries, chats, and messages; it should not be confused with the general Vault or Bosch cube query path.
+
+The key ownership boundary is: Vault documents belong to a user, Enterprise documents belong to a company/domain/cube context, and Boards compose sources rather than owning a second copy of their contents.
+
 Important Bosch semantics:
 
 - Official views such as MS, SX, VM, PS, and XC are protected business filters, not suggestions for an LLM to reinterpret.
