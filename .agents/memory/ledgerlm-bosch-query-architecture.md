@@ -29,6 +29,12 @@ Product-facing composition:
 
 The key ownership boundary is: Vault documents belong to a user, Enterprise documents belong to a company/domain/cube context, and Boards compose sources rather than owning a second copy of their contents.
 
+Board data-source rule: Enterprise Data → Create Cube is the canonical path for tabular financial inputs. Boards should select and configure an existing authorized cube; they must not create a parallel browser-only dataset or duplicate cube rows. Board-specific choices belong in Board configuration, while source files, schema, dimensions, versions, semantic rules, and facts remain owned by the Enterprise/Cube layer.
+
+**Why:** The standalone Board prototype uses local sample data and IndexedDB uploads, but production LedgerLM needs tenant isolation, reusable data, cross-device access, ingestion tracking, and one governed interpretation of financial numbers.
+
+**How to apply:** Map standalone Board cube selection and analysis controls onto the existing cube APIs and metadata. Send a board run configuration to the server, query by authorized `cube_id`, and return verified aggregates/results instead of posting raw cube rows from the browser.
+
 Important Bosch semantics:
 
 - Official views such as MS, SX, VM, PS, and XC are protected business filters, not suggestions for an LLM to reinterpret.
