@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/ledgerlm-preview/"
+title = "LedgerLM"
+description = "AI-powered financial analysis platform for uploading financial documents and querying them through a RAG-enhanced assistant."
+version = "1.0.0"
+id = "artifacts/ledgerlm-app"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/ledgerlm-preview/" ]
+localPort = 19100
+
+[services.development]
+run = "cd ../../ledgerlm/ledgerlm && npm run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ledgerlm-app", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/ledgerlm-app/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19100"
+BASE_PATH = "/"

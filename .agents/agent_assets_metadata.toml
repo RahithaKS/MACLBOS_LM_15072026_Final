@@ -6,21 +6,25 @@ id = "ur-t1Vxxxbluoh2tB2uko"
 uri = "file://ledgerlm_test_questions.txt"
 type = "text"
 title = "LedgerLM – 100 Test Questions for Bosch"
+logical_id = "496acacd-566d-47f4-8644-baba5bb856b1"
 
 [[outputs]]
 id = "T17ZCXDBDFciqONDjDgA7"
 uri = "file://ledgerlm_bosch_all_scenarios.md"
 type = "text"
 title = "LedgerLM – All Scenarios Test Questions (338 queries)"
+logical_id = "70ef05b5-c8a5-4507-89c0-f64de1da4ea8"
 
 [[outputs]]
 id = "SwqIGXdablOoUCqI-r54X"
 uri = "file://ledgerlm_security_scan_report.html"
 type = "unspecified"
 title = "LedgerLM Security Scanning Report"
+logical_id = "b14a6a71-523d-43b0-9a1a-3e3a1051e1be"
 
 [[outputs]]
 id = "2oRwxNWZcXW-TVnCIYWsB"
 uri = "file://ledgerlm_sbom_cyclonedx.json"
 type = "unspecified"
 title = "LedgerLM SBOM (CycloneDX 1.4)"
+logical_id = "bbecfabc-6796-4b7b-826f-11b67748e507"
