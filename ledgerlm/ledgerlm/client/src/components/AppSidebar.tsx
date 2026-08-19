@@ -84,7 +84,7 @@ const menuItems = [
     title: "Boards",
     url: "/boards",
     icon: LuLayoutDashboard,
-    comingSoon: true,
+    comingSoon: false,
   },
   // {
   //   title: "Market Intelligence",
@@ -836,7 +836,9 @@ export function AppSidebar() {
               className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
               data-testid="button-new-analysis"
             >
-              {isCreatingAnalysis || createChatMutation.isPending ? "Creating…" : "New Analysis"}
+              {isCreatingAnalysis || createChatMutation.isPending
+                ? "Creating…"
+                : "New Analysis"}
               <Plus className="w-4 h-4 mr-2" />
             </Button>
 

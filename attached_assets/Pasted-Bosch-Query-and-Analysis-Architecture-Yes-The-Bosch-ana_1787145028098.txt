@@ -1,0 +1,591 @@
+Bosch Query and Analysis Architecture
+Yes. The Bosch analysis system is a combination of:
+
+Structured financial data
+Business-specific Bosch rules
+Natural-language query parsing
+Deterministic SQL calculation builders
+AI-generated explanations and charts
+The AI does not directly guess financial answers. It first retrieves data from the Bosch cube, calculates the result through SQL, and then uses the AI mainly to explain the verified result.
+
+1. End-to-end Bosch query flow
+Example user question:
+
+“What was the billing utilization for BGSW in March 2025 by entity?”
+
+The flow is:
+
+User question
+   ↓
+React chat interface
+   ↓
+Node.js Express chat API
+   ↓
+User/domain/cube access check
+   ↓
+Query orchestrator
+   ↓
+Python Semantic SQL service
+   ↓
+Intent detection and Bosch rule matching
+   ↓
+Structured query object
+   ↓
+Safe SQL generation
+   ↓
+PostgreSQL cube_fact_data
+   ↓
+Result rows and calculation metadata
+   ↓
+Evidence ranking and citation building
+   ↓
+OpenAI/Ollama explanation
+   ↓
+Streamed answer back to user
+
+The main chat endpoint is:
+
+POST /api/chats/:chatId/messages/stream
+
+The Node backend sends semantic SQL requests to Python through:
+
+POST /api/v2/semantic-sql/intent
+POST /api/v2/semantic-sql/query
+
+2. User access comes before data analysis
+Before a Bosch query is executed, LedgerLM determines what the user is allowed to see.
+
+The access decision uses:
+
+Current server session
+User account
+Domain membership
+Company membership
+Enterprise-data setting
+Cube access records
+User cube preferences
+Domain and company configuration
+A user must have:
+
+A valid authenticated session
+Membership in the relevant Bosch domain/company
+Enterprise access enabled
+Access to the relevant data cube
+The query is then executed with the selected cube_id.
+
+This prevents a user from querying another domain's cube or seeing unrelated enterprise data.
+
+3. Bosch data storage model
+Bosch data is mainly stored in cube-specific structured tables.
+
+Main fact table
+cube_fact_data
+
+This contains the detailed Bosch financial and operational records, including fields such as:
+
+cube_id
+cost_category
+region_entity
+sector
+project_gb
+planning_gb
+new_service_area
+service_area
+res_sub_service_area
+proj_sub_service_area
+res_dept
+onsite_offshore
+resource_type
+employee_name
+employee_number
+year
+month
+amount_usd
+amount_inr
+billed_capacity
+allocated_capacity
+not_allocated_capacity
+vkm_capacity
+ms_capacity
+non_linear_capacity
+headcount
+attrition
+Other Bosch-related tables
+cube_plan_data
+
+Used for:
+
+Budget
+TBP
+Forecast
+CF02
+CF05
+CF09
+CF11
+cube_investment_data
+
+Used for:
+
+Investment
+CAPEX
+PMO queries
+Supporting tables include:
+
+Cube dimensions
+Cost categories
+Column mappings
+Schema versions
+Business terms
+Calculation rules
+Filter rules
+Query patterns
+Known column values
+Query jobs
+Ingestion jobs
+4. How Bosch questions are understood
+The Python service first loads context from the database:
+
+Available columns
+Actual dimension values
+Cost categories
+Cube metadata
+Business terms
+Calculation formulas
+Filter rules
+Query patterns
+Known entity aliases
+For example, the system knows that:
+
+India → BGSW
+Vietnam → BGSV
+Japan → BGSJ
+Germany → BGSG
+Mexico → BGSW/NE-MX
+Poland/EBS → BGSW/EBS-PL
+
+It also knows special Bosch terms such as:
+
+Billing Utilization
+Revenue Summary
+GB Wise END Capacity
+Budget per Capacity
+EBIT
+Price Mix
+Pyramid Mix
+Attrition
+Internal Capacity Mix
+External Capacity Mix
+CTG Adjustment
+The query parser uses both:
+
+Deterministic keyword and alias matching
+LLM intent parsing for less predictable questions
+Known calculations are deliberately matched before relying on the LLM.
+
+5. Actuals versus budget and forecast
+The system decides whether the question is about actual data or planning data.
+
+Actual-data queries
+Examples:
+
+Actual revenue
+Billing utilization
+Headcount
+Capacity
+Cost
+EBIT
+Attrition
+These normally query:
+
+cube_fact_data
+
+Planning-data queries
+Keywords such as these route the query toward cube_plan_data:
+
+Budget
+Forecast
+TBP
+CF02
+CF05
+CF09
+CF11
+YTD Forecast
+The parser extracts values such as:
+
+Plan type
+Page/view
+Entity
+Global Business
+Particulars
+Average or End category
+Year
+Month
+For example:
+
+“Budget for BGSW in March 2025”
+
+may become:
+
+plan_type = TBP 2025
+entity = BGSW
+month = 3
+year = 2025
+particulars = Budget
+
+There is additional routing logic to distinguish true plan queries from questions where “budget” is mentioned as part of an actual-data calculation.
+
+6. Bosch view and GB filtering
+Bosch uses specific business views. These are implemented as fixed SQL filter rules.
+
+MS View
+new_service_area = 'MS'
+AND sector = 'BBM'
+
+SX View
+new_service_area = 'SX'
+AND sector IN ('BBE', 'BBG', 'BBI', 'OTHERS')
+
+VM View
+new_service_area = 'MS'
+AND project_gb = 'VM'
+
+PS View
+new_service_area = 'MS'
+AND project_gb = 'PS'
+
+XC View
+new_service_area = 'MS'
+AND project_gb = 'XC'
+
+The parser recognizes phrases such as:
+
+“MS View”
+“SX revenue”
+“PS capacity”
+“VM utilization”
+“XC budget”
+“MS offshore capacity”
+“for PS”
+“by VM”
+These view rules are protected because they define the official Bosch reporting logic.
+
+7. Cost-category routing
+The cost_category field determines which type of financial data a row represents.
+
+The system selects the correct cost category based on the question.
+
+Revenue
+Usually:
+
+cost_category = 'Revenue Summary'
+include_exclude = 'Include'
+
+Billing utilization
+High-level totals:
+
+cost_category = 'Billing Utilization Summary'
+
+Detailed breakdowns by department, service area, or employee:
+
+cost_category = 'Billing Utilization'
+
+Cost and expense
+cost_category = 'Cost Summary'
+
+Headcount and end capacity
+cost_category = 'GB Wise END Capacity'
+
+Attrition
+cost_category = 'Attrition'
+
+Employee-level data
+Often routed to:
+
+cost_category = 'WW Employee'
+
+This distinction is important because not every cost category contains the same columns.
+
+For example, a high-level summary may contain enough information for totals by entity, while a detailed billing category may be required for service-area or employee-level analysis.
+
+8. KPI calculations
+Many Bosch KPIs use specialized deterministic SQL builders instead of generic LLM-generated SQL.
+
+Examples include:
+
+Billing utilization
+A formula based on billed capacity divided by available or allocated capacity.
+
+EBIT percentage
+Conceptually:
+
+EBIT % = (Revenue - Cost) / Revenue × 100
+
+Available capacity
+A Bosch-specific formula combining several capacity fields, for example:
+
+Allocated Capacity
++ Not Allocated Capacity
++ M/S Capacity
++ VKM Capacity
+- Non-Linear Capacity
+
+Some formulas also account for SL2 capacity fields.
+
+Price mix
+Calculates the share of premium/lead billing capacity compared with total applicable billing capacity.
+
+Pyramid mix
+Analyzes salary or seniority bands such as:
+
+48–51
+52–53
+54–55
+56 and above
+E2
+E3
+E4
+SLX
+Internal and external mix
+Separates internal Bosch capacity from external or outsourcing capacity.
+
+Other supported KPI groups
+Revenue
+Budget
+Budget per capacity
+Offshore capacity
+Outsourcing capacity
+Attrition percentage
+Cost
+Gross margin
+Direct cost
+Indirect cost
+CTG adjustment
+Customer revenue
+Investment/CAPEX/PMO calculations
+9. Time interpretation
+The query engine handles:
+
+Specific months
+Specific years
+Fiscal years
+Quarters
+YTD
+MTD
+Monthly trends
+Month-over-month analysis
+Last N months
+Year-over-year comparison
+Difference or delta between periods
+Variance analysis
+“Which month” ranking questions
+Examples:
+
+“Revenue for March 2025”
+
+year = 2025
+month = 3
+
+“Revenue for Q1 2025”
+
+month IN (1, 2, 3)
+year = 2025
+
+“Revenue trend in 2025”
+
+group_by = month
+year = 2025
+
+“Difference between March 2025 and March 2026”
+
+The engine runs separate period queries and compares the results.
+
+If the user does not specify a period, the system normally uses the latest available months, generally up to the latest three months in the newest available year.
+
+10. Entity and filter detection
+Entity filters are resolved using:
+
+Known Bosch aliases
+Cube dimension values
+Seeded column values
+Fuzzy matching
+Exact matching for sensitive entity codes
+For example:
+
+“Compare BGSW and BGSV”
+
+becomes:
+
+region_entity IN ('BGSW', 'BGSV')
+
+The parser also handles special cases where words should not be interpreted as filters.
+
+For example:
+
+“Internal capacity” should not accidentally become resource_type = Internal
+“External mix” should not accidentally become an external entity filter
+“Corporate cost” should not incorrectly become new_service_area = Corporate
+These protected phrases are handled explicitly to reduce false filters.
+
+11. SQL generation and execution
+Once the intent is built, the Python service compiles it into SQL.
+
+The query compiler:
+
+Adds the target cube_id
+Adds dimension filters
+Adds cost-category filters
+Adds year/month filters
+Adds grouping columns
+Adds metric calculations
+Applies currency selection
+Applies ranking, comparison, or trend logic
+Uses parameterized SQL where possible
+Executes against PostgreSQL
+The generated result includes:
+
+SQL query
+Returned rows
+Column names
+Row count
+Execution time
+Currency
+Calculation type
+View type
+Time filter applied
+Comparison metadata
+Every executed query can be logged in:
+
+cube_query_jobs
+
+The chat layer also records:
+
+query_audit
+
+with:
+
+Original question
+Sources used
+Successful sources
+Failed sources
+Latency
+Associated chat and message
+12. Multi-source analysis connection
+The Bosch cube is only one possible source.
+
+The Node QueryOrchestrator can query several sources in parallel:
+
+Personal documents
+Enterprise documents
+Bosch semantic SQL cubes
+Google Search
+Configured database sources
+Configured external sources
+
+The process is:
+
+Run all enabled sources in parallel
+   ↓
+Collect evidence
+   ↓
+Rank evidence
+   ↓
+Build a context with citations
+   ↓
+Send verified context to the AI
+   ↓
+Generate the final explanation
+
+For Bosch financial questions, semantic SQL evidence normally has high relevance and includes the actual SQL result.
+
+The AI receives the structured result and source metadata rather than having to invent the numbers.
+
+13. Final answer generation
+After SQL execution:
+
+The evidence broker ranks the returned evidence.
+It builds a financial context.
+It adds citations and data coverage information.
+The Node service sends the context to the configured AI provider.
+The response is streamed to the browser.
+The assistant message is stored in the chat history.
+Charts may be added when the result is suitable for visualization.
+The AI is primarily used to:
+
+Explain the result
+Summarize trends
+Compare periods
+Describe drivers
+Present findings clearly
+Answer follow-up questions
+The numerical foundation comes from the database query and calculation logic.
+
+14. Investment/CAPEX/PMO path
+Investment cubes use a separate route:
+
+/api/v2/semantic-sql/investment-query
+
+When the cube schema type is:
+
+investment_capex_pmo
+
+the query bypasses the normal Bosch KPI fact-data path and uses investment-specific SQL and data structures.
+
+This supports separate analysis for:
+
+Investment
+CAPEX
+PMO
+Project-related financial data
+15. Data ingestion connection
+Bosch data reaches the query system through:
+
+Manual upload
+Anaplan export
+Azure Blob synchronization
+
+The ingestion process is:
+
+Excel/CSV/blob file
+   ↓
+File registry and ingestion job
+   ↓
+Column/schema detection
+   ↓
+Data normalization
+   ↓
+cube_fact_data or cube_plan_data
+   ↓
+Dimension and cost-category registration
+   ↓
+Business logic availability
+   ↓
+Queryable Bosch cube
+
+The system tracks:
+
+File versions
+Active versus archived documents
+Schema changes
+Processed blobs
+ETags
+Failed files
+Ingestion progress
+Query jobs
+Technical summary
+The Bosch query system is a hybrid semantic analytics engine:
+
+Natural language
+   + Bosch aliases
+   + cube metadata
+   + business terminology
+   + deterministic KPI rules
+   + optional LLM intent parsing
+   + parameterized SQL
+   + PostgreSQL facts
+   + AI explanation
+
+The most important design principle is:
+
+The LLM interprets and explains, while the database and deterministic calculation builders provide the financial values.
+
+This allows LedgerLM to answer Bosch questions about revenue, capacity, billing, budget, utilization, EBIT, attrition, pyramid mix, entities, service areas, projects, customers, and time periods while maintaining domain-specific Bosch reporting rules.
