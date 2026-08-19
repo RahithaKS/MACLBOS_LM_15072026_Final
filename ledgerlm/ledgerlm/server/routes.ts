@@ -13,6 +13,11 @@ import {
   insertBoardSchema,
   insertQueryAuditSchema,
   enterpriseDocuments,
+  boardStudioTemplates,
+  boardStudioBoards,
+  boardStudioReports,
+  boardStudioThreads,
+  boardStudioMessages,
 } from "@shared/schema";
 import { eq, desc, sql as sqlTag, sql } from "drizzle-orm";
 import { randomBytes } from "crypto";
@@ -65,6 +70,7 @@ import {
 import { writeAuditLog, extractIp } from "./services/auditLogger";
 import { runBackup, listBackups } from "./services/backupService";
 import { listRetentionPolicies, updateRetentionPolicy, runRetentionEngine } from "./services/retentionEngine";
+import { buildBoardStudioResult } from "./services/boardStudioService";
 
 const signinSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -82,6 +88,72 @@ const verifyOtpSchema = z.object({
 const resendOtpSchema = z.object({
   email: z.string().email("Invalid email address"),
 });
+
+const boardStudioBoardSchema = z.object({
+  title: z.string().trim().min(1, "A Board name is required").max(200),
+  description: z.string().trim().max(2000).optional().nullable(),
+  templateId: z.string().uuid().optional().nullable(),
+  cubeId: z.string().uuid("Select an Enterprise Cube").optional().nullable(),
+  config: z.record(z.unknown()).optional().default({}),
+});
+
+const defaultBoardStudioTemplates = [
+  {
+    slug: "balance-sheet-analysis",
+    name: "Balance Sheet Analysis",
+    description: "Review a governed Balance Sheet snapshot with controlled evidence and traceable outputs.",
+    analysisPrompt: "Summarize material Balance Sheet movements, liquidity signals, and integrity exceptions using the deterministic result only.",
+  },
+  {
+    slug: "variance-analysis",
+    name: "Variance Analysis",
+    description: "Compare governed actuals, plan, and forecast data for management review.",
+    analysisPrompt: "Explain material variances, their data basis, and recommended management actions.",
+  },
+  {
+    slug: "trend-analysis",
+    name: "Trend Analysis",
+    description: "Track the direction of governed measures across available reporting versions.",
+    analysisPrompt: "Describe trends and identify the most relevant evidence for follow-up.",
+  },
+  {
+    slug: "kpi-review",
+    name: "KPI Review",
+    description: "Provide a concise operating KPI view from an authorized Enterprise Cube.",
+    analysisPrompt: "Interpret performance indicators without recalculating the deterministic source values.",
+  },
+  {
+    slug: "audit-review",
+    name: "Audit Review",
+    description: "Surface data availability, lineage, and governance signals for a Cube-backed review.",
+    analysisPrompt: "Focus on evidence, scope, controls, and data-quality exceptions.",
+  },
+];
+
+async function getBoardStudioAccessibleCubes(user: any) {
+  // Authenticated user records intentionally do not carry companyId. Resolve
+  // the domain via the governed domain-user membership instead of assuming the
+  // optional company membership is present on req.user.
+  const domainUser = await storage.getDomainUserByEmail(user.username);
+  if (!domainUser || domainUser.status === "inactive") return [];
+
+  const accessibleCubeIds = await storage.getAccessibleCubeIds(user.username, domainUser.domainId);
+  const cubes = await storage.getCubes(domainUser.domainId);
+  return cubes.filter((cube) => accessibleCubeIds.includes(cube.id));
+}
+
+async function ensureBoardStudioTemplates() {
+  const existing = await db.select({ id: boardStudioTemplates.id }).from(boardStudioTemplates).limit(1);
+  if (existing.length === 0) {
+    await db.insert(boardStudioTemplates).values(defaultBoardStudioTemplates).onConflictDoNothing();
+  }
+}
+
+function validateBoardStudioSelection(template: any, cube: any) {
+  if (template?.slug === "balance-sheet-analysis" && cube?.schemaType !== "balance_sheet") {
+    throw new Error("Balance Sheet Analysis requires an authorized Balance Sheet Cube");
+  }
+}
 
 const createDomainSchema = z.object({
   name:               z.string().min(1).max(253),
@@ -118,7 +190,7 @@ const createCubeSchema = z.object({
   description:     z.string().max(1000).optional().nullable(),
   domainId:        z.string().optional(),
   sourceType:      z.string().max(50).optional(),
-  schemaType:      z.enum(['kpi', 'investment_capex_pmo']).optional().default('kpi'),
+  schemaType:      z.enum(['kpi', 'investment_capex_pmo', 'balance_sheet']).optional().default('kpi'),
   connectorId:     z.string().optional(),
   ingestionConfig: z.record(z.unknown()).optional().nullable(),
 });
@@ -7408,7 +7480,7 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
         name: name.trim(),
         description: description?.trim() || null,
         sourceType: sourceType || "manual",
-        schemaType: (cubeParsed.data.schemaType as 'kpi' | 'investment_capex_pmo') || 'kpi',
+        schemaType: (cubeParsed.data.schemaType as 'kpi' | 'investment_capex_pmo' | 'balance_sheet') || 'kpi',
         connectorId: connectorId || null,
         ingestionConfig: processedConfig
           ? JSON.stringify(processedConfig)
@@ -8094,6 +8166,298 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
     } catch (error: any) {
       console.error("Error fetching accessible cubes:", error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ==========================================
+  // BOARD STUDIO — isolated, Cube-governed analysis workspace
+  // These routes deliberately do not use the legacy /api/boards surface.
+  // ==========================================
+
+  app.get("/api/board-studio/templates", requireAuth, async (_req, res) => {
+    try {
+      await ensureBoardStudioTemplates();
+      const templates = await db
+        .select()
+        .from(boardStudioTemplates)
+        .orderBy(boardStudioTemplates.name);
+      res.json(templates);
+    } catch (error) {
+      console.error("Board Studio template error:", error);
+      res.status(500).json({ error: "Failed to load Board Studio templates" });
+    }
+  });
+
+  app.get("/api/board-studio/cubes", requireAuth, async (req, res) => {
+    try {
+      const cubes = await getBoardStudioAccessibleCubes((req as any).user);
+      res.json(cubes.map((cube) => ({
+        id: cube.id,
+        name: cube.name,
+        description: cube.description,
+        schemaType: cube.schemaType ?? "kpi",
+      })));
+    } catch (error) {
+      console.error("Board Studio Cube access error:", error);
+      res.status(500).json({ error: "Failed to load authorized Enterprise Cubes" });
+    }
+  });
+
+  app.get("/api/board-studio/boards", requireAuth, async (req, res) => {
+    try {
+      const boards = await db
+        .select()
+        .from(boardStudioBoards)
+        .where(eq(boardStudioBoards.userId, (req as any).user.id))
+        .orderBy(desc(boardStudioBoards.updatedAt));
+      res.json(boards);
+    } catch (error) {
+      console.error("Board Studio board list error:", error);
+      res.status(500).json({ error: "Failed to load Board Studio boards" });
+    }
+  });
+
+  app.get("/api/board-studio/boards/:id", requireAuth, async (req, res) => {
+    try {
+      const [board] = await db
+        .select()
+        .from(boardStudioBoards)
+        .where(eq(boardStudioBoards.id, req.params.id))
+        .limit(1);
+      if (!board) return res.status(404).json({ error: "Board Studio board not found" });
+      if (board.userId !== (req as any).user.id) return res.status(403).json({ error: "Forbidden" });
+      res.json(board);
+    } catch (error) {
+      console.error("Board Studio board read error:", error);
+      res.status(500).json({ error: "Failed to load Board Studio board" });
+    }
+  });
+
+  app.post("/api/board-studio/boards", requireAuth, async (req, res) => {
+    try {
+      await ensureBoardStudioTemplates();
+      const input = boardStudioBoardSchema.parse(req.body);
+      const accessibleCubes = await getBoardStudioAccessibleCubes((req as any).user);
+      const selectedCube = input.cubeId
+        ? accessibleCubes.find((cube) => cube.id === input.cubeId)
+        : undefined;
+      if (input.cubeId && !selectedCube) {
+        return res.status(403).json({ error: "The selected Enterprise Cube is not authorized for your account" });
+      }
+      let selectedTemplate: typeof boardStudioTemplates.$inferSelect | undefined;
+      if (input.templateId) {
+        const [template] = await db
+          .select()
+          .from(boardStudioTemplates)
+          .where(eq(boardStudioTemplates.id, input.templateId))
+          .limit(1);
+        if (!template) return res.status(400).json({ error: "Board Studio template not found" });
+        selectedTemplate = template;
+      }
+      validateBoardStudioSelection(selectedTemplate, selectedCube);
+
+      const [board] = await db
+        .insert(boardStudioBoards)
+        .values({
+          userId: (req as any).user.id,
+          title: input.title,
+          description: input.description ?? null,
+          templateId: input.templateId ?? null,
+          cubeId: input.cubeId ?? null,
+          config: input.config,
+        })
+        .returning();
+      res.status(201).json(board);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.issues[0]?.message || "Invalid Board Studio board data" });
+      }
+      if (error instanceof Error && error.message.includes("requires an authorized Balance Sheet Cube")) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error("Board Studio board create error:", error);
+      res.status(500).json({ error: "Failed to create Board Studio board" });
+    }
+  });
+
+  app.patch("/api/board-studio/boards/:id", requireAuth, async (req, res) => {
+    try {
+      const [existing] = await db
+        .select()
+        .from(boardStudioBoards)
+        .where(eq(boardStudioBoards.id, req.params.id))
+        .limit(1);
+      if (!existing) return res.status(404).json({ error: "Board Studio board not found" });
+      if (existing.userId !== (req as any).user.id) return res.status(403).json({ error: "Forbidden" });
+
+      const input = boardStudioBoardSchema.partial().parse(req.body);
+      const targetCubeId = input.cubeId ?? existing.cubeId;
+      const targetTemplateId = input.templateId ?? existing.templateId;
+      const accessibleCubes = await getBoardStudioAccessibleCubes((req as any).user);
+      const selectedCube = targetCubeId
+        ? accessibleCubes.find((cube) => cube.id === targetCubeId)
+        : undefined;
+      if (targetCubeId && !selectedCube) {
+          return res.status(403).json({ error: "The selected Enterprise Cube is not authorized for your account" });
+      }
+      let selectedTemplate: typeof boardStudioTemplates.$inferSelect | undefined;
+      if (targetTemplateId) {
+        const [template] = await db
+          .select()
+          .from(boardStudioTemplates)
+          .where(eq(boardStudioTemplates.id, targetTemplateId))
+          .limit(1);
+        if (!template) return res.status(400).json({ error: "Board Studio template not found" });
+        selectedTemplate = template;
+      }
+      validateBoardStudioSelection(selectedTemplate, selectedCube);
+      const [board] = await db
+        .update(boardStudioBoards)
+        .set({
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.templateId !== undefined ? { templateId: input.templateId } : {}),
+          ...(input.cubeId !== undefined ? { cubeId: input.cubeId } : {}),
+          ...(input.config !== undefined ? { config: input.config } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(boardStudioBoards.id, existing.id))
+        .returning();
+      res.json(board);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.issues[0]?.message || "Invalid Board Studio board data" });
+      }
+      if (error instanceof Error && error.message.includes("requires an authorized Balance Sheet Cube")) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error("Board Studio board update error:", error);
+      res.status(500).json({ error: "Failed to update Board Studio board" });
+    }
+  });
+
+  app.delete("/api/board-studio/boards/:id", requireAuth, async (req, res) => {
+    try {
+      const [board] = await db
+        .select()
+        .from(boardStudioBoards)
+        .where(eq(boardStudioBoards.id, req.params.id))
+        .limit(1);
+      if (!board) return res.status(404).json({ error: "Board Studio board not found" });
+      if (board.userId !== (req as any).user.id) return res.status(403).json({ error: "Forbidden" });
+      await db.delete(boardStudioBoards).where(eq(boardStudioBoards.id, board.id));
+      res.status(204).send();
+    } catch (error) {
+      console.error("Board Studio board delete error:", error);
+      res.status(500).json({ error: "Failed to delete Board Studio board" });
+    }
+  });
+
+  app.get("/api/board-studio/boards/:id/reports", requireAuth, async (req, res) => {
+    try {
+      const [board] = await db.select().from(boardStudioBoards).where(eq(boardStudioBoards.id, req.params.id)).limit(1);
+      if (!board) return res.status(404).json({ error: "Board Studio board not found" });
+      if (board.userId !== (req as any).user.id) return res.status(403).json({ error: "Forbidden" });
+      const accessibleCubes = await getBoardStudioAccessibleCubes((req as any).user);
+      const reports = await db
+        .select()
+        .from(boardStudioReports)
+        .where(eq(boardStudioReports.boardId, board.id))
+        .orderBy(desc(boardStudioReports.createdAt));
+      const accessibleCubeIds = new Set(accessibleCubes.map((cube) => cube.id));
+      if (reports.some((report) => !report.cubeId || !accessibleCubeIds.has(report.cubeId))) {
+        return res.status(403).json({ error: "You no longer have access to one or more Enterprise Cubes used by this Board Studio report history" });
+      }
+      res.json(reports);
+    } catch (error) {
+      console.error("Board Studio report list error:", error);
+      res.status(500).json({ error: "Failed to load Board Studio reports" });
+    }
+  });
+
+  app.post("/api/board-studio/boards/:id/run", requireAuth, async (req, res) => {
+    const startedAt = Date.now();
+    try {
+      const [board] = await db.select().from(boardStudioBoards).where(eq(boardStudioBoards.id, req.params.id)).limit(1);
+      if (!board) return res.status(404).json({ error: "Board Studio board not found" });
+      if (board.userId !== (req as any).user.id) return res.status(403).json({ error: "Forbidden" });
+      if (!board.cubeId) return res.status(400).json({ error: "Select an authorized Enterprise Cube before running this Board Studio analysis" });
+
+      const accessibleCubes = await getBoardStudioAccessibleCubes((req as any).user);
+      const cube = accessibleCubes.find((candidate) => candidate.id === board.cubeId);
+      if (!cube) return res.status(403).json({ error: "Your account no longer has access to this Board's Enterprise Cube" });
+
+      const [template] = board.templateId
+        ? await db.select().from(boardStudioTemplates).where(eq(boardStudioTemplates.id, board.templateId)).limit(1)
+        : [];
+      validateBoardStudioSelection(template, cube);
+      const result = await buildBoardStudioResult(
+        cube.id,
+        cube.name,
+        template?.name ?? "Custom Board Studio analysis",
+        template?.slug === "balance-sheet-analysis",
+      );
+      const [report] = await db
+        .insert(boardStudioReports)
+        .values({
+          boardId: board.id,
+          cubeId: cube.id,
+          trigger: "adhoc",
+          status: "complete",
+          durationMs: Date.now() - startedAt,
+          result,
+          configSnapshot: board.config ?? {},
+        })
+        .returning();
+      const [thread] = await db
+        .insert(boardStudioThreads)
+        .values({
+          boardId: board.id,
+          reportId: report.id,
+          name: `Analysis run — ${new Date().toLocaleDateString("en-CA")}`,
+          trigger: "adhoc",
+        })
+        .returning();
+      await db.insert(boardStudioMessages).values({
+        threadId: thread.id,
+        role: "assistant",
+        content: String((result as any).executiveSummary),
+        metadata: { reportId: report.id, generatedBy: "deterministic-cube-aggregation" },
+      });
+
+      res.status(201).json(report);
+    } catch (error: any) {
+      if (error instanceof Error && error.message.includes("requires an authorized Balance Sheet Cube")) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error("Board Studio analysis error:", error);
+      res.status(500).json({ error: error?.message || "Failed to run Board Studio analysis" });
+    }
+  });
+
+  app.get("/api/board-studio/boards/:id/threads", requireAuth, async (req, res) => {
+    try {
+      const [board] = await db.select().from(boardStudioBoards).where(eq(boardStudioBoards.id, req.params.id)).limit(1);
+      if (!board) return res.status(404).json({ error: "Board Studio board not found" });
+      if (board.userId !== (req as any).user.id) return res.status(403).json({ error: "Forbidden" });
+      const accessibleCubes = await getBoardStudioAccessibleCubes((req as any).user);
+      const threadRows = await db
+        .select({
+          thread: boardStudioThreads,
+          reportCubeId: boardStudioReports.cubeId,
+        })
+        .from(boardStudioThreads)
+        .leftJoin(boardStudioReports, eq(boardStudioThreads.reportId, boardStudioReports.id))
+        .where(eq(boardStudioThreads.boardId, board.id))
+        .orderBy(desc(boardStudioThreads.createdAt));
+      const accessibleCubeIds = new Set(accessibleCubes.map((cube) => cube.id));
+      if (threadRows.some(({ thread, reportCubeId }) => !thread.reportId || !reportCubeId || !accessibleCubeIds.has(reportCubeId))) {
+        return res.status(403).json({ error: "You no longer have access to one or more Enterprise Cubes used by this Board Studio discussion history" });
+      }
+      res.json(threadRows.map(({ thread }) => thread));
+    } catch (error) {
+      console.error("Board Studio thread list error:", error);
+      res.status(500).json({ error: "Failed to load Board Studio threads" });
     }
   });
 

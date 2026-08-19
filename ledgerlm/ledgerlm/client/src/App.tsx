@@ -15,6 +15,8 @@ import ChatDetail from "@/pages/ChatDetail";
 import Vault from "@/pages/Vault";
 import Boards from "@/pages/Boards";
 import BoardDetail from "@/pages/BoardDetail";
+import BoardStudio from "@/pages/BoardStudio";
+import BoardStudioDetail from "@/pages/BoardStudioDetail";
 import MarketIntelligence from "@/pages/MarketIntelligence";
 import AdminEnterprise from "@/pages/AdminEnterprise";
 import AdminUsers from "@/pages/AdminUsers";
@@ -104,6 +106,16 @@ function Router() {
       <Route path="/board/:id">
         <DashboardLayout>
           <BoardDetail />
+        </DashboardLayout>
+      </Route>
+      <Route path="/board-studio">
+        <DashboardLayout>
+          <BoardStudio />
+        </DashboardLayout>
+      </Route>
+      <Route path="/board-studio/:id">
+        <DashboardLayout>
+          <BoardStudioDetail />
         </DashboardLayout>
       </Route>
       <Route path="/market-intelligence">

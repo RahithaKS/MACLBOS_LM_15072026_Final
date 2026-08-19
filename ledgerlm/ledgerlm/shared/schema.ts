@@ -194,6 +194,92 @@ export const cubeBoardReports = pgTable("cube_board_reports", {
   createdAtIdx: index("cube_board_reports_created_at_idx").on(table.createdAt),
 }));
 
+// Board Studio is isolated from the legacy Boards feature. It stores its own
+// configuration and generated results; Enterprise Cubes remain the source of
+// truth for all financial input data.
+export const boardStudioTemplates = pgTable("board_studio_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  slug: varchar("slug", { length: 100 }).notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  analysisPrompt: text("analysis_prompt").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  slugIdx: index("board_studio_templates_slug_idx").on(table.slug),
+}));
+
+export const boardStudioBoards = pgTable("board_studio_boards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  templateId: varchar("template_id").references(() => boardStudioTemplates.id, { onDelete: 'set null' }),
+  cubeId: varchar("cube_id").references(() => cubes.id, { onDelete: 'set null' }),
+  title: text("title").notNull(),
+  description: text("description"),
+  // Scope, comparison, schedule and PPT template anatomy deliberately live
+  // outside the legacy boards.settings contract.
+  config: jsonb("config").notNull().default({}),
+  status: varchar("status", { length: 20 }).notNull().default('active'),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  userIdIdx: index("board_studio_boards_user_id_idx").on(table.userId),
+  cubeIdIdx: index("board_studio_boards_cube_id_idx").on(table.cubeId),
+  templateIdIdx: index("board_studio_boards_template_id_idx").on(table.templateId),
+}));
+
+export const boardStudioReports = pgTable("board_studio_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  boardId: varchar("board_id").notNull().references(() => boardStudioBoards.id, { onDelete: 'cascade' }),
+  cubeId: varchar("cube_id").references(() => cubes.id, { onDelete: 'set null' }),
+  trigger: varchar("trigger", { length: 20 }).notNull().default('adhoc'),
+  status: varchar("status", { length: 20 }).notNull().default('complete'),
+  durationMs: integer("duration_ms"),
+  result: jsonb("result").notNull(),
+  configSnapshot: jsonb("config_snapshot").notNull().default({}),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  boardIdIdx: index("board_studio_reports_board_id_idx").on(table.boardId),
+  createdAtIdx: index("board_studio_reports_created_at_idx").on(table.createdAt),
+}));
+
+export const boardStudioThreads = pgTable("board_studio_threads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  boardId: varchar("board_id").notNull().references(() => boardStudioBoards.id, { onDelete: 'cascade' }),
+  reportId: varchar("report_id").references(() => boardStudioReports.id, { onDelete: 'set null' }),
+  name: text("name").notNull(),
+  trigger: varchar("trigger", { length: 20 }).notNull().default('adhoc'),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  boardIdIdx: index("board_studio_threads_board_id_idx").on(table.boardId),
+  reportIdIdx: index("board_studio_threads_report_id_idx").on(table.reportId),
+}));
+
+export const boardStudioMessages = pgTable("board_studio_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  threadId: varchar("thread_id").notNull().references(() => boardStudioThreads.id, { onDelete: 'cascade' }),
+  role: varchar("role", { length: 20 }).notNull(),
+  content: text("content").notNull(),
+  metadata: jsonb("metadata").notNull().default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  threadIdIdx: index("board_studio_messages_thread_id_idx").on(table.threadId),
+}));
+
+export const boardStudioScheduleRuns = pgTable("board_studio_schedule_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  boardId: varchar("board_id").notNull().references(() => boardStudioBoards.id, { onDelete: 'cascade' }),
+  reportId: varchar("report_id").references(() => boardStudioReports.id, { onDelete: 'set null' }),
+  status: varchar("status", { length: 20 }).notNull().default('queued'),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  boardIdIdx: index("board_studio_schedule_runs_board_id_idx").on(table.boardId),
+  statusIdx: index("board_studio_schedule_runs_status_idx").on(table.status),
+}));
+
 export const documentChunks = pgTable("document_chunks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   documentId: varchar("document_id").notNull().references(() => documents.id, { onDelete: 'cascade' }),
