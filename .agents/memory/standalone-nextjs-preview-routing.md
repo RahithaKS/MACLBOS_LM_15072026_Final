@@ -20,3 +20,9 @@ Raw browser API requests do not automatically inherit a Next.js base path. Stand
 **Why:** A root-relative request such as `/api/analyze` escapes the embedded standalone app and reaches LedgerLM's protected API, which correctly rejects it for lacking LedgerLM's CSRF token.
 
 **How to apply:** Use the standalone API path helper for all client-side standalone API calls, including analysis and board chat, while retaining root behavior for direct standalone development.
+
+When the standalone workspace is embedded in LedgerLM, the LedgerLM sidebar is the only navigation shown; the standalone sidebar is hidden. The direct standalone workspace retains its own sidebar.
+
+**Why:** Two simultaneous sidebars duplicate navigation and leave too little room for Boards and Enterprise Data content.
+
+**How to apply:** Mark LedgerLM iframe destinations as embedded and let the standalone sidebar component detect that mode. Do not alter LedgerLM's outer sidebar for this behavior.

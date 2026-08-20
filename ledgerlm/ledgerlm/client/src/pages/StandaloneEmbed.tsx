@@ -39,7 +39,7 @@ export default function StandaloneEmbed({ page }: { page: StandalonePage }) {
       <div className="min-h-0 flex-1 bg-background p-4">
         <iframe
           title={details.title}
-          src={`/standalone-boards${details.path}`}
+          src={`/standalone-boards${details.path}?embedded=1`}
           className="h-full w-full rounded-xl border bg-white shadow-sm"
           allow="clipboard-write"
           data-testid={`iframe-standalone-${page}`}

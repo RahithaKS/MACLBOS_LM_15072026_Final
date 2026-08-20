@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const NAV_ITEMS = [
   {
@@ -91,6 +92,18 @@ const RECENT_CHATS = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [isEmbedded, setIsEmbedded] = useState(false);
+
+  useEffect(() => {
+    const frameTestId = window.frameElement?.getAttribute("data-testid");
+    const embeddedByFrame = frameTestId?.startsWith("iframe-standalone-") ?? false;
+    const embeddedByRoute =
+      new URLSearchParams(window.location.search).get("embedded") === "1";
+
+    setIsEmbedded(embeddedByFrame || embeddedByRoute);
+  }, []);
+
+  if (isEmbedded) return null;
 
   return (
     <aside className="hidden md:flex w-72 shrink-0 flex-col bg-surface border-r border-border px-5 py-6">
