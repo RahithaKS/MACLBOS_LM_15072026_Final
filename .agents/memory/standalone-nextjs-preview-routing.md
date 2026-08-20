@@ -39,8 +39,8 @@ Decide embedded mode during the standalone request, not in a client-side effect.
 
 **How to apply:** Send the explicit embedded marker with iframe URLs, pass it into the server-rendered layout, and omit the standalone sidebar from the embedded HTML. Keep direct standalone routes unmarked so their sidebar renders normally.
 
-Standalone Board and Enterprise Data frames remain mounted after first use while users navigate native LedgerLM routes.
+Standalone Board and Enterprise Data frames prewarm in the authenticated LedgerLM shell and remain mounted while users navigate native routes.
 
 **Why:** Route-level iframe mounting destroys the standalone document on every navigation, causing reload flashes and losing in-progress UI state when returning.
 
-**How to apply:** Keep lazily opened standalone frames in the persistent LedgerLM shell and toggle their visibility by route; do not recreate an iframe for each return visit.
+**How to apply:** Mount both embedded frames behind the LedgerLM content area as soon as the authenticated shell is ready and toggle their visibility by route. Keep the Board frame as the only embedded scheduler owner so prewarming Enterprise Data cannot duplicate scheduled analysis.

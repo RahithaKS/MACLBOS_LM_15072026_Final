@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
 type StandalonePage = "boards" | "enterprise-data";
@@ -28,6 +27,7 @@ export default function StandaloneEmbed({ page }: { page: StandalonePage }) {
         title={details.title}
         src={`/standalone-boards${details.path}?embedded=1`}
         className="h-full w-full border-0 bg-transparent"
+        loading="eager"
         allow="clipboard-write"
         data-testid={`iframe-standalone-${page}`}
       />
@@ -37,24 +37,16 @@ export default function StandaloneEmbed({ page }: { page: StandalonePage }) {
 
 export function PersistentStandaloneFrames() {
   const [location] = useLocation();
-  const [openedPages, setOpenedPages] = useState<StandalonePage[]>([]);
   const activePage: StandalonePage | null =
     location === "/integrations/standalone-boards"
       ? "boards"
       : location === "/integrations/standalone-enterprise-data"
         ? "enterprise-data"
         : null;
-
-  useEffect(() => {
-    if (activePage && !openedPages.includes(activePage)) {
-      setOpenedPages((current) => [...current, activePage]);
-    }
-  }, [activePage, openedPages]);
-
-  const pagesToRender =
-    activePage && !openedPages.includes(activePage)
-      ? [...openedPages, activePage]
-      : openedPages;
+  // Prewarm both documents after the authenticated shell mounts. They remain
+  // mounted while native LedgerLM routes are active, so the first click after
+  // a browser refresh does not have to cold-start a standalone Next.js app.
+  const pagesToRender: StandalonePage[] = ["boards", "enterprise-data"];
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">

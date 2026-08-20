@@ -15,6 +15,14 @@ export default function ScheduleRunner() {
   const running = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    const isEmbedded = new URLSearchParams(window.location.search).get("embedded") === "1";
+    const isEnterpriseDataPage = window.location.pathname.endsWith("/enterprise-data");
+
+    // When LedgerLM prewarms both standalone frames, only the Boards frame
+    // owns the scheduler. This keeps scheduled analysis behavior intact while
+    // avoiding duplicate background runs from the hidden Enterprise Data frame.
+    if (isEmbedded && isEnterpriseDataPage) return;
+
     async function tick() {
       const now = Date.now();
       for (const board of getBoards()) {
