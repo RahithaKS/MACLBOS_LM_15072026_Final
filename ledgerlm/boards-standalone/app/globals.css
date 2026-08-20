@@ -49,8 +49,32 @@ body[data-embedded="true"] .standalone-page-area {
 }
 
 body[data-embedded="true"] .standalone-page-shell {
-  min-height: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   box-shadow: none;
+}
+
+.standalone-page-shell {
+  display: flex;
+  height: calc(100vh - 2rem);
+  height: calc(100dvh - 2rem);
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.standalone-page-header {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+}
+
+.standalone-page-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 @media (min-width: 1024px) {

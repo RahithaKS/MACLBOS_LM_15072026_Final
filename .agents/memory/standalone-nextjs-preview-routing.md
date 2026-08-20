@@ -44,3 +44,9 @@ Standalone Board and Enterprise Data frames prewarm in the authenticated LedgerL
 **Why:** Route-level iframe mounting destroys the standalone document on every navigation, causing reload flashes and losing in-progress UI state when returning.
 
 **How to apply:** Mount both embedded frames behind the LedgerLM content area as soon as the authenticated shell is ready and toggle their visibility by route. Keep the Board frame as the only embedded scheduler owner so prewarming Enterprise Data cannot duplicate scheduled analysis.
+
+Embedded standalone list pages keep their action header fixed while only the page body scrolls.
+
+**Why:** Native LedgerLM pages retain their title and primary actions during long content scrolls; document-level scrolling made the standalone pages feel inconsistent and hid key actions.
+
+**How to apply:** Use a fixed-height page shell with a non-scrolling header and an internal overflow area for Boards and Enterprise Data, in both direct and embedded layouts.
