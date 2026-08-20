@@ -25,7 +25,7 @@ import AdminAgenticWorkflow from "@/pages/AdminAgenticWorkflow";
 import SemanticSqlTest from "@/pages/SemanticSqlTest";
 import NotFound from "@/pages/not-found";
 import Downloads from "@/pages/Downloads";
-import StandaloneEmbed from "@/pages/StandaloneEmbed";
+import { PersistentStandaloneFrames } from "@/pages/StandaloneEmbed";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [, setLocation] = useLocation();
@@ -67,12 +67,39 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
       <SidebarProvider style={style as React.CSSProperties}>
         <div className="flex h-screen w-full bg-background">
           <AppSidebar />
-          <main className="flex-1 overflow-hidden bg-background">
+          <main className="relative flex-1 overflow-hidden bg-background">
+            <PersistentStandaloneFrames />
             {children}
           </main>
         </div>
       </SidebarProvider>
     </ProtectedRoute>
+  );
+}
+
+function AuthenticatedRouteContent() {
+  return (
+    <Switch>
+      <Route path="/dashboard" component={Dashboard} />
+      <Route path="/chat/:id" component={ChatDetail} />
+      <Route path="/vault" component={Vault} />
+      <Route path="/boards" component={Boards} />
+      <Route path="/integrations/standalone-boards">
+        <div aria-hidden="true" />
+      </Route>
+      <Route path="/integrations/standalone-enterprise-data">
+        <div aria-hidden="true" />
+      </Route>
+      <Route path="/board/:id" component={BoardDetail} />
+      <Route path="/market-intelligence" component={MarketIntelligence} />
+      <Route path="/admin/enterprise" component={AdminEnterprise} />
+      <Route path="/admin/users" component={AdminUsers} />
+      <Route path="/admin/agentic-workflow" component={AdminAgenticWorkflow} />
+      <Route path="/super-admin" component={SuperAdmin} />
+      <Route path="/agentic-workflow" component={AgenticWorkflow} />
+      <Route path="/semantic-sql-test" component={SemanticSqlTest} />
+      <Route component={NotFound} />
+    </Switch>
   );
 }
 
@@ -82,78 +109,12 @@ function Router() {
       <Route path="/" component={Welcome} />
       <Route path="/verify-otp" component={VerifyOTP} />
       <Route path="/accept-invitation" component={AcceptInvitation} />
-      <Route path="/dashboard">
-        <DashboardLayout>
-          <Dashboard />
-        </DashboardLayout>
-      </Route>
-      <Route path="/chat/:id">
-        <DashboardLayout>
-          <ChatDetail />
-        </DashboardLayout>
-      </Route>
-      <Route path="/vault">
-        <DashboardLayout>
-          <Vault />
-        </DashboardLayout>
-      </Route>
-      <Route path="/boards">
-        <DashboardLayout>
-          <Boards />
-        </DashboardLayout>
-      </Route>
-      <Route path="/integrations/standalone-boards">
-        <DashboardLayout>
-          <StandaloneEmbed page="boards" />
-        </DashboardLayout>
-      </Route>
-      <Route path="/integrations/standalone-enterprise-data">
-        <DashboardLayout>
-          <StandaloneEmbed page="enterprise-data" />
-        </DashboardLayout>
-      </Route>
-      <Route path="/board/:id">
-        <DashboardLayout>
-          <BoardDetail />
-        </DashboardLayout>
-      </Route>
-      <Route path="/market-intelligence">
-        <DashboardLayout>
-          <MarketIntelligence />
-        </DashboardLayout>
-      </Route>
-      <Route path="/admin/enterprise">
-        <DashboardLayout>
-          <AdminEnterprise />
-        </DashboardLayout>
-      </Route>
-      <Route path="/admin/users">
-        <DashboardLayout>
-          <AdminUsers />
-        </DashboardLayout>
-      </Route>
-      <Route path="/admin/agentic-workflow">
-        <DashboardLayout>
-          <AdminAgenticWorkflow />
-        </DashboardLayout>
-      </Route>
-      <Route path="/super-admin">
-        <DashboardLayout>
-          <SuperAdmin />
-        </DashboardLayout>
-      </Route>
-      <Route path="/agentic-workflow">
-        <DashboardLayout>
-          <AgenticWorkflow />
-        </DashboardLayout>
-      </Route>
-      <Route path="/semantic-sql-test">
-        <DashboardLayout>
-          <SemanticSqlTest />
-        </DashboardLayout>
-      </Route>
       <Route path="/downloads" component={Downloads} />
-      <Route component={NotFound} />
+      <Route>
+        <DashboardLayout>
+          <AuthenticatedRouteContent />
+        </DashboardLayout>
+      </Route>
     </Switch>
   );
 }
