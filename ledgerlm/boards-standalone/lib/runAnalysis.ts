@@ -122,6 +122,19 @@ export class AnalysisStoppedError extends Error {
   }
 }
 
+/** The embedded app shares LedgerLM's session, including its CSRF protection. */
+async function ledgerLmCsrfToken(signal?: AbortSignal): Promise<string> {
+  const response = await fetch("/api/auth/csrf-token", {
+    credentials: "include",
+    signal,
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.csrfToken) {
+    throw new Error(payload?.error ?? "Could not establish a secure LedgerLM session. Please sign in again.");
+  }
+  return payload.csrfToken as string;
+}
+
 /**
  * Read the analysis route's newline-delimited stream: progress ticks, then a
  * single result or error line. Resolves with the result; rejects on error or
@@ -177,9 +190,83 @@ export async function runBoardAnalysis(
   await ensureDatasetsLoaded();
   const board = getBoard(boardId);
   if (!board) throw new Error("Board not found.");
+  const startedAt = Date.now();
+
+  // Entity P&L boards intentionally never copy Enterprise Data into the
+  // browser. Each run asks the authenticated LedgerLM proxy to authorize the
+  // saved cube selection and invoke the read-only Python calculation service.
+  if (board.entityPnl?.cubeId) {
+    if (!board.entityPnl.entity.trim() || !board.entityPnl.asOf) {
+      throw new Error("Choose an entity and an as-of month before running the Entity P&L.");
+    }
+    opts.onProgress?.({ pct: 2, until: 15, stage: "Authorizing the Enterprise cube" });
+    let payload: { result?: AnalysisResult; error?: string };
+    try {
+      const csrfToken = await ledgerLmCsrfToken(opts.signal);
+      const res = await fetch("/api/v2/entity-pnl/report-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-csrf-token": csrfToken },
+        signal: opts.signal,
+        credentials: "include",
+        body: JSON.stringify({
+          cube_id: board.entityPnl.cubeId,
+          entity: board.entityPnl.entity,
+          as_of: board.entityPnl.asOf,
+          comparison: board.entityPnl.comparison,
+          currency: board.entityPnl.currency,
+          cf_version: board.entityPnl.cfVersion,
+        }),
+      });
+      payload = await res.json().catch(() => ({}));
+      if (!res.ok || !payload.result) {
+        throw new Error(payload.error ?? "Could not calculate the Entity P&L from this cube.");
+      }
+    } catch (error) {
+      if (opts.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+        throw new AnalysisStoppedError();
+      }
+      throw error;
+    }
+    if (opts.signal?.aborted) throw new AnalysisStoppedError();
+    opts.onProgress?.({ pct: 88, until: 100, stage: "Saving the governed P&L report" });
+    const now = new Date();
+    const report: Report = {
+      id: crypto.randomUUID(),
+      createdAt: now.toISOString(),
+      durationMs: Date.now() - startedAt,
+      trigger,
+      result: payload.result,
+    };
+    const thread: AnalysisThread = {
+      id: crypto.randomUUID(),
+      name: `${trigger === "scheduled" ? "Scheduled run" : "Ad-hoc run"} — ${now.toLocaleString([], {
+        dateStyle: "short",
+        timeStyle: "short",
+      })}`,
+      createdAt: now.toISOString(),
+      trigger,
+      reportId: report.id,
+      messages: [
+        {
+          role: "assistant",
+          text: `Entity P&L report generated.\n\n${report.result.summary}\n\nAsk me anything about this report or the underlying data.`,
+        },
+      ],
+    };
+    const fresh = getBoard(boardId) ?? board;
+    const updated: Board = {
+      ...fresh,
+      reports: [report, ...fresh.reports],
+      threads: [thread, ...fresh.threads],
+    };
+    saveBoard(updated);
+    announceBoardsUpdated();
+    opts.onProgress?.({ pct: 100, until: 100, stage: "Done" });
+    return updated;
+  }
+
   const cube = getCube(board.cubeId);
   if (!cube) throw new Error("No data cube connected to this board.");
-  const startedAt = Date.now();
 
   // Only ship the columns in scope — wide datasets are too big otherwise.
   const records = projectRecordsForScope(cube.records, {

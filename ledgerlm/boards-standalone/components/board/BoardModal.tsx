@@ -27,6 +27,7 @@ import type {
   ScheduleFrequency,
   ScopeMode,
   TimeGranularity,
+  EntityPnlSettings,
 } from "@/lib/types";
 
 const GRANULARITY_LABELS: Record<TimeGranularity, string> = {
@@ -44,6 +45,7 @@ export interface BoardModalResult {
   templateTheme: PptTheme | null;
   templateAnatomy: PptTemplateAnatomy | null;
   cubeId: string | null;
+  entityPnl: EntityPnlSettings | null;
   timeGranularity: TimeGranularity;
   comparisonBasis: ComparisonBasis;
   scopeMode: ScopeMode;
@@ -401,6 +403,7 @@ function TemplateAnatomyView({ anatomy }: { anatomy: PptTemplateAnatomy }) {
 }
 
 export default function BoardModal({ mode, template, board, onClose, onSubmit }: Props) {
+  const isEntityPnl = template.id === "entity-pnl";
   const [cubes, setCubes] = useState<DataCube[]>(() => getCubes());
   useEffect(() => {
     ensureDatasetsLoaded().then(() => setCubes(getCubes()));
@@ -461,6 +464,22 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
     reader.readAsText(file);
   }
   const [cubeId, setCubeId] = useState<string | null>(board?.cubeId ?? null);
+  const [enterpriseCubes, setEnterpriseCubes] = useState<
+    { id: string; name: string; description?: string }[]
+  >([]);
+  const [entityOptions, setEntityOptions] = useState<string[]>([]);
+  const [enterpriseError, setEnterpriseError] = useState<string | null>(null);
+  const [entityPnl, setEntityPnl] = useState<EntityPnlSettings>(
+    board?.entityPnl ?? {
+      cubeId: null,
+      cubeName: "",
+      entity: "",
+      asOf: new Date().toISOString().slice(0, 7),
+      comparison: "qoq",
+      currency: "USD",
+      cfVersion: null,
+    },
+  );
   const [timeGranularity, setTimeGranularity] = useState<TimeGranularity>(
     board?.timeGranularity ?? "auto",
   );
@@ -484,6 +503,45 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
       vaultDocuments: true,
     },
   );
+
+  useEffect(() => {
+    if (!isEntityPnl) return;
+    let cancelled = false;
+    fetch("/api/user/accessible-cubes", { credentials: "include" })
+      .then(async (res) => {
+        const payload = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(payload?.error ?? "Could not load accessible Enterprise Data cubes.");
+        if (!cancelled) setEnterpriseCubes(payload?.cubes ?? []);
+      })
+      .catch((error) => {
+        if (!cancelled) setEnterpriseError(error instanceof Error ? error.message : "Could not load Enterprise Data cubes.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isEntityPnl]);
+
+  useEffect(() => {
+    if (!isEntityPnl || !entityPnl.cubeId) {
+      setEntityOptions([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/v2/entity-pnl/cubes/${encodeURIComponent(entityPnl.cubeId)}/entities`, {
+      credentials: "include",
+    })
+      .then(async (res) => {
+        const payload = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(payload?.error ?? "Could not load entities for this cube.");
+        if (!cancelled) setEntityOptions(payload?.entities ?? []);
+      })
+      .catch((error) => {
+        if (!cancelled) setEnterpriseError(error instanceof Error ? error.message : "Could not load entities for this cube.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [entityPnl.cubeId, isEntityPnl]);
 
   const cube = cubes.find((c) => c.id === cubeId);
   /** Data columns (measures) vs dimensions of the selected cube. */
@@ -612,7 +670,7 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
   function buildSchedule(): BoardSchedule {
     const custom =
       frequency === "custom" ? { customEvery: customEveryValue, customUnit } : {};
-    if (!scheduleEnabled || !cubeId) {
+    if (!scheduleEnabled || (!cubeId && !entityPnl.cubeId)) {
       return {
         enabled: false,
         frequency,
@@ -653,6 +711,7 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
       templateTheme,
       templateAnatomy,
       cubeId,
+      entityPnl: isEntityPnl ? entityPnl : null,
       timeGranularity,
       comparisonBasis: { mode: comparisonMode, periods: comparisonPeriods },
       scopeMode,
@@ -935,6 +994,108 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
             </div>
           </div>
 
+            {isEntityPnl && (
+              <div className="mt-4 rounded-xl border border-border bg-background/40 p-4">
+                <span className="text-sm font-semibold">Governed Entity P&amp;L selection</span>
+                <p className="mt-1 text-xs leading-relaxed text-muted">
+                  The selected cube is read on every run through LedgerLM&apos;s authorized, read-only
+                  service. No Enterprise Data rows are stored in this board.
+                </p>
+                {enterpriseError && (
+                  <p className="mt-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+                    {enterpriseError}
+                  </p>
+                )}
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted">Enterprise cube</span>
+                    <select
+                      value={entityPnl.cubeId ?? ""}
+                      onChange={(e) => {
+                        const selected = enterpriseCubes.find((cube) => cube.id === e.target.value);
+                        setEntityPnl((previous) => ({
+                          ...previous,
+                          cubeId: selected?.id ?? null,
+                          cubeName: selected?.name ?? "",
+                          entity: "",
+                        }));
+                      }}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                    >
+                      <option value="">Select an authorized Enterprise cube</option>
+                      {enterpriseCubes.map((enterpriseCube) => (
+                        <option key={enterpriseCube.id} value={enterpriseCube.id}>
+                          {enterpriseCube.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted">Entity</span>
+                    <input
+                      list="entity-pnl-entities"
+                      value={entityPnl.entity}
+                      onChange={(e) => setEntityPnl((previous) => ({ ...previous, entity: e.target.value }))}
+                      placeholder="Select or enter an entity"
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                    />
+                    <datalist id="entity-pnl-entities">
+                      {entityOptions.map((entity) => <option key={entity} value={entity} />)}
+                    </datalist>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted">As-of month</span>
+                    <input
+                      type="month"
+                      value={entityPnl.asOf}
+                      onChange={(e) => setEntityPnl((previous) => ({ ...previous, asOf: e.target.value }))}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted">Comparison</span>
+                    <select
+                      value={entityPnl.comparison}
+                      onChange={(e) => setEntityPnl((previous) => ({ ...previous, comparison: e.target.value as EntityPnlSettings["comparison"] }))}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                    >
+                      <option value="qoq">QoQ — quarter-end MTD vs prior quarter-end MTD</option>
+                      <option value="yoy">YoY — YTD vs same month last year</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted">Currency</span>
+                    <select
+                      value={entityPnl.currency}
+                      onChange={(e) => setEntityPnl((previous) => ({ ...previous, currency: e.target.value as EntityPnlSettings["currency"] }))}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                    >
+                      <option value="USD">USD</option>
+                      <option value="INR">INR</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted">CF scenario <span className="font-normal">(optional)</span></span>
+                    <select
+                      value={entityPnl.cfVersion ?? ""}
+                      onChange={(e) => setEntityPnl((previous) => ({ ...previous, cfVersion: e.target.value || null }))}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                    >
+                      <option value="">Actual only</option>
+                      {["CF02", "CF05", "CF09", "CF11", "TBP"].map((version) => (
+                        <option key={version} value={version}>{version}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <p className="mt-3 text-[11px] text-muted">
+                  Actual and CF remain separate columns. QoQ derives MTD from consecutive YTD snapshots;
+                  YoY compares YTD snapshots only.
+                </p>
+              </div>
+            )}
+
+            {!isEntityPnl && (
           <div className="rounded-xl border border-border">
             <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary text-white">
@@ -1340,6 +1501,7 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
             )}
             </div>
           </div>
+            )}
             </>
           )}
 

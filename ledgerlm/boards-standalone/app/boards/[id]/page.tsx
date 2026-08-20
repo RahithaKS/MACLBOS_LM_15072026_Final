@@ -108,6 +108,8 @@ export default function BoardDetailPage() {
 
   const template = board ? (getTemplate(board.templateId) ?? TEMPLATES[0]) : undefined;
   const cube = getCube(board?.cubeId ?? null);
+  const isEntityPnl = board?.templateId === "entity-pnl";
+  const hasEntityPnlSelection = Boolean(board?.entityPnl?.cubeId && board.entityPnl.entity && board.entityPnl.asOf);
   const activeThread = board?.threads.find((t) => t.id === activeThreadId) ?? null;
   const latestReport = board?.reports[0] ?? null;
   const activeReport =
@@ -146,7 +148,7 @@ export default function BoardDetailPage() {
   }
 
   async function runAnalysis() {
-    if (!board || !template || !cube || running) return;
+    if (!board || !template || (!cube && !hasEntityPnlSelection) || running) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setRunning(true);
@@ -330,7 +332,7 @@ export default function BoardDetailPage() {
 
         {/* Analysis scope — what this board actually reads. Sits directly under
             the description so it frames everything below it. */}
-        {!cube ? (
+        {!cube && !isEntityPnl ? (
           <div className="mt-5 rounded-xl border border-border px-6 py-10 text-center">
             <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-surface-muted">
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-muted" stroke="currentColor" strokeWidth="1.5">
@@ -349,6 +351,28 @@ export default function BoardDetailPage() {
               Connect Cube
             </button>
           </div>
+        ) : isEntityPnl ? (
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border px-5 py-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">{board.entityPnl?.cubeName || "Enterprise Data cube"}</p>
+              <p className="mt-1 text-xs text-muted">
+                {board.entityPnl?.entity || "Select an entity"} · {board.entityPnl?.asOf || "Select an as-of month"} ·{" "}
+                {board.entityPnl?.comparison === "yoy" ? "YoY YTD comparison" : "QoQ MTD comparison"} ·{" "}
+                {board.entityPnl?.currency ?? "USD"}
+                {board.entityPnl?.cfVersion ? ` · ${board.entityPnl.cfVersion} shown separately` : ""}
+              </p>
+              <p className="mt-1.5 text-[11px] text-muted">
+                Every run reads the authorized cube through the governed, read-only P&amp;L service.
+              </p>
+            </div>
+            <button
+              onClick={runAnalysis}
+              disabled={!hasEntityPnlSelection || running}
+              className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {board.reports.length ? "Re-run Analysis" : "Run Analysis"}
+            </button>
+          </div>
         ) : (
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border px-5 py-4">
             <div className="flex min-w-0 items-center gap-3">
@@ -359,9 +383,9 @@ export default function BoardDetailPage() {
                 </svg>
               </span>
               <div className="min-w-0">
-                <p className="text-sm font-semibold">{cube.name}</p>
-                <p className="line-clamp-2 text-xs text-muted" title={cube.description}>
-                  {cube.description}
+                <p className="text-sm font-semibold">{cube?.name}</p>
+                <p className="line-clamp-2 text-xs text-muted" title={cube?.description}>
+                  {cube?.description}
                   {board.timeGranularity !== "auto" ? ` · ${board.timeGranularity} granularity` : ""}
                   {board.schedule.enabled && board.schedule.nextRunAt
                     ? ` · ${describeFrequency(board.schedule).toLowerCase()} schedule, next run ${new Date(board.schedule.nextRunAt).toLocaleString()}`
@@ -481,14 +505,14 @@ export default function BoardDetailPage() {
           </p>
         )}
 
-        {tab === "reports" && cube && (
+        {tab === "reports" && (cube || isEntityPnl) && (
           <div className="mt-5 space-y-5">
             {board.reports.length === 0
               ? !running && (
                   <div className="rounded-xl border border-border px-6 py-12 text-center">
                     <p className="font-display text-lg font-semibold">No reports yet</p>
                     <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted">
-                      Run Analysis to generate a Smart Analysis report from {cube.name}
+                      Run Analysis to generate a Smart Analysis report from {isEntityPnl ? board.entityPnl?.cubeName || "the selected Enterprise cube" : cube?.name}
                       {board.schedule.enabled ? ", or wait for the next scheduled run" : ""}.
                     </p>
                   </div>

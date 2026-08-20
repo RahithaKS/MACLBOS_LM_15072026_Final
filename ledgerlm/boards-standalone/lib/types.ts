@@ -288,6 +288,41 @@ export interface BalanceSheetReport {
   unmapped: string[];
 }
 
+export type EntityPnlComparison = "qoq" | "yoy";
+export type EntityPnlCurrency = "USD" | "INR";
+
+/**
+ * Stored board inputs for the governed Entity P&L. The cube remains in
+ * Enterprise Data; this only saves the permitted selection to re-run later.
+ */
+export interface EntityPnlSettings {
+  cubeId: string | null;
+  cubeName: string;
+  entity: string;
+  asOf: string;
+  comparison: EntityPnlComparison;
+  currency: EntityPnlCurrency;
+  /** Optional, independently displayed forecast scenario such as CF05. */
+  cfVersion: string | null;
+}
+
+export interface EntityPnlLine {
+  label: string;
+  values: Record<string, number | null>;
+}
+
+/** Deterministic, presentation-ready result returned by the Python adapter. */
+export interface EntityPnlReport {
+  entity: string;
+  asOf: string;
+  comparison: EntityPnlComparison;
+  currency: EntityPnlCurrency;
+  units: string;
+  columns: string[];
+  lines: EntityPnlLine[];
+  evidence: string[];
+}
+
 export interface AnalysisResult {
   summary: string;
   kpis: Kpi[];
@@ -299,6 +334,8 @@ export interface AnalysisResult {
   actions: ActionItem[];
   /** Present only for balance sheet boards. */
   balanceSheet?: BalanceSheetReport | null;
+  /** Present only for governed Entity P&L boards. */
+  entityPnl?: EntityPnlReport | null;
 }
 
 export interface Report {
@@ -324,6 +361,8 @@ export interface Board {
   /** Slide-by-slide layout of that template, and what fills each region. */
   templateAnatomy: PptTemplateAnatomy | null;
   cubeId: string | null;
+  /** Saved selection for a read-only Enterprise Data Entity P&L run. */
+  entityPnl?: EntityPnlSettings | null;
   /** Time period granularity for the analysis ("auto" = finest available). */
   timeGranularity: TimeGranularity;
   /** Which period the closing position is compared against. */

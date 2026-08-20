@@ -19,7 +19,7 @@ from pythonjsonlogger.jsonlogger import JsonFormatter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import settings
-from api.routes import documents, embeddings, rag, enterprise, semantic_sql, schema_config, health
+from api.routes import documents, embeddings, rag, enterprise, semantic_sql, entity_pnl, schema_config, health
 
 
 class _LedgerJsonFormatter(JsonFormatter):
@@ -113,6 +113,7 @@ app.include_router(embeddings.router, prefix="/api/v2/embeddings", tags=["embedd
 app.include_router(rag.router, prefix="/api/v2/rag", tags=["rag"])
 app.include_router(enterprise.router, prefix="/api/v2/enterprise", tags=["enterprise"])
 app.include_router(semantic_sql.router, prefix="/api/v2", tags=["semantic-sql"])
+app.include_router(entity_pnl.router, prefix="/api/v2", tags=["entity-pnl"])
 app.include_router(schema_config.router, prefix="/api/v2/schema-config", tags=["schema-config"])
 app.include_router(health.router, tags=["health"])
 

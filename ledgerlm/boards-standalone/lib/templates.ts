@@ -227,6 +227,28 @@ Charts should show each measure over time and one line per area of the dimension
 trend-by-area table.`,
 });
 
+TEMPLATES.push({
+  id: "entity-pnl",
+  tier: "custom",
+  name: "Entity P&L Analysis",
+  description:
+    "Run a governed entity profit-and-loss review directly against an authorized Enterprise Data cube.",
+  systemPrompt: `I'll help you analyse a governed Entity P&L. I'm configured to:
+- Read only the selected, authorized Enterprise Data cube for each run
+- Compare quarter-end MTD performance quarter-on-quarter, or YTD performance year-on-year
+- Keep Actual and the selected CF scenario in separate columns
+- Report the governed revenue, cost, EBIT and capacity lines with traceable evidence
+- Never infer a business cause that is not supported by the retrieved financial data`,
+  analysisPrompt: `Perform the Entity P&L review using the deterministic figures returned by the
+governed data adapter. For QoQ, compare the selected quarter-end MTD to the prior quarter-end MTD:
+each MTD is derived as the current YTD snapshot less the immediately preceding YTD snapshot. For YoY,
+compare the selected month's YTD to the same month's YTD in the previous year.
+
+Keep Actual and the selected CF scenario separate. Total Expenses must be calculated from the complete
+governed Entity P&L cost population, not merely the visible detail rows. Use the source evidence and
+calculated table as the authority; do not recreate figures from prose or invent business causes.`,
+});
+
 export function getTemplate(id: string): BoardTemplate | undefined {
   return TEMPLATES.find((t) => t.id === id);
 }

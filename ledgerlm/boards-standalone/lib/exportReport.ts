@@ -1191,6 +1191,98 @@ function slideSide(title: string): "Assets" | "Funding" | null {
   return null;
 }
 
+/**
+ * One-page native fall-back for Entity P&L reports. Uploaded PowerPoint
+ * templates still take precedence through addTemplateDrivenSlides below.
+ */
+function addEntityPnlSlide(
+  pptx: InstanceType<typeof import("pptxgenjs").default>,
+  _board: Board,
+  report: Report,
+): boolean {
+  const pnl = report.result.entityPnl;
+  if (!pnl?.lines.length || !pnl.columns.length) return false;
+  const slide = pptx.addSlide();
+  const format = (value: number | null | undefined, percentage = false) => {
+    if (value === null || value === undefined) return "—";
+    return percentage
+      ? `${Number(value).toFixed(1)}%`
+      : `${pnl.currency === "USD" ? "$" : "₹"}${formatAmount(Number(value))}`;
+  };
+  const line = (label: string) => pnl.lines.find((item) => item.label === label);
+  const current = pnl.columns[0];
+  const comparison = pnl.columns[1];
+  const kpis = ["Revenue", "Total Expenses", "EBIT", "EBIT%"];
+
+  slide.background = { color: "FFFFFF" };
+  slide.addText(`Entity P&L Analysis · ${pnl.entity}`, {
+    ...BS_LAYOUT.title, fontSize: 22, bold: true, color: BS_COLORS.ink,
+  });
+  slide.addText(
+    `${current}${comparison ? ` vs ${comparison}` : ""} · ${pnl.comparison === "qoq" ? "QoQ MTD" : "YoY YTD"} · ${pnl.units}`,
+    { ...BS_LAYOUT.asOf, fontSize: 10, color: BS_COLORS.muted },
+  );
+  slide.addShape(pptx.ShapeType.rect, {
+    ...BS_LAYOUT.rule, fill: { color: BS_COLORS.teal }, line: { color: BS_COLORS.teal, width: 0 },
+  });
+  const tileW = (BS_LAYOUT.kpis.w - BS_LAYOUT.kpis.gap * 3) / 4;
+  kpis.forEach((label, index) => {
+    const source = line(label);
+    const x = BS_LAYOUT.kpis.x + index * (tileW + BS_LAYOUT.kpis.gap);
+    slide.addShape(pptx.ShapeType.rect, {
+      x, y: BS_LAYOUT.kpis.y, w: tileW, h: BS_LAYOUT.kpis.h,
+      fill: { color: BS_COLORS.panel }, line: { color: BS_COLORS.hairline, width: 0.75 },
+    });
+    slide.addText(label.toUpperCase(), {
+      x: x + 0.12, y: BS_LAYOUT.kpis.y + 0.1, w: tileW - 0.24, h: 0.16,
+      fontSize: 7.5, bold: true, color: BS_COLORS.muted,
+    });
+    slide.addText(format(source?.values[current], label === "EBIT%"), {
+      x: x + 0.12, y: BS_LAYOUT.kpis.y + 0.33, w: tileW - 0.24, h: 0.28,
+      fontSize: 14, bold: true, color: BS_COLORS.ink,
+    });
+  });
+  const chartLines = ["Revenue", "Total Expenses", "EBIT"];
+  slide.addChart(
+    pptx.ChartType.bar,
+    [current, comparison].filter(Boolean).map((column) => ({
+      name: column,
+      labels: chartLines,
+      values: chartLines.map((label) => line(label)?.values[column] ?? 0),
+    })),
+    {
+      x: 0.45, y: 2.2, w: 5.1, h: 3.7, barDir: "col", barGrouping: "clustered",
+      chartColors: SERIES_PALETTE.slice(0, 2), catAxisLabelRotate: 0, catAxisLabelFontSize: 9,
+      catAxisLineShow: false, valAxisHidden: true, valGridLine: { style: "none" },
+      showLegend: true, legendPos: "t", legendFontSize: 8, showValue: true,
+    },
+  );
+  const rows = [
+    [{ text: "P&L line" }, ...pnl.columns.map((column) => ({ text: column }))],
+    ...pnl.lines.map((item) => [
+      { text: item.label, options: { bold: ["Revenue", "Total Expenses", "EBIT", "EBIT%"].includes(item.label) } },
+      ...pnl.columns.map((column) => ({
+        text: format(item.values[column], item.label === "EBIT%"),
+      })),
+    ]),
+  ];
+  slide.addTable(rows, {
+    x: 5.8, y: 2.2, w: 7.0, h: 3.7, fontSize: 7.5, margin: 0.05, rowH: 0.26,
+    border: { type: "solid", color: BS_COLORS.hairline, pt: 0.5 },
+    fill: { color: BS_COLORS.panel }, color: BS_COLORS.body,
+  });
+  const notes = (pnl.evidence ?? []).slice(0, 3).map((text) => ({
+    text, options: { bullet: { code: "2022" }, breakLine: true, color: BS_COLORS.body },
+  }));
+  const fitted = fitRuns(notes, { w: 12.35, h: 0.5 }, 8, 7);
+  slide.addText(fitted.runs as never, { x: 0.45, y: 6.15, w: 12.35, h: 0.5, fontSize: fitted.fontSize });
+  slide.addText(
+    "Source: governed Enterprise Data read at run time. Actual and CF remain separate scenarios.",
+    { ...BS_LAYOUT.footnote, fontSize: 7.5, color: BS_COLORS.muted },
+  );
+  return true;
+}
+
 function addTemplateDrivenSlides(
   pptx: InstanceType<typeof import("pptxgenjs").default>,
   board: Board,
@@ -1676,6 +1768,10 @@ export async function exportReportPpt(board: Board, report: Report) {
   // one, balance sheet boards use the house layout and everything else the
   // generic deck.
   if (addTemplateDrivenSlides(pptx, board, report)) {
+    await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
+    return;
+  }
+  if (addEntityPnlSlide(pptx, board, report)) {
     await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
     return;
   }

@@ -9226,6 +9226,58 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
   });
 
   // ==========================================
+  // ENTITY P&L PROXY ROUTES
+  // Authorized, read-only reporting from Enterprise Data.
+  // ==========================================
+  app.all("/api/v2/entity-pnl/*", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session?.userId;
+      const cubeId =
+        req.method === "GET"
+          ? decodeURIComponent(req.path.match(/\/cubes\/([^/]+)\//)?.[1] ?? "")
+          : String(req.body?.cube_id ?? "");
+      if (!userId || !cubeId) {
+        return res.status(400).json({ error: "A selected Enterprise cube is required." });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(401).json({ error: "Your sign-in session is no longer valid." });
+      }
+      const email = user.username.toLowerCase();
+      const domainUser = await storage.getDomainUserByEmail(email);
+      if (!domainUser) {
+        return res.status(403).json({ error: "You do not have access to Enterprise Data in this workspace." });
+      }
+      const accessibleCubeIds = await storage.getAccessibleCubeIds(
+        email,
+        domainUser.domainId,
+      );
+      if (!accessibleCubeIds.includes(cubeId)) {
+        return res.status(403).json({ error: "You do not have permission to read this Enterprise cube." });
+      }
+
+      const PYTHON_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120_000);
+      const response = await fetch(`${PYTHON_URL}${req.originalUrl}`, {
+        method: req.method,
+        headers: { "Content-Type": req.headers["content-type"] || "application/json" },
+        signal: controller.signal,
+        ...(req.method !== "GET" && req.method !== "HEAD"
+          ? { body: JSON.stringify(req.body) }
+          : {}),
+      });
+      clearTimeout(timeoutId);
+      const payload = await response.json().catch(() => ({ error: "The P&L data service returned an invalid response." }));
+      return res.status(response.status).json(payload);
+    } catch (error) {
+      console.error("Entity P&L proxy error:", error);
+      return res.status(500).json({ error: "Could not generate the Entity P&L report." });
+    }
+  });
+
+  // ==========================================
   // SCHEMA CONFIG PROXY ROUTES
   // Proxy schema-config requests to Python backend
   // ==========================================
