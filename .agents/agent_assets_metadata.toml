@@ -42,3 +42,17 @@ mtime_ms = 1787235575657
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:8fb1e782-d061-4eb4-a946-88f35142b823/744e9b72-f2fe-4e6e-a46c-8021ec5b8fcf/6763ac2d-2180-4f22-9431-e216697e6b19"
 storage_version_token = "1787235586914193"
 content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+[[outputs]]
+id = "-ohGYVtF1oDU9Co20KzhY"
+uri = "file://attached_assets/entity_pnl_bosch_template_fixed.pptx"
+type = "slides"
+title = "Fixed Entity P&L Bosch Template"
+description = "PowerPoint-safe replacement template with the Bosch Entity P&L table and commentary layout."
+logical_id = "6839fbb0-86fd-4a3d-97a0-0e062443675c"
+content_hash = "sha256:d436a16d469f13076db0eae4016db9a96613503bd5de015d297238c0e0f99b92"
+size = 265076
+mtime_ms = 1787237405168
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:8fb1e782-d061-4eb4-a946-88f35142b823/6839fbb0-86fd-4a3d-97a0-0e062443675c/fa718af8-ce21-4b47-936a-cd2ea54ae0d2"
+storage_version_token = "1787237453521962"
+content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
