@@ -1293,8 +1293,9 @@ function addTemplateDrivenSlides(
 
   const result = report.result;
   const bs = result.balanceSheet ?? null;
-  const asOf = bs?.periods[bs.periods.length - 1] ?? null;
-  const units = bs?.units ?? "";
+  const pnl = result.entityPnl ?? null;
+  const asOf = bs?.periods[bs.periods.length - 1] ?? pnl?.asOf ?? null;
+  const units = bs?.units ?? pnl?.units ?? "";
   const theme = board.templateTheme;
   // Text is black. The template's regions carry their own colours — its
   // commentary box is the red used for emphasis — and inheriting those paints
@@ -1318,6 +1319,7 @@ function addTemplateDrivenSlides(
   const risks = result.risks ?? [];
 
   const columns = (() => {
+    if (pnl) return pnl.columns;
     if (!bs || !asOf) return [] as string[];
     const chosen = (bs.comparisonPeriods ?? []).filter((p) => p !== asOf);
     return chosen.length ? [asOf, ...[...chosen].reverse()] : [...bs.periods].reverse().slice(0, 3);
@@ -1368,33 +1370,47 @@ function addTemplateDrivenSlides(
 
       switch (r.role) {
         case "title":
-          slide.addText(retargetPeriod(r.sample || board.name, asOf) || board.name, {
+          slide.addText(
+            pnl
+              ? `Entity P&L Analysis · ${pnl.entity}`
+              : retargetPeriod(r.sample || board.name, asOf) || board.name,
+            {
             ...base,
             bold: true,
             fontSize: Math.max(size, 14),
             color: inkColor,
             ...(fontHead ? { fontFace: fontHead } : {}),
             valign: "middle",
-          });
+            },
+          );
           break;
 
         case "subtitle":
-          slide.addText(retargetPeriod(r.sample, asOf) || (asOf ? `as of ${asOf}` : ""), {
-            ...base,
-            bold: r.bold,
-          });
+          slide.addText(
+            pnl
+              ? `${pnl.columns[0] ?? pnl.asOf}${pnl.columns[1] ? ` vs ${pnl.columns[1]}` : ""} · ${pnl.comparison === "qoq" ? "QoQ MTD" : "YoY YTD"}`
+              : retargetPeriod(r.sample, asOf) || (asOf ? `as of ${asOf}` : ""),
+            { ...base, bold: r.bold },
+          );
           break;
 
         case "units":
-          slide.addText(units ? `Values in ${units}${bs?.fxRate ? ` · mUSD at ${bs.fxRate}` : ""}` : r.sample, {
+          slide.addText(
+            units
+              ? `Values in ${units}${bs?.fxRate ? ` · mUSD at ${bs.fxRate}` : ""}`
+              : r.sample,
+            {
             ...base,
             bold: true,
-          });
+            },
+          );
           break;
 
         case "footnote":
           slide.addText(
-            bs?.unmapped.length
+            pnl?.evidence?.length
+              ? pnl.evidence[0]
+              : bs?.unmapped.length
               ? `${bs.unmapped.length} line item(s) matched no report line: ${bs.unmapped.slice(0, 6).join(", ")}`
               : units
                 ? `All figures in ${units}.`
