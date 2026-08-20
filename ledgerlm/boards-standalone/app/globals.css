@@ -82,6 +82,12 @@ body[data-embedded="true"] .standalone-page-shell {
   flex: 1 1 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.standalone-page-content::-webkit-scrollbar {
+  display: none;
 }
 
 @media (min-width: 1024px) {
