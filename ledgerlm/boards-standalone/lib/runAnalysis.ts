@@ -196,8 +196,8 @@ export async function runBoardAnalysis(
   // browser. Each run asks the authenticated LedgerLM proxy to authorize the
   // saved cube selection and invoke the read-only Python calculation service.
   if (board.entityPnl?.cubeId) {
-    if (!board.entityPnl.entity.trim() || !board.entityPnl.asOf) {
-      throw new Error("Choose an entity and an as-of month before running the Entity P&L.");
+    if (!board.entityPnl.asOf) {
+      throw new Error("Choose an as-of month before running the Entity P&L.");
     }
     opts.onProgress?.({ pct: 2, until: 15, stage: "Authorizing the Enterprise cube" });
     let payload: { result?: AnalysisResult; error?: string };

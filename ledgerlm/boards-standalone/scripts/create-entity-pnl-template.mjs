@@ -12,21 +12,11 @@ pptx.theme = {
   bodyFontFace: "Arial",
   lang: "en-US",
 };
-pptx.defineSlideMaster({
-  title: "P&L_MASTER",
-  background: { color: "FFFFFF" },
-  objects: [
-    { rect: { x: 0, y: 7.18, w: 13.33, h: 0.32, fill: { color: "00A7B5" }, line: { color: "00A7B5" } } },
-    { rect: { x: 0, y: 7.18, w: 8.65, h: 0.32, fill: { color: "008A99" }, line: { color: "008A99" } } },
-    { rect: { x: 8.65, y: 7.18, w: 2.65, h: 0.32, fill: { color: "E20015" }, line: { color: "E20015" } } },
-    { rect: { x: 11.30, y: 7.18, w: 2.03, h: 0.32, fill: { color: "00A7B5" }, line: { color: "00A7B5" } } },
-    { text: { text: "Internal | Governed Enterprise Data", options: { x: 0.42, y: 7.22, w: 4.4, h: 0.12, fontFace: "Arial", fontSize: 5.5, color: "FFFFFF", margin: 0 } } },
-    { text: { text: "BOSCH", options: { x: 11.83, y: 7.19, w: 0.9, h: 0.18, fontFace: "Arial", fontSize: 8, bold: true, color: "FFFFFF", align: "center", margin: 0 } } },
-  ],
-  slideNumber: { x: 0.36, y: 6.94, color: "65747A", fontFace: "Arial", fontSize: 7 },
-});
-
-const slide = pptx.addSlide("P&L_MASTER");
+// Keep the sample on an ordinary slide rather than a programmatic slide
+// master. Office desktop is stricter than ZIP readers about generated master
+// relationships, while all report formatting can be represented directly on
+// the slide just as reliably.
+const slide = pptx.addSlide();
 slide.background = { color: "FFFFFF" };
 
 const teal = "008A99";
@@ -150,5 +140,24 @@ slide.addText("Source: authorized Enterprise Data cube read at run time. Actual 
   x: 6.82, y: 6.35, w: 5.85, h: 0.20,
   fontFace: "Arial", fontSize: 5.7, color: muted, margin: 0,
 });
+[
+  ["008A99", 8.65],
+  ["E20015", 2.65],
+  ["00A7B5", 2.03],
+].reduce((x, [color, width]) => {
+  slide.addShape(pptx.ShapeType.rect, {
+    x, y: 7.18, w: Number(width), h: 0.32,
+    fill: { color }, line: { color, transparency: 100 },
+  });
+  return x + Number(width);
+}, 0);
+slide.addText("Internal | Governed Enterprise Data", {
+  x: 0.42, y: 7.22, w: 4.4, h: 0.12,
+  fontFace: "Arial", fontSize: 5.5, color: "FFFFFF", margin: 0,
+});
+slide.addText("BOSCH", {
+  x: 11.83, y: 7.19, w: 0.9, h: 0.18,
+  fontFace: "Arial", fontSize: 8, bold: true, color: "FFFFFF", align: "center", margin: 0,
+});
 
-await pptx.writeFile({ fileName: "../../attached_assets/entity_pnl_bosch_template.pptx" });
+await pptx.writeFile({ fileName: "../../attached_assets/entity_pnl_bosch_template_fixed.pptx" });

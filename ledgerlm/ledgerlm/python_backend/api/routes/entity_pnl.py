@@ -43,7 +43,10 @@ VISIBLE_COST_LINES = [
 
 class EntityPnlRequest(BaseModel):
     cube_id: str = Field(min_length=1)
-    entity: str = Field(min_length=1)
+    # An empty entity deliberately means "all entity rows in the authorized
+    # cube". It is not transformed into an entity <> '' condition, so rows
+    # whose source entity is blank remain part of the all-entities total.
+    entity: str = Field(default="", max_length=200)
     as_of: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     comparison: Literal["qoq", "yoy"]
     currency: Literal["USD", "INR"] = "USD"
@@ -166,6 +169,7 @@ async def build_entity_pnl(request: EntityPnlRequest):
     points = _selected_points(request)
     year, month = map(int, request.as_of.split("-"))
     currency_column = "amount_usd" if request.currency == "USD" else "amount_inr"
+    selected_entity = request.entity.strip()
 
     point_filter = " OR ".join("(year = %s AND month = %s)" for _ in points)
     point_params: List[Any] = [value for point in points for value in point]
@@ -174,6 +178,12 @@ async def build_entity_pnl(request: EntityPnlRequest):
     if request.cf_version:
         scenario_sql = f"({ACTUAL_SCENARIO_SQL} OR TRIM(COALESCE(version, '')) = %s)"
         scenario_params.append(request.cf_version.strip())
+
+    entity_filter = ""
+    entity_params: List[Any] = []
+    if selected_entity:
+        entity_filter = "AND LOWER(TRIM(COALESCE(region_entity, ''))) = LOWER(TRIM(%s))"
+        entity_params.append(selected_entity)
 
     sql = f"""
         SELECT
@@ -189,7 +199,7 @@ async def build_entity_pnl(request: EntityPnlRequest):
           COALESCE(SUM(COALESCE(capacity, 0)), 0) AS capacity
         FROM cube_fact_data
         WHERE cube_id = %s
-          AND LOWER(TRIM(COALESCE(region_entity, ''))) = LOWER(TRIM(%s))
+          {entity_filter}
           AND ({point_filter})
           AND {scenario_sql}
           AND (
@@ -204,7 +214,7 @@ async def build_entity_pnl(request: EntityPnlRequest):
     conn = semantic_sql_service.get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(sql, [request.cube_id, request.entity, *point_params, *scenario_params])
+        cursor.execute(sql, [request.cube_id, *entity_params, *point_params, *scenario_params])
         rows = cursor.fetchall()
     except Exception as error:
         logger.exception("Entity P&L report query failed")
@@ -290,8 +300,9 @@ async def build_entity_pnl(request: EntityPnlRequest):
     mode_text = "quarter-end MTD" if request.comparison == "qoq" else "YTD"
     unit = request.currency
     comparison_delta = current_ebit - prior_ebit
+    entity_label = selected_entity or "All entities"
     result = {
-        "entity": request.entity.strip(),
+        "entity": entity_label,
         "asOf": request.as_of,
         "comparison": request.comparison,
         "currency": request.currency,
@@ -299,7 +310,11 @@ async def build_entity_pnl(request: EntityPnlRequest):
         "columns": columns,
         "lines": lines,
         "evidence": [
-            f"Read-only run from the selected Enterprise cube for {request.entity.strip()}.",
+            (
+                f"Read-only run from the selected Enterprise cube for {entity_label}."
+                if selected_entity
+                else "Read-only run from the selected Enterprise cube across all entity rows, including blank entity values."
+            ),
             f"{mode_text.upper()} comparison: {current_label} versus {comparison_label}.",
             "Total Expenses uses the full governed Cost Summary population; visible expense rows are a presentation subset.",
             "Actual and CF are queried as separate scenarios and are never combined.",
@@ -309,7 +324,7 @@ async def build_entity_pnl(request: EntityPnlRequest):
         "success": True,
         "result": {
             "summary": (
-                f"{request.entity.strip()} reported {_format_amount(current_revenue, request.currency)} revenue and "
+                f"{entity_label} reported {_format_amount(current_revenue, request.currency)} revenue and "
                 f"{_format_amount(current_ebit, request.currency)} EBIT in {current_label}. "
                 f"EBIT moved {_format_amount(comparison_delta, request.currency)} from {comparison_label}."
             ),
@@ -368,7 +383,7 @@ async def build_entity_pnl(request: EntityPnlRequest):
             "risks": [],
             "tables": [
                 {
-                    "title": f"Entity P&L · {request.entity.strip()}",
+                    "title": f"Entity P&L · {entity_label}",
                     "columns": ["Line item", *columns],
                     "rows": [
                         [

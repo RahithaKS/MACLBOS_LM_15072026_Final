@@ -431,6 +431,9 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
   const [templateAnatomy, setTemplateAnatomy] = useState<PptTemplateAnatomy | null>(
     board?.templateAnatomy ?? null,
   );
+  const asOfYear = new Date().getFullYear();
+  const asOfMin = `${asOfYear - 5}-01`;
+  const asOfMax = `${asOfYear + 5}-12`;
 
   async function handleTemplateFile(file: File) {
     setTemplateError(null);
@@ -1031,17 +1034,20 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
                     </select>
                   </label>
                   <label className="block">
-                    <span className="text-xs font-medium text-muted">Entity</span>
+                    <span className="text-xs font-medium text-muted">Entity <span className="font-normal">(optional)</span></span>
                     <input
                       list="entity-pnl-entities"
                       value={entityPnl.entity}
                       onChange={(e) => setEntityPnl((previous) => ({ ...previous, entity: e.target.value }))}
-                      placeholder="Select or enter an entity"
+                      placeholder="Leave blank for all entities"
                       className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
                     />
                     <datalist id="entity-pnl-entities">
                       {entityOptions.map((entity) => <option key={entity} value={entity} />)}
                     </datalist>
+                    <span className="mt-1 block text-[11px] text-muted">
+                      Leave blank to combine every entity row in the authorized cube, including blank entity values.
+                    </span>
                   </label>
                   <label className="block">
                     <span className="text-xs font-medium text-muted">As-of month</span>
@@ -1049,8 +1055,13 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
                       type="month"
                       value={entityPnl.asOf}
                       onChange={(e) => setEntityPnl((previous) => ({ ...previous, asOf: e.target.value }))}
+                      min={asOfMin}
+                      max={asOfMax}
                       className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
                     />
+                    <span className="mt-1 block text-[11px] text-muted">
+                      Select a month from {asOfYear - 5} through {asOfYear + 5}.
+                    </span>
                   </label>
                   <label className="block">
                     <span className="text-xs font-medium text-muted">Comparison</span>

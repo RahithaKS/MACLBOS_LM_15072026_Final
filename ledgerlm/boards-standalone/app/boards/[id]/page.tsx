@@ -109,7 +109,7 @@ export default function BoardDetailPage() {
   const template = board ? (getTemplate(board.templateId) ?? TEMPLATES[0]) : undefined;
   const cube = getCube(board?.cubeId ?? null);
   const isEntityPnl = board?.templateId === "entity-pnl";
-  const hasEntityPnlSelection = Boolean(board?.entityPnl?.cubeId && board.entityPnl.entity && board.entityPnl.asOf);
+  const hasEntityPnlSelection = Boolean(board?.entityPnl?.cubeId && board.entityPnl.asOf);
   const activeThread = board?.threads.find((t) => t.id === activeThreadId) ?? null;
   const latestReport = board?.reports[0] ?? null;
   const activeReport =
@@ -356,7 +356,7 @@ export default function BoardDetailPage() {
             <div className="min-w-0">
               <p className="text-sm font-semibold">{board.entityPnl?.cubeName || "Enterprise Data cube"}</p>
               <p className="mt-1 text-xs text-muted">
-                {board.entityPnl?.entity || "Select an entity"} · {board.entityPnl?.asOf || "Select an as-of month"} ·{" "}
+                {board.entityPnl?.entity || "All entities"} · {board.entityPnl?.asOf || "Select an as-of month"} ·{" "}
                 {board.entityPnl?.comparison === "yoy" ? "YoY YTD comparison" : "QoQ MTD comparison"} ·{" "}
                 {board.entityPnl?.currency ?? "USD"}
                 {board.entityPnl?.cfVersion ? ` · ${board.entityPnl.cfVersion} shown separately` : ""}

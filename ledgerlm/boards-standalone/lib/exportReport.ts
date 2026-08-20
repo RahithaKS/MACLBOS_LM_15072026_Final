@@ -1192,8 +1192,10 @@ function slideSide(title: string): "Assets" | "Funding" | null {
 }
 
 /**
- * One-page native fall-back for Entity P&L reports. Uploaded PowerPoint
- * templates still take precedence through addTemplateDrivenSlides below.
+ * Bosch-style Entity P&L report. The P&L output uses a governed, fixed
+ * financial-statement canvas instead of the generic report-table renderer:
+ * the reference format has a seven-column comparison table and a commentary
+ * column, neither of which can be represented accurately by a generic table.
  */
 function addEntityPnlSlide(
   pptx: InstanceType<typeof import("pptxgenjs").default>,
@@ -1207,79 +1209,106 @@ function addEntityPnlSlide(
     if (value === null || value === undefined) return "—";
     return percentage
       ? `${Number(value).toFixed(1)}%`
-      : `${pnl.currency === "USD" ? "$" : "₹"}${formatAmount(Number(value))}`;
+      : formatAmount(Number(value));
   };
-  const line = (label: string) => pnl.lines.find((item) => item.label === label);
-  const current = pnl.columns[0];
-  const comparison = pnl.columns[1];
-  const kpis = ["Revenue", "Total Expenses", "EBIT", "EBIT%"];
+  const current = pnl.columns[0] ?? "";
+  const comparison = pnl.columns[1] ?? "";
+  const cf = pnl.columns.find((column) => /^CF\d+|^TBP/i.test(column)) ?? null;
+  const yearEnd = pnl.columns.find((column) => /\bYE$/i.test(column)) ?? null;
+  const [year, month] = pnl.asOf.split("-").map(Number);
+  const date = new Date(year, Math.max(0, month - 1), 1);
+  const monthLabel = date.toLocaleString("en-US", { month: "long" });
+  const titlePeriod = pnl.comparison === "yoy" ? `H1'${String(year).slice(-2)}` : `Q${Math.ceil(month / 3)}'${String(year).slice(-2)}`;
+  const comparisonCaption = pnl.comparison === "yoy" ? "YoY" : "QoQ";
+  const reportTitle = `P&L ${titlePeriod} – ${comparisonCaption} : ${monthLabel}'${String(year).slice(-2)} v ${comparison.replace(/ .*/, "")}'${comparison.match(/\d{4}/)?.[0]?.slice(-2) ?? ""}`;
+  const significantRows = new Set(["Revenue", "Total Expenses", "EBIT", "EBIT%", "End Capacity", "Average Capacity"]);
+  const tableRows = [
+    [
+      { text: pnl.entity, options: { bold: true, color: "FFFFFF", fill: { color: "007D88" }, align: "left" as const } },
+      { text: yearEnd ?? `YE ${year - 1}`, options: { bold: true, color: "FFFFFF", fill: { color: "007D88" }, align: "right" as const } },
+      { text: cf ?? "CF", options: { bold: true, color: "FFFFFF", fill: { color: "007D88" }, align: "right" as const } },
+      { text: current, options: { bold: true, color: "FFFFFF", fill: { color: "007D88" }, align: "right" as const } },
+      { text: comparison, options: { bold: true, color: "FFFFFF", fill: { color: "007D88" }, align: "right" as const } },
+      { text: "Variance", options: { bold: true, color: "FFFFFF", fill: { color: "007D88" }, align: "right" as const } },
+      { text: "%", options: { bold: true, color: "FFFFFF", fill: { color: "007D88" }, align: "right" as const } },
+    ],
+    ...pnl.lines.map((item) => {
+      const isPercent = item.label === "EBIT%";
+      const currentValue = item.values[current] ?? null;
+      const comparisonValue = item.values[comparison] ?? null;
+      const variance =
+        currentValue === null || comparisonValue === null ? null : Number(currentValue) - Number(comparisonValue);
+      const variancePercent =
+        variance === null || !comparisonValue ? null : (variance / Math.abs(Number(comparisonValue))) * 100;
+      const base = { color: "263238", fill: { color: significantRows.has(item.label) ? "EEF5F5" : "FFFFFF" }, align: "right" as const };
+      return [
+        { text: item.label, options: { ...base, align: "left" as const, bold: significantRows.has(item.label) } },
+        { text: format(yearEnd ? item.values[yearEnd] : null, isPercent), options: base },
+        { text: format(cf ? item.values[cf] : null, isPercent), options: base },
+        { text: format(currentValue, isPercent), options: { ...base, bold: significantRows.has(item.label) } },
+        { text: format(comparisonValue, isPercent), options: base },
+        { text: format(variance, isPercent), options: { ...base, color: variance !== null && variance < 0 ? "B42318" : "1E6B4E" } },
+        { text: format(variancePercent, true), options: { ...base, color: variancePercent !== null && variancePercent < 0 ? "B42318" : "1E6B4E" } },
+      ];
+    }),
+  ];
+  const commentary = [
+    ...report.result.commentary.map((item) => ({
+      heading: item.area,
+      text: item.explanation,
+    })),
+    ...["Outsourcing Cost", "Consultancy Charges", "CI Charges & Other Revenue", "Facilities Cost", "Other Expenses"]
+      .filter((label) => pnl.lines.some((line) => line.label === label))
+      .map((heading) => ({
+        heading,
+        text: "Owner commentary is required to attribute this movement. This report shows only the governed cube figures.",
+      })),
+  ].slice(0, 6);
 
   slide.background = { color: "FFFFFF" };
-  slide.addText(`Entity P&L Analysis · ${pnl.entity}`, {
-    ...BS_LAYOUT.title, fontSize: 22, bold: true, color: BS_COLORS.ink,
+  slide.addText(reportTitle, {
+    x: 0.48, y: 0.28, w: 9.5, h: 0.36, fontSize: 21, bold: true, color: "C90073",
   });
   slide.addText(
-    `${current}${comparison ? ` vs ${comparison}` : ""} · ${pnl.comparison === "qoq" ? "QoQ MTD" : "YoY YTD"} · ${pnl.units}`,
-    { ...BS_LAYOUT.asOf, fontSize: 10, color: BS_COLORS.muted },
+    `Entity: ${pnl.entity} · ${current}${comparison ? ` vs ${comparison}` : ""} · ${pnl.comparison === "qoq" ? "QoQ MTD" : "YoY YTD"}`,
+    { x: 0.5, y: 0.76, w: 8.4, h: 0.2, fontSize: 8.5, bold: true, color: "007D88" },
   );
-  slide.addShape(pptx.ShapeType.rect, {
-    ...BS_LAYOUT.rule, fill: { color: BS_COLORS.teal }, line: { color: BS_COLORS.teal, width: 0 },
+  slide.addText(`Values in m${pnl.currency}`, {
+    x: 5.1, y: 1.06, w: 1.35, h: 0.18, fontSize: 7.5, italic: true, bold: true, color: "263238", align: "right",
   });
-  const tileW = (BS_LAYOUT.kpis.w - BS_LAYOUT.kpis.gap * 3) / 4;
-  kpis.forEach((label, index) => {
-    const source = line(label);
-    const x = BS_LAYOUT.kpis.x + index * (tileW + BS_LAYOUT.kpis.gap);
-    slide.addShape(pptx.ShapeType.rect, {
-      x, y: BS_LAYOUT.kpis.y, w: tileW, h: BS_LAYOUT.kpis.h,
-      fill: { color: BS_COLORS.panel }, line: { color: BS_COLORS.hairline, width: 0.75 },
-    });
-    slide.addText(label.toUpperCase(), {
-      x: x + 0.12, y: BS_LAYOUT.kpis.y + 0.1, w: tileW - 0.24, h: 0.16,
-      fontSize: 7.5, bold: true, color: BS_COLORS.muted,
-    });
-    slide.addText(format(source?.values[current], label === "EBIT%"), {
-      x: x + 0.12, y: BS_LAYOUT.kpis.y + 0.33, w: tileW - 0.24, h: 0.28,
-      fontSize: 14, bold: true, color: BS_COLORS.ink,
-    });
+  slide.addTable(tableRows, {
+    x: 0.48, y: 1.32, w: 6.04, h: 5.23, fontSize: 6.2, margin: 0.035, rowH: 0.255,
+    border: { type: "solid", color: "BCC7CA", pt: 0.45 },
+    colW: [1.64, 0.68, 0.68, 0.77, 0.77, 0.77, 0.44],
   });
-  const chartLines = ["Revenue", "Total Expenses", "EBIT"];
-  slide.addChart(
-    pptx.ChartType.bar,
-    [current, comparison].filter(Boolean).map((column) => ({
-      name: column,
-      labels: chartLines,
-      values: chartLines.map((label) => line(label)?.values[column] ?? 0),
-    })),
-    {
-      x: 0.45, y: 2.2, w: 5.1, h: 3.7, barDir: "col", barGrouping: "clustered",
-      chartColors: SERIES_PALETTE.slice(0, 2), catAxisLabelRotate: 0, catAxisLabelFontSize: 9,
-      catAxisLineShow: false, valAxisHidden: true, valGridLine: { style: "none" },
-      showLegend: true, legendPos: "t", legendFontSize: 8, showValue: true,
-    },
+  let commentY = 1.25;
+  commentary.forEach((item) => {
+    slide.addText(`${item.heading}:`, {
+      x: 6.86, y: commentY, w: 1.55, h: 0.18, fontSize: 7.4, bold: true, color: "263238",
+    });
+    slide.addText(item.text, {
+      x: 8.3, y: commentY, w: 4.42, h: 0.46, fontSize: 6.25, color: "263238", fit: "shrink", valign: "top",
+    });
+    commentY += 0.68;
+  });
+  slide.addText(
+    pnl.evidence?.[0] ?? "Source: authorized Enterprise Data cube read at run time.",
+    { x: 0.48, y: 6.67, w: 8.7, h: 0.16, fontSize: 5.7, color: "65747A" },
   );
-  const rows = [
-    [{ text: "P&L line" }, ...pnl.columns.map((column) => ({ text: column }))],
-    ...pnl.lines.map((item) => [
-      { text: item.label, options: { bold: ["Revenue", "Total Expenses", "EBIT", "EBIT%"].includes(item.label) } },
-      ...pnl.columns.map((column) => ({
-        text: format(item.values[column], item.label === "EBIT%"),
-      })),
-    ]),
+  slide.addText("BOSCH", {
+    x: 11.78, y: 6.66, w: 0.9, h: 0.2, fontSize: 10, bold: true, color: "E20015", align: "center",
+  });
+  const footerSegments = [
+    ["E20015", 3.1], ["743B8E", 1.35], ["006B76", 1.6], ["00A7B5", 2.2], ["37A757", 1.3], ["00A7B5", 3.78],
   ];
-  slide.addTable(rows, {
-    x: 5.8, y: 2.2, w: 7.0, h: 3.7, fontSize: 7.5, margin: 0.05, rowH: 0.26,
-    border: { type: "solid", color: BS_COLORS.hairline, pt: 0.5 },
-    fill: { color: BS_COLORS.panel }, color: BS_COLORS.body,
+  let footerX = 0;
+  footerSegments.forEach(([color, width]) => {
+    slide.addShape(pptx.ShapeType.rect, {
+      x: footerX, y: 7.18, w: Number(width), h: 0.32,
+      fill: { color: String(color) }, line: { color: String(color), width: 0 },
+    });
+    footerX += Number(width);
   });
-  const notes = (pnl.evidence ?? []).slice(0, 3).map((text) => ({
-    text, options: { bullet: { code: "2022" }, breakLine: true, color: BS_COLORS.body },
-  }));
-  const fitted = fitRuns(notes, { w: 12.35, h: 0.5 }, 8, 7);
-  slide.addText(fitted.runs as never, { x: 0.45, y: 6.15, w: 12.35, h: 0.5, fontSize: fitted.fontSize });
-  slide.addText(
-    "Source: governed Enterprise Data read at run time. Actual and CF remain separate scenarios.",
-    { ...BS_LAYOUT.footnote, fontSize: 7.5, color: BS_COLORS.muted },
-  );
   return true;
 }
 
@@ -1752,6 +1781,22 @@ async function writePptxFile(
   const blob = (await pptx.write({ outputType: "blob" })) as Blob;
   const zip = await JSZip.loadAsync(blob);
   const charts = Object.keys(zip.files).filter((n) => /^ppt\/charts\/chart\d+\.xml$/.test(n));
+  const download = (file: Blob) => {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  };
+  // Entity P&L slides have no charts. Preserve the document produced by
+  // PptxGenJS byte-for-byte rather than unnecessarily repackaging it.
+  if (!charts.length) {
+    download(blob);
+    return;
+  }
   for (const name of charts) {
     const xml = await zip.file(name)!.async("string");
     const patched = xml.replace(
@@ -1764,14 +1809,7 @@ async function writePptxFile(
     type: "blob",
     mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   });
-  const url = URL.createObjectURL(out);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  download(out);
 }
 
 export async function exportReportPpt(board: Board, report: Report) {
@@ -1780,14 +1818,17 @@ export async function exportReportPpt(board: Board, report: Report) {
   pptx.layout = "LAYOUT_WIDE"; // 13.33 x 7.5 in
   const W = 13.33;
 
+  // Entity P&L is a governed financial statement with a prescribed Bosch
+  // table structure. It must not fall through to the generic template mapper,
+  // which collapses its year-end / forecast / variance columns.
+  if (addEntityPnlSlide(pptx, board, report)) {
+    await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
+    return;
+  }
   // A board with an uploaded report format gets exactly that format. Without
   // one, balance sheet boards use the house layout and everything else the
   // generic deck.
   if (addTemplateDrivenSlides(pptx, board, report)) {
-    await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
-    return;
-  }
-  if (addEntityPnlSlide(pptx, board, report)) {
     await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
     return;
   }
