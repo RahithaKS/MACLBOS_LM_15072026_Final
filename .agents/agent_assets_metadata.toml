@@ -28,3 +28,17 @@ uri = "file://ledgerlm_sbom_cyclonedx.json"
 type = "unspecified"
 title = "LedgerLM SBOM (CycloneDX 1.4)"
 logical_id = "bbecfabc-6796-4b7b-826f-11b67748e507"
+
+[[outputs]]
+id = "0VFH_sh8UI-KeeCRWgbj-"
+uri = "file://attached_assets/entity_pnl_bosch_template.pptx"
+type = "slides"
+title = "Entity P&L Analysis Template"
+description = "Editable Bosch-style Entity P&L slide template with a comparison table and commentary regions, ready to upload to a LedgerLM Entity P&L board."
+logical_id = "744e9b72-f2fe-4e6e-a46c-8021ec5b8fcf"
+content_hash = "sha256:c02f071295e49116afa6fcd3042db722c871adc45f973491be05a612ce4ce745"
+size = 269909
+mtime_ms = 1787235575657
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:8fb1e782-d061-4eb4-a946-88f35142b823/744e9b72-f2fe-4e6e-a46c-8021ec5b8fcf/6763ac2d-2180-4f22-9431-e216697e6b19"
+storage_version_token = "1787235586914193"
+content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
