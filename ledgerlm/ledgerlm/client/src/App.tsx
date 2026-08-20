@@ -25,6 +25,7 @@ import AdminAgenticWorkflow from "@/pages/AdminAgenticWorkflow";
 import SemanticSqlTest from "@/pages/SemanticSqlTest";
 import NotFound from "@/pages/not-found";
 import Downloads from "@/pages/Downloads";
+import StandaloneEmbed from "@/pages/StandaloneEmbed";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [, setLocation] = useLocation();
@@ -99,6 +100,16 @@ function Router() {
       <Route path="/boards">
         <DashboardLayout>
           <Boards />
+        </DashboardLayout>
+      </Route>
+      <Route path="/integrations/standalone-boards">
+        <DashboardLayout>
+          <StandaloneEmbed page="boards" />
+        </DashboardLayout>
+      </Route>
+      <Route path="/integrations/standalone-enterprise-data">
+        <DashboardLayout>
+          <StandaloneEmbed page="enterprise-data" />
         </DashboardLayout>
       </Route>
       <Route path="/board/:id">

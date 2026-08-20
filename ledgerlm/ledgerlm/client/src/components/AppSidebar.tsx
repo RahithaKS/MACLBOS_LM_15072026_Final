@@ -88,15 +88,13 @@ const menuItems = [
   },
   {
     title: "Boards (Standalone)",
-    url: "/boards",
+    url: "/integrations/standalone-boards",
     icon: Grid3x3,
-    standaloneApp: true,
   },
   {
     title: "Enterprise Data (Standalone)",
-    url: "/enterprise-data",
+    url: "/integrations/standalone-enterprise-data",
     icon: Building2,
-    standaloneApp: true,
   },
   // {
   //   title: "Market Intelligence",
@@ -432,9 +430,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu className="space-y-1">
               {menuItems.map((item) => {
-                const isStandaloneApp = item.standaloneApp === true;
-                const isActive = !isStandaloneApp && location === item.url;
-                const standaloneUrl = `/standalone-boards${item.url}`;
+                const isActive = location === item.url;
                 const content = (
                   <>
                     <div
@@ -466,17 +462,7 @@ export function AppSidebar() {
                     : "hover-elevate"
                 }`;
                 const testId = `link-${item.title.toLowerCase().replace(/\s+/g, "-")}`;
-                const menuItem = isStandaloneApp ? (
-                  <a
-                    href={standaloneUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    data-testid={testId}
-                    className={className}
-                  >
-                    {content}
-                  </a>
-                ) : (
+                const menuItem = (
                   <Link
                     href={item.comingSoon ? location : item.url}
                     data-testid={testId}
