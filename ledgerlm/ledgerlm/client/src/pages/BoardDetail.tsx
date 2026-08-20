@@ -91,10 +91,10 @@ export default function BoardDetail() {
   const mapping = boardSettings.columnMapping ?? {};
 
   return (
-    <div className="h-full flex-1 bg-muted/20 p-4 lg:p-6 overflow-hidden">
-      <div className="h-full bg-white rounded-2xl overflow-auto flex flex-col">
+    <div className="workspace-page flex-1 bg-primary/10 p-6 overflow-hidden">
+      <div className="workspace-surface h-full bg-white flex flex-col">
         {/* ── Header ─────────────────────────────────────────────────── */}
-        <div className="px-6 lg:px-8 py-3.5 flex items-center justify-between gap-3 bg-primary/40 flex-shrink-0">
+        <div className="workspace-header px-6 lg:px-8 py-3.5 flex items-center justify-between gap-3 bg-primary/40">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => navigate('/boards')} data-testid="button-back-boards">
               <ArrowLeft className="w-4 h-4" />
@@ -141,7 +141,7 @@ export default function BoardDetail() {
         </div>
 
         {/* ── Body ───────────────────────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto px-6 lg:px-8 py-6 space-y-6">
+        <div className="workspace-body flex-1 px-6 lg:px-8 py-6 space-y-6">
           {/* Meta section */}
           <div className="space-y-4">
             {board.description && (

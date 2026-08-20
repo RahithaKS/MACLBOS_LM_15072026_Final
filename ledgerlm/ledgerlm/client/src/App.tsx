@@ -67,7 +67,7 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
       <SidebarProvider style={style as React.CSSProperties}>
         <div className="flex h-screen w-full bg-background">
           <AppSidebar />
-          <main className="relative flex-1 overflow-hidden bg-background">
+          <main className="workspace-viewport relative min-w-0 flex-1 overflow-hidden bg-background">
             <PersistentStandaloneFrames />
             {children}
           </main>

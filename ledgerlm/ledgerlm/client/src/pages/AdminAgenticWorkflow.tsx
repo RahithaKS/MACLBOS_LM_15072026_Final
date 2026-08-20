@@ -247,16 +247,21 @@ export default function AdminAgenticWorkflow() {
   };
 
   return (
-    <div className="h-full overflow-auto">
-      <div className="max-w-5xl mx-auto p-6 space-y-6">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold" data-testid="text-page-title">Agentic Workflow Settings</h1>
-          <p className="text-muted-foreground">
-            Manage AI-powered workflow configurations and FAQ documents
-          </p>
-        </div>
+    <div className="workspace-page flex flex-col overflow-hidden bg-primary/10">
+      <div className="workspace-frame flex-1 overflow-hidden">
+        <div className="workspace-surface flex h-full flex-col bg-white shadow-sm">
+          <header className="workspace-header flex items-center bg-primary/40 px-6 lg:px-8">
+            <div>
+              <h1 className="text-xl font-semibold" data-testid="text-page-title">Agentic Workflow Settings</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Manage AI-powered workflow configurations and FAQ documents
+              </p>
+            </div>
+          </header>
 
-        <Card data-testid="card-billing-kiosk">
+          <div className="workspace-body flex-1 px-6 py-6 lg:px-8">
+            <div className="w-full space-y-6">
+              <Card data-testid="card-billing-kiosk">
           <CardHeader>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -321,7 +326,10 @@ export default function AdminAgenticWorkflow() {
               </div>
             </div>
           </CardContent>
-        </Card>
+              </Card>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

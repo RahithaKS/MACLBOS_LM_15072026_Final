@@ -27,16 +27,20 @@ export default function AgenticWorkflow() {
   const domainId = domainInfo?.domain?.id || '';
 
   return (
-    <div className="h-full flex flex-col overflow-auto bg-background" data-testid="page-agentic-workflow">
-      <div className="p-6 flex-1">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold" data-testid="text-page-title">Agentic Workflow</h1>
-          <p className="text-muted-foreground mt-1">
-            AI-powered assistants to help streamline your workflows
-          </p>
-        </div>
+    <div className="workspace-page flex flex-col overflow-hidden bg-primary/10" data-testid="page-agentic-workflow">
+      <div className="workspace-frame flex-1 overflow-hidden">
+        <div className="workspace-surface flex h-full flex-col bg-white shadow-sm">
+          <header className="workspace-header flex items-center bg-primary/40 px-6 lg:px-8">
+            <div>
+              <h1 className="text-xl font-semibold" data-testid="text-page-title">Agentic Workflow</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                AI-powered assistants to help streamline your workflows
+              </p>
+            </div>
+          </header>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <div className="workspace-body flex-1 px-6 py-6 lg:px-8">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {isBoschUser && (
             <Card 
               className="hover-elevate cursor-pointer transition-all" 
@@ -78,6 +82,8 @@ export default function AgenticWorkflow() {
               <p className="text-sm mt-1">Contact your administrator for access.</p>
             </div>
           )}
+            </div>
+          </div>
         </div>
       </div>
 

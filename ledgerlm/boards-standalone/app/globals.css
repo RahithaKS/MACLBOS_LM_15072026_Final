@@ -64,6 +64,13 @@ body[data-embedded="true"] .standalone-page-shell {
   overflow: hidden;
 }
 
+@media (min-width: 1024px) {
+  .standalone-page-shell {
+    height: calc(100vh - 3rem);
+    height: calc(100dvh - 3rem);
+  }
+}
+
 .standalone-page-header {
   flex: 0 0 auto;
   position: relative;

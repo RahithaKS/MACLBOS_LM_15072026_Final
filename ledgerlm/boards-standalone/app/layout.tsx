@@ -26,7 +26,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <ScheduleRunner />
         <div className="flex min-h-screen">
           {!isEmbedded && <Sidebar />}
-          <main className="standalone-page-area flex-1 min-w-0 p-4">{children}</main>
+          <main className="standalone-page-area flex-1 min-w-0 p-4 lg:p-6">{children}</main>
         </div>
       </body>
     </html>

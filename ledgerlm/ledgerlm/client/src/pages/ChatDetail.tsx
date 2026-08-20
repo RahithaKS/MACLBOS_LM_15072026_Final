@@ -1077,13 +1077,13 @@ export default function ChatDetail() {
       messages[messages.length - 1]?.role === "assistant");
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-accent">
+    <div className="workspace-page h-full flex flex-col overflow-hidden bg-primary/10">
       {/* Main content area with white background */}
-      <div className="flex-1 overflow-hidden p-6">
-        <div className="h-full bg-[#F9FAFB] rounded-2xl overflow-hidden flex">
+      <div className="workspace-frame flex-1 overflow-hidden">
+        <div className="workspace-surface h-full bg-[#F9FAFB] flex">
           <div className="flex flex-col flex-1 min-w-0">
             {/* Header inside white box */}
-            <div className="px-6 lg:px-10 py-3.5 flex items-center justify-between gap-3 bg-primary/40">
+            <div className="workspace-header px-6 lg:px-10 py-3.5 flex items-center justify-between gap-3 bg-primary/40">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-2xl bg-primary flex items-center justify-center flex-shrink-0">
                   <img

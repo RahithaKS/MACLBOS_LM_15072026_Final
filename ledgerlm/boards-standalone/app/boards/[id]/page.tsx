@@ -285,8 +285,8 @@ export default function BoardDetailPage() {
   if (!board || !template) return null;
 
   return (
-    <div className="min-h-[calc(100vh-2rem)] rounded-2xl bg-surface shadow-sm">
-      <header className="flex flex-wrap items-center justify-between gap-3 rounded-t-2xl bg-band px-6 py-3.5">
+    <div className="standalone-page-shell rounded-2xl bg-surface shadow-sm">
+      <header className="standalone-page-header flex flex-wrap items-center justify-between gap-3 rounded-t-2xl bg-band px-6 py-3.5">
         <div className="flex items-center gap-3">
           <Link href="/boards" aria-label="Back to Boards" className="text-primary-deep/70 hover:text-primary-deep">
             <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8">
@@ -314,7 +314,7 @@ export default function BoardDetailPage() {
         </div>
       </header>
 
-      <div className="px-8 py-6">
+      <div className="standalone-page-content px-8 py-6">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted">Description</p>
         <p className="mt-1.5 text-[15px]">{board.description || template.description}</p>
         <div className="mt-3 flex flex-wrap gap-2">

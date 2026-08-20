@@ -24,19 +24,19 @@ const mockData = [
 
 export default function MarketIntelligence() {
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-primary/10">
-      <div className="flex-1 overflow-auto p-6">
-        <div className="h-full bg-white rounded-2xl overflow-auto flex flex-col">
-          <div className="px-6 lg:px-8 py-6 border-b flex-shrink-0">
-            <div className="space-y-2">
-              <h1 className="text-3xl font-semibold text-foreground">Market Intelligence</h1>
-              <p className="text-muted-foreground">
+    <div className="workspace-page flex flex-col overflow-hidden bg-primary/10">
+      <div className="workspace-frame flex-1 overflow-hidden">
+        <div className="workspace-surface flex h-full flex-col bg-white">
+          <header className="workspace-header flex items-center border-b bg-primary/40 px-6 lg:px-8">
+            <div>
+              <h1 className="text-xl font-semibold text-foreground">Market Intelligence</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
                 Real-time market data and competitive analysis
               </p>
             </div>
-          </div>
+          </header>
 
-          <div className="flex-1 overflow-y-auto px-6 lg:px-8 py-6 space-y-6">
+          <div className="workspace-body flex-1 px-6 lg:px-8 py-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {mockData.map((item, index) => (
                 <Card key={index} className="p-6 space-y-3" data-testid={`card-metric-${index}`}>
