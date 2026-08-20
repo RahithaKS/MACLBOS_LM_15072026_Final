@@ -26,3 +26,9 @@ When the standalone workspace is embedded in LedgerLM, the LedgerLM sidebar is t
 **Why:** Two simultaneous sidebars duplicate navigation and leave too little room for Boards and Enterprise Data content.
 
 **How to apply:** Mark LedgerLM iframe destinations as embedded and let the standalone sidebar component detect that mode. Do not alter LedgerLM's outer sidebar for this behavior.
+
+Embedded Boards and Enterprise Data use the native LedgerLM content frame without an additional “Standalone workspace” header or iframe card.
+
+**Why:** Nested headers, padding, borders, and scroll regions made the companion pages visibly separate from LedgerLM and wasted the main content area.
+
+**How to apply:** Keep the iframe flush inside LedgerLM's standard content padding and enable embedded-only standalone styling. Preserve direct standalone styling and all local browser-storage behavior.

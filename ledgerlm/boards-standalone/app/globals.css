@@ -42,6 +42,27 @@ body {
   font-family: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
 }
 
+/* Embedded pages inherit the native LedgerLM content frame. The standalone
+   route keeps its normal padding and sidebar when opened directly. */
+body[data-embedded="true"] .standalone-page-area {
+  padding: 0;
+}
+
+body[data-embedded="true"] .standalone-page-shell {
+  min-height: 100%;
+  box-shadow: none;
+}
+
+@media (min-width: 1024px) {
+  body[data-embedded="true"] .standalone-my-boards-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  body[data-embedded="true"] .standalone-template-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 h1,
 h2,
 h3,

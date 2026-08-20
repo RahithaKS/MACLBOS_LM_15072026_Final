@@ -196,8 +196,8 @@ export default function EnterpriseDataPage() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-2rem)] rounded-2xl bg-surface shadow-sm">
-      <header className="flex items-center justify-between rounded-t-2xl bg-band px-8 py-4">
+    <div className="standalone-page-shell min-h-[calc(100vh-2rem)] rounded-2xl bg-surface shadow-sm">
+      <header className="standalone-page-header flex items-center justify-between rounded-t-2xl bg-band px-8 py-4">
         <h1 className="font-display text-xl font-semibold">Enterprise Data</h1>
         <button
           onClick={() => fileInput.current?.click()}
@@ -222,7 +222,7 @@ export default function EnterpriseDataPage() {
         />
       </header>
 
-      <div className="px-8 py-6">
+      <div className="standalone-page-content px-8 py-6">
         <p className="text-sm text-muted">
           Company-wide datasets available to every Board. Each dataset is exposed as a data cube —
           connect one in a Board&apos;s settings to enable Smart Analysis reports and thread queries.

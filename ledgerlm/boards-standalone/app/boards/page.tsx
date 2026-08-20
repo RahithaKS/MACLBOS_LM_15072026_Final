@@ -69,8 +69,8 @@ export default function BoardsPage() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-2rem)] rounded-2xl bg-surface shadow-sm">
-      <header className="flex items-center justify-between rounded-t-2xl bg-band px-8 py-4">
+    <div className="standalone-page-shell min-h-[calc(100vh-2rem)] rounded-2xl bg-surface shadow-sm">
+      <header className="standalone-page-header flex items-center justify-between rounded-t-2xl bg-band px-8 py-4">
         <h1 className="font-display text-xl font-semibold">Boards</h1>
         <button
           onClick={() => fileInput.current?.click()}
@@ -96,7 +96,7 @@ export default function BoardsPage() {
         />
       </header>
 
-      <div className="px-8 py-6">
+      <div className="standalone-page-content px-8 py-6">
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-background/40 px-6 py-5">
           <div className="flex items-center gap-4">
             <span className="grid h-11 w-11 place-items-center rounded-lg bg-surface-muted">
@@ -125,7 +125,7 @@ export default function BoardsPage() {
         {boards.length > 0 && (
           <>
             <h2 className="mt-8 font-display text-xl font-semibold">My Boards</h2>
-            <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="standalone-my-boards-grid mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
               {boards.map((board) => {
                 const template = getTemplate(board.templateId) ?? TEMPLATES[0];
                 return (
@@ -177,7 +177,7 @@ export default function BoardsPage() {
         )}
 
         <h2 className="mt-8 font-display text-xl font-semibold">Browse Templates</h2>
-        <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="standalone-template-grid mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
           {TEMPLATES.map((template) => (
             <div
               key={template.id}
