@@ -3,6 +3,7 @@
 import { getBoard, saveBoard, ensureDatasetsLoaded } from "./store";
 import { getCube } from "./cubes";
 import { projectRecordsForScope } from "./promptData";
+import { standaloneApiPath } from "./apiPath";
 import type {
   AnalysisResult,
   AnalysisThread,
@@ -191,7 +192,7 @@ export async function runBoardAnalysis(
   opts.onProgress?.({ pct: 1, until: 4, stage: "Sending the data for analysis" });
   let res: Response;
   try {
-    res = await fetch("/api/analyze", {
+    res = await fetch(standaloneApiPath("/api/analyze"), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
       signal: opts.signal,

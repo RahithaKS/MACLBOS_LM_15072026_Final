@@ -14,3 +14,9 @@ LedgerLM presents the standalone Boards and Enterprise Data pages inside its own
 **Why:** The approved user experience keeps LedgerLM navigation available while the standalone workspace is in use.
 
 **How to apply:** Keep the outer LedgerLM route distinct from the standalone artifact path, then load the standalone destination in an iframe. Do not convert the standalone app into LedgerLM components unless integration is explicitly requested later.
+
+Raw browser API requests do not automatically inherit a Next.js base path. Standalone API callers must construct their URLs with the embedded artifact prefix.
+
+**Why:** A root-relative request such as `/api/analyze` escapes the embedded standalone app and reaches LedgerLM's protected API, which correctly rejects it for lacking LedgerLM's CSRF token.
+
+**How to apply:** Use the standalone API path helper for all client-side standalone API calls, including analysis and board chat, while retaining root behavior for direct standalone development.
