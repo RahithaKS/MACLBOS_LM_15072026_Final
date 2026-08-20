@@ -32,3 +32,9 @@ Embedded Boards and Enterprise Data use the native LedgerLM content frame withou
 **Why:** Nested headers, padding, borders, and scroll regions made the companion pages visibly separate from LedgerLM and wasted the main content area.
 
 **How to apply:** Keep the iframe flush inside LedgerLM's standard content padding and enable embedded-only standalone styling. Preserve direct standalone styling and all local browser-storage behavior.
+
+Decide embedded mode during the standalone request, not in a client-side effect.
+
+**Why:** Client-only iframe detection renders the standalone sidebar first, then removes it after hydration, producing a visible navigation flash.
+
+**How to apply:** Send the explicit embedded marker with iframe URLs, pass it into the server-rendered layout, and omit the standalone sidebar from the embedded HTML. Keep direct standalone routes unmarked so their sidebar renders normally.

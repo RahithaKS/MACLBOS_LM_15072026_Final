@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import ScheduleRunner from "@/components/ScheduleRunner";
-import EmbeddedMode from "@/components/EmbeddedMode";
 
 const jakarta = Plus_Jakarta_Sans({
   variable: "--font-jakarta",
@@ -16,14 +16,16 @@ export const metadata: Metadata = {
     "Group analyses, documents, and insights into one centralized financial workspace.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const requestHeaders = await headers();
+  const isEmbedded = requestHeaders.get("x-standalone-embedded") === "true";
+
   return (
     <html lang="en" className={`${jakarta.variable} h-full antialiased`}>
-      <body className="min-h-screen">
+      <body className="min-h-screen" data-embedded={isEmbedded ? "true" : undefined}>
         <ScheduleRunner />
-        <EmbeddedMode />
         <div className="flex min-h-screen">
-          <Sidebar />
+          {!isEmbedded && <Sidebar />}
           <main className="standalone-page-area flex-1 min-w-0 p-4">{children}</main>
         </div>
       </body>
