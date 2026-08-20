@@ -86,6 +86,18 @@ const menuItems = [
     icon: LuLayoutDashboard,
     comingSoon: false,
   },
+  {
+    title: "Boards (Standalone)",
+    url: "/boards",
+    icon: Grid3x3,
+    standaloneApp: true,
+  },
+  {
+    title: "Enterprise Data (Standalone)",
+    url: "/enterprise-data",
+    icon: Building2,
+    standaloneApp: true,
+  },
   // {
   //   title: "Market Intelligence",
   //   url: "/market-intelligence",
@@ -420,29 +432,11 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu className="space-y-1">
               {menuItems.map((item) => {
-                const isActive = location === item.url;
-                const menuItem = (
-                  <Link
-                    href={item.comingSoon ? location : item.url}
-                    data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
-                    className={`flex items-center ${isCollapsed ? "justify-center" : "gap-3"} px-3 py-2 rounded-lg transition-colors ${
-                      isActive
-                        ? "bg-white border border-border/50 shadow-sm"
-                        : "hover-elevate"
-                    }`}
-                    onClick={
-                      item.comingSoon
-                        ? (e: React.MouseEvent) => {
-                            e.preventDefault();
-                            toast({
-                              title: "🚧 Boards — Coming Soon",
-                              description: "Boards Comming Soon!.",
-                              duration: 3000,
-                            });
-                          }
-                        : undefined
-                    }
-                  >
+                const isStandaloneApp = item.standaloneApp === true;
+                const isActive = !isStandaloneApp && location === item.url;
+                const standaloneUrl = `/standalone-boards${item.url}`;
+                const content = (
+                  <>
                     <div
                       className={`w-5 h-5 shrink-0 flex items-center justify-center ${
                         isActive ? "text-primary" : "text-muted-foreground/60"
@@ -464,6 +458,43 @@ export function AppSidebar() {
                         {item.title}
                       </span>
                     )}
+                  </>
+                );
+                const className = `flex items-center ${isCollapsed ? "justify-center" : "gap-3"} px-3 py-2 rounded-lg transition-colors ${
+                  isActive
+                    ? "bg-white border border-border/50 shadow-sm"
+                    : "hover-elevate"
+                }`;
+                const testId = `link-${item.title.toLowerCase().replace(/\s+/g, "-")}`;
+                const menuItem = isStandaloneApp ? (
+                  <a
+                    href={standaloneUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-testid={testId}
+                    className={className}
+                  >
+                    {content}
+                  </a>
+                ) : (
+                  <Link
+                    href={item.comingSoon ? location : item.url}
+                    data-testid={testId}
+                    className={className}
+                    onClick={
+                      item.comingSoon
+                        ? (e: React.MouseEvent) => {
+                            e.preventDefault();
+                            toast({
+                              title: "🚧 Boards — Coming Soon",
+                              description: "Boards Comming Soon!.",
+                              duration: 3000,
+                            });
+                          }
+                        : undefined
+                    }
+                  >
+                    {content}
                   </Link>
                 );
 

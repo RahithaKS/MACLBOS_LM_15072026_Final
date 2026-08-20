@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+:root {
+  --background: #eef2f1;
+  --surface: #ffffff;
+  --surface-muted: #e7edec;
+  --band: #b5d0cf;
+  --foreground: #1c3230;
+  --muted: #5f7472;
+  --border: #dde5e3;
+  --primary: #4e7f80;
+  --primary-hover: #40696a;
+  --primary-deep: #1c3230;
+  --accent: #2f6f6c;
+  --accent-soft: #eaf1f0;
+  --danger: #b4552f;
+  --positive: #3a7d5c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-band: var(--band);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-deep: var(--primary-deep);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-positive: var(--positive);
+  --font-sans: var(--font-jakarta);
+  --font-display: var(--font-jakarta);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+}
+
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Analysis progress bar: brand gradient with a slow shimmer so a bar that is
+   waiting on the model still reads as alive. */
+.analysis-progress-fill {
+  background: linear-gradient(90deg, #439798 0%, #5fb3b3 45%, #bc4096 100%);
+  background-size: 200% 100%;
+  animation: analysis-shimmer 2.4s linear infinite;
+}
+@keyframes analysis-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
