@@ -1312,6 +1312,125 @@ function addEntityPnlSlide(
   return true;
 }
 
+/**
+ * Direct Business Metrics output for KPI boards. An imported PPTX stores only
+ * text-region anatomy, not its decorative panel shapes; rendering this fixed
+ * layout prevents the values from collapsing into a thin strip at the top.
+ */
+function addKpiMetricsSlide(
+  pptx: InstanceType<typeof import("pptxgenjs").default>,
+  board: Board,
+  report: Report,
+): boolean {
+  if (board.templateId !== "kpi-metrics") return false;
+  const snapshot = report.result.kpiReport ?? null;
+  const rows = snapshot
+    ? snapshot.metrics.map((metric) => {
+        const value = (amount: number | null) =>
+          amount === null
+            ? "—"
+            : metric.unit === "percent"
+              ? `${(amount * 100).toFixed(1)}%`
+              : `${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}${metric.unit === "mUSD" ? " mUSD" : ""}`;
+        const variance = `${value(metric.variance)}${metric.variancePercent === null ? "" : ` (${(metric.variancePercent * 100).toFixed(1)}%)`}`;
+        return {
+          label: metric.label,
+          values: `Actual: ${value(metric.actual)}   |   Forecast: ${value(metric.forecast)}   |   Variance: ${variance}`,
+          note: `${metric.remarks.join(" ")}  Source rows — Actual: ${metric.actualSourceRows}; Forecast: ${metric.forecastSourceRows}`,
+        };
+      })
+    : report.result.kpis.map((metric) => ({
+        label: metric.label,
+        values: metric.value,
+        note: metric.change ?? "No comparison is available.",
+      }));
+
+  pptx.defineLayout({ name: "KPI_BUSINESS_METRICS", width: 13.333, height: 9.2 });
+  pptx.layout = "KPI_BUSINESS_METRICS";
+  const slide = pptx.addSlide();
+  slide.background = { color: "FFFFFF" };
+  const C = {
+    magenta: "A83678", darkMagenta: "8C2465", ink: "303030", muted: "626262",
+    border: "777777", panel: "D9D9D9", navy: "006578", red: "D9192B",
+    teal: "0097A7", orange: "F08A21", green: "009B76",
+  };
+  const add = (value: string, options: Record<string, unknown>) =>
+    slide.addText(value, {
+      fontFace: "Arial", color: C.ink, margin: 0, fit: "shrink", valign: "top", ...options,
+    });
+
+  slide.addShape(pptx.ShapeType.rect, {
+    x: 0, y: 0, w: 13.333, h: 0.09,
+    fill: { color: C.magenta }, line: { color: C.magenta, transparency: 100 },
+  });
+  [[C.magenta, 0, 2.2], [C.orange, 2.2, 2.7], [C.green, 4.9, 3.1], [C.teal, 8, 2.3], [C.red, 10.3, 3.033]]
+    .forEach(([fill, x, w]) => slide.addShape(pptx.ShapeType.rect, {
+      x: Number(x), y: 0.09, w: Number(w), h: 0.055,
+      fill: { color: String(fill) }, line: { color: String(fill), transparency: 100 },
+    }));
+  add(`Business Metrics ${snapshot?.periodLabel ?? ""}`, {
+    x: 2.15, y: 0.33, w: 7.8, h: 0.45, fontSize: 25, bold: true,
+    italic: true, color: C.magenta, align: "center",
+  });
+  add("Bosch\nGlobal\nSoftware\nTechnologies", {
+    x: 11.87, y: 0.30, w: 1.08, h: 0.56, fontSize: 7.5, bold: true,
+    color: C.magenta, breakLine: true,
+  });
+  [["WW", C.navy], ["IN", "EE9AB8"], ["VN", C.red], ["MX", "59A587"]].forEach(([label, fill], index) => {
+    const x = 3.1 + index * 1.14;
+    slide.addShape(pptx.ShapeType.rect, {
+      x, y: 0.91, w: 0.88, h: 0.48,
+      fill: { color: fill }, line: { color: fill, transparency: 100 },
+    });
+    add(label, { x, y: 1.035, w: 0.88, h: 0.17, fontSize: 8.5, bold: true, color: "FFFFFF", align: "center" });
+  });
+
+  slide.addShape(pptx.ShapeType.rect, {
+    x: 0.36, y: 1.52, w: 12.62, h: 7.03,
+    fill: { color: C.panel }, line: { color: C.border, pt: 0.65 },
+  });
+  add("Decision / info to GLs", {
+    x: 0.45, y: 1.60, w: 4.6, h: 0.20, fontSize: 10.5, bold: true, color: C.magenta,
+  });
+  add(`${snapshot?.entityLabel ?? "Governed KPI selection"}  •  Forecast: ${snapshot?.forecastScenario ?? "As selected"}  •  Actual vs forecast`, {
+    x: 7, y: 1.61, w: 5.55, h: 0.17, fontSize: 7.2, bold: true, color: C.muted, align: "right",
+  });
+  let y = 1.95;
+  rows.slice(0, 4).forEach((row) => {
+    add(`${row.label}:`, { x: 0.47, y, w: 3.2, h: 0.18, fontSize: 9.1, bold: true });
+    add(row.values, { x: 0.65, y: y + 0.22, w: 11.85, h: 0.20, fontSize: 7.2 });
+    add(row.note || "No additional data note.", {
+      x: 0.65, y: y + 0.46, w: 11.85, h: 0.19, fontSize: 6.7, italic: true, color: C.muted,
+    });
+    y += 1.03;
+  });
+  slide.addShape(pptx.ShapeType.line, { x: 0.48, y: 6.2, w: 12.34, h: 0, line: { color: "AFAFAF", pt: 0.5 } });
+  add("Source & governance", {
+    x: 0.48, y: 6.34, w: 2, h: 0.17, fontSize: 8.4, bold: true, color: C.darkMagenta,
+  });
+  add(`Actuals: ${snapshot?.actualSourceLabel ?? "governed source"}  •  Forecast: ${snapshot?.forecastSourceLabel ?? "governed source"}`, {
+    x: 0.48, y: 6.57, w: 12.28, h: 0.22, fontSize: 7, color: C.muted,
+  });
+  add(`Warnings / data-quality notes: ${snapshot?.warnings?.join("  •  ") || "No data-quality warnings returned by the governed KPI service."}`, {
+    x: 0.48, y: 6.88, w: 12.28, h: 0.48, fontSize: 6.8, italic: true, color: C.muted,
+  });
+  add(`Report generated ${new Date(report.createdAt).toLocaleString()} · LedgerLM KPI Metrics Board`, {
+    x: 0.48, y: 7.53, w: 12.28, h: 0.16, fontSize: 6.2, color: C.muted,
+  });
+  [[C.navy, 0, 5], [C.red, 5, 2.4], [C.teal, 7.4, 2.6], [C.orange, 10, 3.333]]
+    .forEach(([fill, x, w]) => slide.addShape(pptx.ShapeType.rect, {
+      x: Number(x), y: 8.75, w: Number(w), h: 0.45,
+      fill: { color: String(fill) }, line: { color: String(fill), transparency: 100 },
+    }));
+  add("Internal | Governed Enterprise Data | KPI Metrics Board", {
+    x: 0.44, y: 8.89, w: 5.7, h: 0.12, fontSize: 5.5, bold: true, color: "FFFFFF",
+  });
+  add("BOSCH", {
+    x: 11.74, y: 8.84, w: 1.05, h: 0.20, fontSize: 9.3, bold: true, color: "FFFFFF", align: "center",
+  });
+  return true;
+}
+
 function addTemplateDrivenSlides(
   pptx: InstanceType<typeof import("pptxgenjs").default>,
   board: Board,
@@ -1822,6 +1941,13 @@ export async function exportReportPpt(board: Board, report: Report) {
   // table structure. It must not fall through to the generic template mapper,
   // which collapses its year-end / forecast / variance columns.
   if (addEntityPnlSlide(pptx, board, report)) {
+    await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
+    return;
+  }
+  // KPI Metrics uses its own governed Business Metrics layout. The imported
+  // file is an editable reference template, while this renderer retains the
+  // graphic panel and section layout in the downloaded report.
+  if (addKpiMetricsSlide(pptx, board, report)) {
     await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
     return;
   }

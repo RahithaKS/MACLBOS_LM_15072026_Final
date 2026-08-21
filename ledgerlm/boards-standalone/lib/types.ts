@@ -336,6 +336,31 @@ export interface EntityPnlReport {
   evidence: string[];
 }
 
+/** One governed KPI value pair retained with a board report for presentation. */
+export interface GovernedKpiMetric {
+  id: string;
+  label: string;
+  unit: "mUSD" | "percent" | "capacity";
+  actual: number | null;
+  forecast: number | null;
+  variance: number | null;
+  variancePercent: number | null;
+  actualSourceRows: number;
+  forecastSourceRows: number;
+  remarks: string[];
+}
+
+/** Deterministic KPI snapshot used by the KPI Metrics Board and its PPTX export. */
+export interface GovernedKpiReport {
+  periodLabel: string;
+  entityLabel: string;
+  forecastScenario: string;
+  actualSourceLabel: string;
+  forecastSourceLabel: string;
+  metrics: GovernedKpiMetric[];
+  warnings: string[];
+}
+
 export interface AnalysisResult {
   summary: string;
   kpis: Kpi[];
@@ -349,6 +374,8 @@ export interface AnalysisResult {
   balanceSheet?: BalanceSheetReport | null;
   /** Present only for governed Entity P&L boards. */
   entityPnl?: EntityPnlReport | null;
+  /** Present only for governed KPI Metrics boards. */
+  kpiReport?: GovernedKpiReport | null;
 }
 
 export interface Report {

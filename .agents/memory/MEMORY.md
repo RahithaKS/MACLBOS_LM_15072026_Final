@@ -4,3 +4,4 @@
 - [Embedded Standalone API Security](embedded-standalone-api-security.md) — embedded boards share LedgerLM's session but must obtain its CSRF token before mutating root API calls.
 - [Entity P&L PowerPoint Format](entity-pnl-powerpoint-format.md) — Entity P&L exports use the fixed Bosch financial-statement layout, not generic template-table mapping.
 - [Workspace Frame Standards](workspace-frame-standards.md) — authenticated pages share one full-height frame, stable header, and internal scroll model.
+- [KPI PPTX export layout](kpi-pptx-export-layout.md) — imported template anatomy retains text regions, not decorative shapes; Business Metrics KPIs need a dedicated renderer.

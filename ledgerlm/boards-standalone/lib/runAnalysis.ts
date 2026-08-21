@@ -10,33 +10,12 @@ import type {
   Board,
   BoardSchedule,
   CustomIntervalUnit,
+  GovernedKpiMetric,
+  GovernedKpiReport,
   Report,
   RunTrigger,
   ScheduleFrequency,
 } from "./types";
-
-type GovernedKpiMetric = {
-  id: string;
-  label: string;
-  unit: "mUSD" | "percent" | "capacity";
-  actual: number | null;
-  forecast: number | null;
-  variance: number | null;
-  variancePercent: number | null;
-  actualSourceRows: number;
-  forecastSourceRows: number;
-  remarks: string[];
-};
-
-type GovernedKpiReport = {
-  periodLabel: string;
-  entityLabel: string;
-  forecastScenario: string;
-  actualSourceLabel: string;
-  forecastSourceLabel: string;
-  metrics: GovernedKpiMetric[];
-  warnings: string[];
-};
 
 function formatGovernedKpiValue(value: number | null, unit: GovernedKpiMetric["unit"]) {
   if (value === null || value === undefined) return "—";
@@ -57,6 +36,7 @@ function formatGovernedKpiVariance(metric: GovernedKpiMetric) {
 
 function kpiBoardResult(report: GovernedKpiReport): AnalysisResult {
   return {
+    kpiReport: report,
     summary: `${report.periodLabel} · ${report.entityLabel} · ${report.forecastScenario}. Actuals: ${report.actualSourceLabel}. Forecast: ${report.forecastSourceLabel}.`,
     kpis: report.metrics.map((metric) => ({
       label: metric.label,
