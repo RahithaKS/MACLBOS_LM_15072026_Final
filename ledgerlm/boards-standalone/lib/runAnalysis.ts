@@ -15,6 +15,103 @@ import type {
   ScheduleFrequency,
 } from "./types";
 
+type GovernedKpiMetric = {
+  id: string;
+  label: string;
+  unit: "mUSD" | "percent" | "capacity";
+  actual: number | null;
+  forecast: number | null;
+  variance: number | null;
+  variancePercent: number | null;
+  actualSourceRows: number;
+  forecastSourceRows: number;
+  remarks: string[];
+};
+
+type GovernedKpiReport = {
+  periodLabel: string;
+  entityLabel: string;
+  forecastScenario: string;
+  actualSourceLabel: string;
+  forecastSourceLabel: string;
+  metrics: GovernedKpiMetric[];
+  warnings: string[];
+};
+
+function formatGovernedKpiValue(value: number | null, unit: GovernedKpiMetric["unit"]) {
+  if (value === null || value === undefined) return "—";
+  if (unit === "percent") return `${(value * 100).toFixed(1)}%`;
+  if (unit === "mUSD") return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} mUSD`;
+  return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
+
+function formatGovernedKpiVariance(metric: GovernedKpiMetric) {
+  if (metric.variance === null || metric.variance === undefined) return "No comparison";
+  const value = formatGovernedKpiValue(metric.variance, metric.unit);
+  const percent =
+    metric.variancePercent === null || metric.variancePercent === undefined
+      ? ""
+      : ` · ${(metric.variancePercent * 100).toFixed(1)}%`;
+  return `${value}${percent}`;
+}
+
+function kpiBoardResult(report: GovernedKpiReport): AnalysisResult {
+  return {
+    summary: `${report.periodLabel} · ${report.entityLabel} · ${report.forecastScenario}. Actuals: ${report.actualSourceLabel}. Forecast: ${report.forecastSourceLabel}.`,
+    kpis: report.metrics.map((metric) => ({
+      label: metric.label,
+      value: `Actual ${formatGovernedKpiValue(metric.actual, metric.unit)} · Forecast ${formatGovernedKpiValue(metric.forecast, metric.unit)}`,
+      change: formatGovernedKpiVariance(metric),
+      direction:
+        metric.variance === null || metric.variance === undefined
+          ? "flat"
+          : metric.variance > 0
+            ? "up"
+            : metric.variance < 0
+              ? "down"
+              : "flat",
+    })),
+    charts: [
+      {
+        title: "Actual versus Forecast",
+        type: "bar",
+        series: [
+          {
+            name: "Actual",
+            points: report.metrics
+              .filter((metric) => metric.actual !== null)
+              .map((metric) => ({ x: metric.label, y: metric.actual as number })),
+          },
+          {
+            name: "Forecast",
+            points: report.metrics
+              .filter((metric) => metric.forecast !== null)
+              .map((metric) => ({ x: metric.label, y: metric.forecast as number })),
+          },
+        ],
+      },
+    ],
+    insights: report.metrics.flatMap((metric) => metric.remarks),
+    commentary: [],
+    risks: report.warnings,
+    tables: [
+      {
+        title: "Governed KPI comparison",
+        columns: ["Metric", "Actual", "Forecast", "Variance", "Actual rows", "Forecast rows"],
+        rows: report.metrics.map((metric) => [
+          metric.label,
+          formatGovernedKpiValue(metric.actual, metric.unit),
+          formatGovernedKpiValue(metric.forecast, metric.unit),
+          formatGovernedKpiVariance(metric),
+          String(metric.actualSourceRows),
+          String(metric.forecastSourceRows),
+        ]),
+      },
+    ],
+    actions: [],
+  };
+}
+
 export const FREQUENCY_MS: Record<Exclude<ScheduleFrequency, "custom">, number> = {
   "15min": 15 * 60_000,
   hourly: 60 * 60_000,
@@ -191,6 +288,74 @@ export async function runBoardAnalysis(
   const board = getBoard(boardId);
   if (!board) throw new Error("Board not found.");
   const startedAt = Date.now();
+
+  // KPI Metrics boards use the same governed LedgerLM API as the native KPI
+  // page. The board stores only the selected scope and its generated report.
+  if (board.kpiReport?.cubeId) {
+    opts.onProgress?.({ pct: 2, until: 15, stage: "Authorizing the KPI cube" });
+    let payload: { report?: GovernedKpiReport; error?: string };
+    try {
+      const csrfToken = await ledgerLmCsrfToken(opts.signal);
+      const res = await fetch("/api/kpi-reports/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-csrf-token": csrfToken },
+        signal: opts.signal,
+        credentials: "include",
+        body: JSON.stringify({
+          cubeId: board.kpiReport.cubeId,
+          year: board.kpiReport.year,
+          month: board.kpiReport.month,
+          entity: board.kpiReport.entity || undefined,
+          forecastScenario: board.kpiReport.forecastScenario,
+        }),
+      });
+      payload = await res.json().catch(() => ({}));
+      if (!res.ok || !payload.report) {
+        throw new Error(payload.error ?? "Could not calculate the governed KPI report from this cube.");
+      }
+    } catch (error) {
+      if (opts.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+        throw new AnalysisStoppedError();
+      }
+      throw error;
+    }
+    if (opts.signal?.aborted) throw new AnalysisStoppedError();
+    opts.onProgress?.({ pct: 88, until: 100, stage: "Saving the governed KPI report" });
+    const now = new Date();
+    const report: Report = {
+      id: crypto.randomUUID(),
+      createdAt: now.toISOString(),
+      durationMs: Date.now() - startedAt,
+      trigger,
+      result: kpiBoardResult(payload.report),
+    };
+    const thread: AnalysisThread = {
+      id: crypto.randomUUID(),
+      name: `${trigger === "scheduled" ? "Scheduled run" : "Ad-hoc run"} — ${now.toLocaleString([], {
+        dateStyle: "short",
+        timeStyle: "short",
+      })}`,
+      createdAt: now.toISOString(),
+      trigger,
+      reportId: report.id,
+      messages: [
+        {
+          role: "assistant",
+          text: `KPI Metrics report generated.\n\n${report.result.summary}\n\nAsk me anything about this report or the underlying data.`,
+        },
+      ],
+    };
+    const fresh = getBoard(boardId) ?? board;
+    const updated: Board = {
+      ...fresh,
+      reports: [report, ...fresh.reports],
+      threads: [thread, ...fresh.threads],
+    };
+    saveBoard(updated);
+    announceBoardsUpdated();
+    opts.onProgress?.({ pct: 100, until: 100, stage: "Done" });
+    return updated;
+  }
 
   // Entity P&L boards intentionally never copy Enterprise Data into the
   // browser. Each run asks the authenticated LedgerLM proxy to authorize the

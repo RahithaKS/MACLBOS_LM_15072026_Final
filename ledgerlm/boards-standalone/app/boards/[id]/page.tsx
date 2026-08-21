@@ -109,7 +109,9 @@ export default function BoardDetailPage() {
   const template = board ? (getTemplate(board.templateId) ?? TEMPLATES[0]) : undefined;
   const cube = getCube(board?.cubeId ?? null);
   const isEntityPnl = board?.templateId === "entity-pnl";
+  const isKpiReport = board?.templateId === "kpi-metrics";
   const hasEntityPnlSelection = Boolean(board?.entityPnl?.cubeId && board.entityPnl.asOf);
+  const hasKpiSelection = Boolean(board?.kpiReport?.cubeId && board.kpiReport.year && board.kpiReport.month);
   const activeThread = board?.threads.find((t) => t.id === activeThreadId) ?? null;
   const latestReport = board?.reports[0] ?? null;
   const activeReport =
@@ -148,7 +150,7 @@ export default function BoardDetailPage() {
   }
 
   async function runAnalysis() {
-    if (!board || !template || (!cube && !hasEntityPnlSelection) || running) return;
+    if (!board || !template || (!cube && !hasEntityPnlSelection && !hasKpiSelection) || running) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setRunning(true);
@@ -333,7 +335,7 @@ export default function BoardDetailPage() {
 
         {/* Analysis scope — what this board actually reads. Sits directly under
             the description so it frames everything below it. */}
-        {!cube && !isEntityPnl ? (
+        {!cube && !isEntityPnl && !isKpiReport ? (
           <div className="mt-5 rounded-xl border border-border px-6 py-10 text-center">
             <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-surface-muted">
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-muted" stroke="currentColor" strokeWidth="1.5">
@@ -369,6 +371,29 @@ export default function BoardDetailPage() {
             <button
               onClick={runAnalysis}
               disabled={!hasEntityPnlSelection || running}
+              className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {board.reports.length ? "Re-run Analysis" : "Run Analysis"}
+            </button>
+          </div>
+        ) : isKpiReport ? (
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border px-5 py-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">{board.kpiReport?.cubeName || "KPI Enterprise cube"}</p>
+              <p className="mt-1 text-xs text-muted">
+                {board.kpiReport?.entity || "All entities (excludes World Wide)"} ·{" "}
+                {new Date(Date.UTC(board.kpiReport?.year ?? 2025, (board.kpiReport?.month ?? 1) - 1, 1)).toLocaleString(
+                  "en-US",
+                  { month: "long", year: "numeric" },
+                )} · {board.kpiReport?.forecastScenario || "YTD Forecast"}
+              </p>
+              <p className="mt-1.5 text-[11px] text-muted">
+                Every run reads the authorized cube through the governed, read-only KPI service.
+              </p>
+            </div>
+            <button
+              onClick={runAnalysis}
+              disabled={!hasKpiSelection || running}
               className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {board.reports.length ? "Re-run Analysis" : "Run Analysis"}
@@ -506,14 +531,18 @@ export default function BoardDetailPage() {
           </p>
         )}
 
-        {tab === "reports" && (cube || isEntityPnl) && (
+        {tab === "reports" && (cube || isEntityPnl || isKpiReport) && (
           <div className="mt-5 space-y-5">
             {board.reports.length === 0
               ? !running && (
                   <div className="rounded-xl border border-border px-6 py-12 text-center">
                     <p className="font-display text-lg font-semibold">No reports yet</p>
                     <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted">
-                      Run Analysis to generate a Smart Analysis report from {isEntityPnl ? board.entityPnl?.cubeName || "the selected Enterprise cube" : cube?.name}
+                      Run Analysis to generate a Smart Analysis report from {isEntityPnl
+                        ? board.entityPnl?.cubeName || "the selected Enterprise cube"
+                        : isKpiReport
+                          ? board.kpiReport?.cubeName || "the selected KPI Enterprise cube"
+                          : cube?.name}
                       {board.schedule.enabled ? ", or wait for the next scheduled run" : ""}.
                     </p>
                   </div>

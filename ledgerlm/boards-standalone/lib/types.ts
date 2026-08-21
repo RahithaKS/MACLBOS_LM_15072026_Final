@@ -306,6 +306,19 @@ export interface EntityPnlSettings {
   cfVersion: string | null;
 }
 
+/**
+ * Stored board inputs for the governed KPI Metrics board. The cube remains in
+ * Enterprise Data; this only saves the permitted report selection to re-run.
+ */
+export interface KpiReportSettings {
+  cubeId: string | null;
+  cubeName: string;
+  year: number;
+  month: number;
+  entity: string;
+  forecastScenario: string;
+}
+
 export interface EntityPnlLine {
   label: string;
   values: Record<string, number | null>;
@@ -363,6 +376,8 @@ export interface Board {
   cubeId: string | null;
   /** Saved selection for a read-only Enterprise Data Entity P&L run. */
   entityPnl?: EntityPnlSettings | null;
+  /** Saved selection for a read-only governed KPI Metrics run. */
+  kpiReport?: KpiReportSettings | null;
   /** Time period granularity for the analysis ("auto" = finest available). */
   timeGranularity: TimeGranularity;
   /** Which period the closing position is compared against. */

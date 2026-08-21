@@ -145,6 +145,7 @@ function normalize(board: Partial<Board> & Pick<Board, "id" | "name" | "template
     templateAnatomy: null,
     cubeId: null,
     entityPnl: null,
+    kpiReport: null,
     timeGranularity: "auto",
     comparisonBasis: { mode: "previous", periods: [] },
     // Boards saved before scope modes existed meant "only these" whenever key

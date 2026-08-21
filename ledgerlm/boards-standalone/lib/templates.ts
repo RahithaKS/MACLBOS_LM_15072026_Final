@@ -249,6 +249,24 @@ governed Entity P&L cost population, not merely the visible detail rows. Use the
 calculated table as the authority; do not recreate figures from prose or invent business causes.`,
 });
 
+TEMPLATES.push({
+  id: "kpi-metrics",
+  tier: "custom",
+  name: "KPI Metrics Board",
+  description:
+    "Run governed Budget / Revenue, utilization, and capacity KPIs directly against an authorized Enterprise Data cube.",
+  systemPrompt: `I'll help you run a governed KPI Metrics report. I'm configured to:
+- Read only the selected, authorized Enterprise Data KPI cube
+- Keep Anaplan actuals and the selected MBR forecast scenario separate
+- Report Budget / Revenue, Internal Utilization, External Utilization, and Capacity
+- Show source labels, variances, warnings, and source-row counts
+- Never infer a value when the governed source does not provide it`,
+  analysisPrompt: `Present the deterministic KPI Metrics result returned by the governed data adapter.
+Keep Actual and Forecast in separate columns. Show the selected period, entity scope, forecast
+scenario, source labels, absolute and percentage variances, and any data warnings. Do not recreate
+figures from prose or invent business causes.`,
+});
+
 export function getTemplate(id: string): BoardTemplate | undefined {
   return TEMPLATES.find((t) => t.id === id);
 }

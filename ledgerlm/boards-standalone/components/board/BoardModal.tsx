@@ -28,6 +28,7 @@ import type {
   ScopeMode,
   TimeGranularity,
   EntityPnlSettings,
+  KpiReportSettings,
 } from "@/lib/types";
 
 const GRANULARITY_LABELS: Record<TimeGranularity, string> = {
@@ -46,6 +47,7 @@ export interface BoardModalResult {
   templateAnatomy: PptTemplateAnatomy | null;
   cubeId: string | null;
   entityPnl: EntityPnlSettings | null;
+  kpiReport: KpiReportSettings | null;
   timeGranularity: TimeGranularity;
   comparisonBasis: ComparisonBasis;
   scopeMode: ScopeMode;
@@ -404,6 +406,7 @@ function TemplateAnatomyView({ anatomy }: { anatomy: PptTemplateAnatomy }) {
 
 export default function BoardModal({ mode, template, board, onClose, onSubmit }: Props) {
   const isEntityPnl = template.id === "entity-pnl";
+  const isKpiReport = template.id === "kpi-metrics";
   const [cubes, setCubes] = useState<DataCube[]>(() => getCubes());
   useEffect(() => {
     ensureDatasetsLoaded().then(() => setCubes(getCubes()));
@@ -483,6 +486,22 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
       cfVersion: null,
     },
   );
+  const [kpiReport, setKpiReport] = useState<KpiReportSettings>(
+    board?.kpiReport ?? {
+      cubeId: null,
+      cubeName: "",
+      year: new Date().getFullYear(),
+      month: new Date().getMonth() + 1,
+      entity: "",
+      forecastScenario: "YTD Forecast",
+    },
+  );
+  const [kpiOptions, setKpiOptions] = useState<{
+    years: number[];
+    entities: string[];
+    forecastScenarios: string[];
+    defaultForecastScenario: string;
+  } | null>(null);
   const [timeGranularity, setTimeGranularity] = useState<TimeGranularity>(
     board?.timeGranularity ?? "auto",
   );
@@ -508,9 +527,9 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
   );
 
   useEffect(() => {
-    if (!isEntityPnl) return;
+    if (!isEntityPnl && !isKpiReport) return;
     let cancelled = false;
-    fetch("/api/user/accessible-cubes", { credentials: "include" })
+    fetch(isKpiReport ? "/api/kpi-reports/cubes" : "/api/user/accessible-cubes", { credentials: "include" })
       .then(async (res) => {
         const payload = await res.json().catch(() => null);
         if (!res.ok) throw new Error(payload?.error ?? "Could not load accessible Enterprise Data cubes.");
@@ -522,7 +541,7 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
     return () => {
       cancelled = true;
     };
-  }, [isEntityPnl]);
+  }, [isEntityPnl, isKpiReport]);
 
   useEffect(() => {
     if (!isEntityPnl || !entityPnl.cubeId) {
@@ -545,6 +564,37 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
       cancelled = true;
     };
   }, [entityPnl.cubeId, isEntityPnl]);
+
+  useEffect(() => {
+    if (!isKpiReport || !kpiReport.cubeId) {
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/kpi-reports/cubes/${encodeURIComponent(kpiReport.cubeId)}/options`, {
+      credentials: "include",
+    })
+      .then(async (res) => {
+        const payload = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(payload?.error ?? "Could not load KPI report options.");
+        if (!cancelled) {
+          setKpiOptions(payload);
+          setKpiReport((previous) => ({
+            ...previous,
+            year: payload.years?.includes(previous.year) ? previous.year : payload.years?.[0] ?? previous.year,
+            entity: payload.entities?.includes(previous.entity) ? previous.entity : "",
+            forecastScenario: payload.forecastScenarios?.includes(previous.forecastScenario)
+              ? previous.forecastScenario
+              : payload.defaultForecastScenario ?? "YTD Forecast",
+          }));
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setEnterpriseError(error instanceof Error ? error.message : "Could not load KPI report options.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isKpiReport, kpiReport.cubeId]);
 
   const cube = cubes.find((c) => c.id === cubeId);
   /** Data columns (measures) vs dimensions of the selected cube. */
@@ -673,7 +723,7 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
   function buildSchedule(): BoardSchedule {
     const custom =
       frequency === "custom" ? { customEvery: customEveryValue, customUnit } : {};
-    if (!scheduleEnabled || (!cubeId && !entityPnl.cubeId)) {
+    if (!scheduleEnabled || (!cubeId && !entityPnl.cubeId && !kpiReport.cubeId)) {
       return {
         enabled: false,
         frequency,
@@ -715,6 +765,7 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
       templateAnatomy,
       cubeId,
       entityPnl: isEntityPnl ? entityPnl : null,
+      kpiReport: isKpiReport ? kpiReport : null,
       timeGranularity,
       comparisonBasis: { mode: comparisonMode, periods: comparisonPeriods },
       scopeMode,
@@ -1106,7 +1157,104 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
               </div>
             )}
 
-            {!isEntityPnl && (
+            {isKpiReport && (
+              <div className="mt-4 rounded-xl border border-border bg-background/40 p-4">
+                <span className="text-sm font-semibold">Governed KPI Metrics selection</span>
+                <p className="mt-1 text-xs leading-relaxed text-muted">
+                  This board runs the same authorized KPI calculation as LedgerLM, without copying
+                  Enterprise Data rows into the board. Actuals and MBR forecasts remain separate.
+                </p>
+                {enterpriseError && (
+                  <p className="mt-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+                    {enterpriseError}
+                  </p>
+                )}
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted">KPI Enterprise cube</span>
+                    <select
+                      value={kpiReport.cubeId ?? ""}
+                      onChange={(e) => {
+                        const selected = enterpriseCubes.find((cube) => cube.id === e.target.value);
+                        setEnterpriseError(null);
+                        setKpiReport((previous) => ({
+                          ...previous,
+                          cubeId: selected?.id ?? null,
+                          cubeName: selected?.name ?? "",
+                          entity: "",
+                        }));
+                      }}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+                    >
+                      <option value="">Select an authorized KPI cube</option>
+                      {enterpriseCubes.map((enterpriseCube) => (
+                        <option key={enterpriseCube.id} value={enterpriseCube.id}>
+                          {enterpriseCube.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted">Entity <span className="font-normal">(optional)</span></span>
+                    <select
+                      value={kpiReport.entity}
+                      onChange={(e) => setKpiReport((previous) => ({ ...previous, entity: e.target.value }))}
+                      disabled={!kpiReport.cubeId}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary disabled:cursor-not-allowed disabled:bg-surface-muted/40"
+                    >
+                      <option value="">All entities (excludes World Wide)</option>
+                      {(kpiOptions?.entities ?? []).map((entity) => (
+                        <option key={entity} value={entity}>{entity}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted">Year</span>
+                    <select
+                      value={kpiReport.year}
+                      onChange={(e) => setKpiReport((previous) => ({ ...previous, year: Number(e.target.value) }))}
+                      disabled={!kpiReport.cubeId}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary disabled:cursor-not-allowed disabled:bg-surface-muted/40"
+                    >
+                      {(kpiOptions?.years ?? []).map((year) => <option key={year} value={year}>{year}</option>)}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted">Month</span>
+                    <select
+                      value={kpiReport.month}
+                      onChange={(e) => setKpiReport((previous) => ({ ...previous, month: Number(e.target.value) }))}
+                      disabled={!kpiReport.cubeId}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary disabled:cursor-not-allowed disabled:bg-surface-muted/40"
+                    >
+                      {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+                        <option key={month} value={month}>
+                          {new Date(Date.UTC(2025, month - 1, 1)).toLocaleString("en-US", { month: "long" })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-medium text-muted">Forecast scenario</span>
+                    <select
+                      value={kpiReport.forecastScenario}
+                      onChange={(e) => setKpiReport((previous) => ({ ...previous, forecastScenario: e.target.value }))}
+                      disabled={!kpiReport.cubeId}
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary disabled:cursor-not-allowed disabled:bg-surface-muted/40"
+                    >
+                      {(kpiOptions?.forecastScenarios ?? ["YTD Forecast"]).map((scenario) => (
+                        <option key={scenario} value={scenario}>{scenario}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <p className="mt-3 text-[11px] text-muted">
+                  The board shows Budget / Revenue, Internal Utilization, External Utilization, and Capacity with governed source labels and variance.
+                </p>
+              </div>
+            )}
+
+            {!isEntityPnl && !isKpiReport && (
           <div className="rounded-xl border border-border">
             <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary text-white">
