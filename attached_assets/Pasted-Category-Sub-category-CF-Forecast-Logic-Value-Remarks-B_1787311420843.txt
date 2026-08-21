@@ -1,0 +1,147 @@
+Category	Sub category	CF Forecast Logic	Value	Remarks
+Budget	YTD	"SELECT SUM([Cost value]) AS Metric_Value
+FROM Planned
+WHERE [Year] = :selected_year
+  AND [Month] = :selected_month
+  AND [Plan/Actual] = 'YTD Forecast'
+  AND [Entity] = 'BGSW'
+  AND [Page] = ""Entity"", 
+  AND [Particulars] = 'Budget (mUSD)'
+  AND [Particulars Sub Category] = 'Total';"	 721.87 	
+Budget	MS	"SELECT SUM([Cost value]) AS Metric_Value
+FROM Planned
+WHERE [Year] = :selected_year
+  AND [Month] = :selected_month
+  AND [Plan/Actual] = 'YTD Forecast'
+  AND [Entity] = 'BGSW'
+  AND [Page] = ""MS View"", 
+  AND [Particulars] = 'Budget (mUSD)';"		
+Budget	SX / MM	"SELECT SUM([Cost value]) AS Metric_Value
+FROM Planned
+WHERE [Year] = :selected_year
+  AND [Month] = :selected_month
+  AND [Plan/Actual] = 'YTD Forecast'
+  AND [Entity] = 'BGSW'
+  AND [Page] = ""SX View"", 
+  AND [Particulars] = 'Budget (mUSD)'"		
+Budget	SDS	"SELECT SUM([Cost value]) AS Metric_Value
+FROM Planned
+WHERE [Year] = :selected_year
+  AND [Month] = :selected_month
+  AND [Plan/Actual] = 'YTD Forecast'
+  AND [Entity] = 'BGSW'
+  AND [GB] = 'SDS'
+  AND [Particulars] = 'Budget (mUSD)'
+  AND [Particulars Sub Category] = 'Total';"	 36.46 	
+Budget	MS - External (iTrams)	"SELECT SUM([Cost value]) AS Metric_Value
+FROM Planned
+WHERE [Year] = :selected_year
+  AND [Month] = :selected_month
+  AND [Plan/Actual] = 'YTD Forecast'
+  AND [Entity] = 'BGSW'
+  AND [GB] = 'iTraMs'
+  AND [Particulars] = 'Budget (mUSD)'
+  AND [Particulars Sub Category] = 'Total';"	 14.77 	
+Budget	Integrated Service	"SELECT SUM([Cost value]) AS Metric_Value
+FROM Planned
+WHERE [Year] = :selected_year
+  AND [Month] = :selected_month
+  AND [Plan/Actual] = 'YTD Forecast'
+  AND [Entity] = 'BGSW'
+  AND [GB] = 'BD','GS','SO'
+  AND [Particulars] = 'Budget (mUSD)'
+  AND [Particulars Sub Category] = 'Total';"	126.91	
+Internal Utilization	YTD07.26	"SELECT   SUM([Value%]) AS Metric_Value
+     FROM Planned
+     WHERE [Year] = :selected_year
+       AND [Month] = :selected_month
+       AND [Plan/Actual] = 'YTD   Forecast'
+       AND [Entity] = 'BGSW'
+       AND [Page] = 'Blank'
+       AND [Particulars] = 'Internal Utilization (%)'
+       AND [Particulars Sub Category] =   'Blank';"		
+Internal Utilization	MS	"SELECT   SUM([Value%]) AS Metric_Value
+     FROM Planned
+     WHERE [Year] = :selected_year
+       AND [Month] = :selected_month
+       AND [Plan/Actual] = 'YTD   Forecast'
+       AND [Entity] = 'BGSW'
+       AND [Page] = 'MS  View'
+       AND [Particulars] = 'Internal Utilization (%)'
+       AND [Particulars Sub Category] =   'Blank';"		
+Internal Utilization	SX / MM	"SELECT   SUM([Value%]) AS Metric_Value
+     FROM Planned
+     WHERE [Year] = :selected_year
+       AND [Month] = :selected_month
+       AND [Plan/Actual] = 'YTD   Forecast'
+       AND [Entity] = 'BGSW'
+       AND [Page] = 'SX  View'
+       AND [Particulars] = 'Internal Utilization (%)'
+       AND [Particulars Sub Category] =   'Blank';"		
+External Utilization	YTD07.26	"SELECT   SUM([Value%]) AS Metric_Value
+     FROM Planned
+     WHERE [Year] = :selected_year
+       AND [Month] = :selected_month
+       AND [Plan/Actual] = 'YTD   Forecast'
+       AND [Entity] = 'BGSW'
+       AND [Page] = 'Blank'
+       AND [Particulars] = 'Outsourcing Utilization (%)'
+       AND [Particulars Sub Category] =   'Blank';"		
+External Utilization	MS	"SELECT   SUM([Value%]) AS Metric_Value
+     FROM Planned
+     WHERE [Year] = :selected_year
+       AND [Month] = :selected_month
+       AND [Plan/Actual] = 'YTD   Forecast'
+       AND [Entity] = 'BGSW'
+       AND [Page] = 'MS  View'
+       AND [Particulars] = 'Outsourcing Utilization (%)'
+       AND [Particulars Sub Category] =   'Blank';"		
+External Utilization	SX / MM	"SELECT   SUM([Value%]) AS Metric_Value
+     FROM Planned
+     WHERE [Year] = :selected_year
+       AND [Month] = :selected_month
+       AND [Plan/Actual] = 'YTD   Forecast'
+       AND [Entity] = 'BGSW'
+       AND [Page] = 'SX  View'
+       AND [Particulars] = 'Outsourcing Utilization (%)'
+       AND [Particulars Sub Category] =   'Blank';"		
+Total Capacity	YTD07.26	"(SUM(Planned[Cost Value]), 
+Planned[Plan/Actual] IN {""Actuals"",""Actual""} , 
+Planned[Entity] = ""BGSW"",  
+Planned[Page] = ""Entity View"", 
+Planned[Particulars] = ""Total Capacity"", 
+Planned[Particulars Sub Category] = ""End"", 
+Planned[Year] = SELECTEDVALUE('Calendar'[Year]), 
+Planned[Month] = SELECTEDVALUE('Calendar'[Selected Mnth]))"		
+Total Capacity	MS	"(SUM(Planned[Cost Value]), 
+Planned[Plan/Actual] IN {""YTD   Forecast""} , 
+Planned[Entity] = ""BGSW"",  
+Planned[Page] = ""MS View"", 
+Planned[Particulars] = ""Offshore Capacity,Outsourcing Capacity, Onsite Capacity "", 
+Planned[Particulars Sub Category] = ""End"", 
+Planned[Year] = SELECTEDVALUE('Calendar'[Year]), 
+Planned[Month] = SELECTEDVALUE('Calendar'[Selected Mnth]))"		
+Total Capacity	SX / MM	"(SUM(Planned[Cost Value]),  
+Planned[Plan/Actual] IN {""YTD   Forecast""} ,
+Planned[Entity] = ""BGSW"",  
+Planned[Page] = ""SX View"", 
+Planned[Particulars] = ""Offshore Capacity,Outsourcing Capacity, Onsite Capacity "", 
+Planned[Particulars Sub Category] = ""End"", 
+Planned[Year] = SELECTEDVALUE('Calendar'[Year]), 
+Planned[Month] = SELECTEDVALUE('Calendar'[Selected Mnth]))"		
+Total Capacity	SDS	"(SUM(Planned[Cost Value]),  
+Planned[Plan/Actual] IN {""YTD   Forecast""} ,
+Planned[Entity] = ""BGSW"",  
+Planned[GB] IN ('SDS')
+Planned[Particulars] = ""Total Capacity"", 
+Planned[Particulars Sub Category] = ""End"", 
+Planned[Year] = SELECTEDVALUE('Calendar'[Year]), 
+Planned[Month] = SELECTEDVALUE('Calendar'[Selected Mnth]))"		
+Total Capacity	Integrated Service	"(SUM(Planned[Cost Value]), 
+Planned[Plan/Actual] IN {""YTD   Forecast""} ,
+Planned[Entity] = ""BGSW"",  
+Planned[GB] IN ('BD','GS','SO')
+Planned[Particulars] = ""Total Capacity"", 
+Planned[Particulars Sub Category] = ""End"", 
+Planned[Year] = SELECTEDVALUE('Calendar'[Year]), 
+Planned[Month] = SELECTEDVALUE('Calendar'[Selected Mnth]))"		
