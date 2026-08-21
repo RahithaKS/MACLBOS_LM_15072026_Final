@@ -70,3 +70,17 @@ mtime_ms = 1787311190432
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:8fb1e782-d061-4eb4-a946-88f35142b823/36c5a4c4-0f5e-4979-b4d7-3566743c7348/7fa3387a-9240-4e2b-bc62-f4ee491ff1cb"
 storage_version_token = "1787315941861221"
 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "DjIpgRL2eTM4JxK2YjmC9"
+uri = "file://attached_assets/kpi_business_metrics_template.pptx"
+type = "slides"
+title = "Business Metrics KPI Report Template"
+description = "Editable PowerPoint template matching the supplied KPI report layout, with reusable placeholders for KPI board exports."
+logical_id = "9363d6c0-9040-47ea-a403-1c382ec746a5"
+content_hash = "sha256:49775fd0c1381b49214f2f80eb2edd2088d012a16913bbe19e99c59fcd6d7ae2"
+size = 74962
+mtime_ms = 1787317496765
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:8fb1e782-d061-4eb4-a946-88f35142b823/9363d6c0-9040-47ea-a403-1c382ec746a5/1e678548-18b0-483e-9977-31296f086623"
+storage_version_token = "1787317506452429"
+content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
