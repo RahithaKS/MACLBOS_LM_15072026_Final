@@ -56,3 +56,17 @@ mtime_ms = 1787237405168
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:8fb1e782-d061-4eb4-a946-88f35142b823/6839fbb0-86fd-4a3d-97a0-0e062443675c/fa718af8-ce21-4b47-936a-cd2ea54ae0d2"
 storage_version_token = "1787237453521962"
 content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+[[outputs]]
+id = "HHJIIlA-2Q1_Bz8eU1TY2"
+uri = "file://ledgerlm/ledgerlm/uploads/1787311190401-8af85b99c08c-Manual_inputs_MBR_master.xlsx"
+type = "table"
+title = "MBR KPI Forecast Template"
+description = "Upload this workbook through Admin → Enterprise Data for the Testing 2025 KPI cube. It contains the Plan,Actual sheet used by KPI Reports."
+logical_id = "36c5a4c4-0f5e-4979-b4d7-3566743c7348"
+content_hash = "sha256:f6d7f40af153eed0420feac75c1813ef42f7f3172d85abad6bf3808709de591b"
+size = 1197037
+mtime_ms = 1787311190432
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:8fb1e782-d061-4eb4-a946-88f35142b823/36c5a4c4-0f5e-4979-b4d7-3566743c7348/7fa3387a-9240-4e2b-bc62-f4ee491ff1cb"
+storage_version_token = "1787315941861221"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
