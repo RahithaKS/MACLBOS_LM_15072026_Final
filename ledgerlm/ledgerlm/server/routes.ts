@@ -65,6 +65,13 @@ import {
 import { writeAuditLog, extractIp } from "./services/auditLogger";
 import { runBackup, listBackups } from "./services/backupService";
 import { listRetentionPolicies, updateRetentionPolicy, runRetentionEngine } from "./services/retentionEngine";
+import {
+  getKpiReportOptions,
+  listSavedKpiReports,
+  runKpiReport,
+  saveKpiReport,
+  validateKpiReportRequest,
+} from "./services/kpiReportService";
 
 const signinSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -467,6 +474,43 @@ async function ensureUserAccountForDomainUser(
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  const resolveKpiScope = async (req: any) => {
+    const userId = req.session?.userId;
+    if (!userId) {
+      throw Object.assign(new Error("Your sign-in session is no longer valid."), { status: 401 });
+    }
+    const user = await storage.getUser(userId);
+    if (!user) {
+      throw Object.assign(new Error("Your sign-in session is no longer valid."), { status: 401 });
+    }
+    const domainUser = await storage.getDomainUserByEmail(user.username.toLowerCase());
+    if (!domainUser) {
+      throw Object.assign(
+        new Error("You do not have access to Enterprise Data in this workspace."),
+        { status: 403 },
+      );
+    }
+    const accessibleCubeIds = await storage.getAccessibleCubeIds(
+      user.username.toLowerCase(),
+      domainUser.domainId,
+    );
+    return { userId, user, domainUser, accessibleCubeIds };
+  };
+
+  const requireKpiCubeAccess = async (req: any, cubeId: string) => {
+    const scope = await resolveKpiScope(req);
+    if (!scope.accessibleCubeIds.includes(cubeId)) {
+      throw Object.assign(
+        new Error("You do not have permission to read this Enterprise cube."),
+        { status: 403 },
+      );
+    }
+    const cube = await storage.getCube(cubeId);
+    if (!cube || cube.domainId !== scope.domainUser.domainId || cube.schemaType !== "kpi") {
+      throw Object.assign(new Error("The selected cube is not available for KPI Reports."), { status: 404 });
+    }
+    return { ...scope, cube };
+  };
 
   // ── SG-41: CSRF token vending endpoint ───────────────────────────────────
   // Generates a random per-session token on first call and returns it.
@@ -9229,6 +9273,92 @@ ${faqContext ? `FAQ KNOWLEDGE BASE:\n${faqContext}` : "No FAQ documentation is c
   // ENTITY P&L PROXY ROUTES
   // Authorized, read-only reporting from Enterprise Data.
   // ==========================================
+  // ==========================================
+  // GOVERNED KPI REPORTS
+  // Actuals always come from the Anaplan fact layer; MBR plan rows are used
+  // only for forecasts. Every route checks cube-level access before querying.
+  // ==========================================
+  app.get("/api/kpi-reports/cubes", requireAuth, async (req, res) => {
+    try {
+      const scope = await resolveKpiScope(req);
+      const cubes = await storage.getCubes(scope.domainUser.domainId);
+      res.json({
+        cubes: cubes
+          .filter((cube) => scope.accessibleCubeIds.includes(cube.id) && cube.schemaType === "kpi")
+          .map((cube) => ({ id: cube.id, name: cube.name, description: cube.description })),
+      });
+    } catch (error: any) {
+      res.status(error.status ?? 500).json({ error: error.message ?? "Could not load KPI cubes." });
+    }
+  });
+
+  app.get("/api/kpi-reports/cubes/:cubeId/options", requireAuth, async (req, res) => {
+    try {
+      await requireKpiCubeAccess(req, req.params.cubeId);
+      res.json(await getKpiReportOptions(req.params.cubeId));
+    } catch (error: any) {
+      res.status(error.status ?? 500).json({ error: error.message ?? "Could not load KPI report options." });
+    }
+  });
+
+  app.post("/api/kpi-reports/run", requireAuth, async (req, res) => {
+    try {
+      const request = validateKpiReportRequest(req.body);
+      await requireKpiCubeAccess(req, request.cubeId);
+      res.json({ report: await runKpiReport(request) });
+    } catch (error: any) {
+      res.status(error.status ?? 400).json({ error: error.message ?? "Could not generate the KPI report." });
+    }
+  });
+
+  app.get("/api/kpi-reports/saved", requireAuth, async (req, res) => {
+    try {
+      const scope = await resolveKpiScope(req);
+      const reports = await listSavedKpiReports(scope.userId);
+      res.json({
+        reports: reports
+          .filter((report) => scope.accessibleCubeIds.includes(String(report.cube_id)))
+          .map((report) => ({
+            id: report.id,
+            cubeId: report.cube_id,
+            title: report.title,
+            request: report.request,
+            report: report.report,
+            createdAt: report.created_at,
+          })),
+      });
+    } catch (error: any) {
+      res.status(error.status ?? 500).json({ error: error.message ?? "Could not load saved KPI reports." });
+    }
+  });
+
+  app.post("/api/kpi-reports/saved", requireAuth, async (req, res) => {
+    try {
+      const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+      if (!title || title.length > 160) {
+        return res.status(400).json({ error: "Provide a report title of up to 160 characters." });
+      }
+      const request = validateKpiReportRequest(req.body?.request);
+      const scope = await requireKpiCubeAccess(req, request.cubeId);
+      // Do not accept a browser-supplied report snapshot as evidence. Re-run the
+      // governed calculation server-side before it is persisted.
+      const report = await runKpiReport(request);
+      const saved = await saveKpiReport(scope.userId, title, request, report);
+      res.status(201).json({
+        report: {
+          id: saved.id,
+          cubeId: saved.cube_id,
+          title: saved.title,
+          request: saved.request,
+          report: saved.report,
+          createdAt: saved.created_at,
+        },
+      });
+    } catch (error: any) {
+      res.status(error.status ?? 400).json({ error: error.message ?? "Could not save the KPI report." });
+    }
+  });
+
   app.all("/api/v2/entity-pnl/*", requireAuth, async (req, res) => {
     try {
       const userId = req.session?.userId;

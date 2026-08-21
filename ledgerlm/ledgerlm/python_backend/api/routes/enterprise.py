@@ -153,7 +153,12 @@ async def process_enterprise_document_background(document_id: str, company_id: s
                         result = sql_service.ingest_investment_data(absolute_path, cube_id, job_id=job_id)
                     elif is_plan_data:
                         logger.info(f"Detected Plan data format (Manual inputs MBR Master) - loading into cube_plan_data")
-                        result = sql_service.ingest_plan_data(absolute_path, cube_id, source_file=os.path.basename(absolute_path))
+                        result = sql_service.ingest_plan_data(
+                            absolute_path,
+                            cube_id,
+                            source_file=os.path.basename(absolute_path),
+                            job_id=job_id,
+                        )
                     else:
                         logger.info(f"Detected Fact data format (MV_GB_INSIGHTS) - loading into cube_fact_data")
                         result = sql_service.ingest_excel_to_facts(absolute_path, cube_id, job_id=job_id)

@@ -4331,6 +4331,7 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
                          cube_id: str,
                          sheet_name: str = 'Plan,Actual',
                          source_file: str = None,
+                         job_id: str = None,
                          batch_size: int = 1000) -> Dict[str, Any]:
         """
         Ingest Plan/Budget data from Manual inputs MBR Master Excel file.
@@ -4359,6 +4360,13 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
             total_rows = len(df)
             logger.info(f"Read {total_rows} rows from sheet '{sheet_name}'")
             logger.info(f"Columns: {list(df.columns)}")
+            if job_id:
+                self.update_ingestion_job(
+                    job_id,
+                    status='running',
+                    total_rows=total_rows,
+                    processed_rows=0,
+                )
 
             # Build lowercase lookup for Excel columns
             excel_cols_lower = {col.lower().strip(): col for col in df.columns}
@@ -4458,6 +4466,14 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
                     logger.debug(f"Row {idx} skipped: {e}")
 
             if not batch_data:
+                if job_id:
+                    self.update_ingestion_job(
+                        job_id,
+                        status='failed',
+                        total_rows=total_rows,
+                        processed_rows=0,
+                        error_message='No valid rows to insert after processing',
+                    )
                 return {
                     'success': False,
                     'error': 'No valid rows to insert after processing'
@@ -4509,6 +4525,13 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
             logger.info(
                 f"Plan data ingestion complete: {inserted_rows} rows in {elapsed:.2f}s"
             )
+            if job_id:
+                self.update_ingestion_job(
+                    job_id,
+                    status='succeeded',
+                    total_rows=total_rows,
+                    processed_rows=inserted_rows,
+                )
 
             return {
                 'success': True,
@@ -4520,6 +4543,12 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
 
         except Exception as e:
             logger.error(f"Plan data ingestion failed: {e}")
+            if job_id:
+                self.update_ingestion_job(
+                    job_id,
+                    status='failed',
+                    error_message=str(e),
+                )
             return {'success': False, 'error': str(e)}
         finally:
             if conn:

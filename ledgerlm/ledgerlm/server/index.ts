@@ -46,6 +46,7 @@ import { runInvestmentTablesMigration } from "./migrations/create-investment-tab
 import { addSsoGroupMappings } from "./migrations/add-sso-group-mappings";
 import { createBoardReportsTable } from "./migrations/create-board-reports";
 import { addVarianceDataColumn } from "./migrations/add-variance-data-column";
+import { createKpiReportsTable } from "./migrations/create-kpi-reports";
 import { runRetentionEngine } from "./services/retentionEngine";
 import { runBackup } from "./services/backupService";
 import { startSsoSyncJob } from "./services/ssoSyncJob";
@@ -417,6 +418,8 @@ app.use(csrfProtection);
   await createBoardReportsTable();
   // Add varianceData + comparisonPeriodLabel columns (Phase 2)
   await addVarianceDataColumn();
+  // Persist governed KPI report snapshots; source facts remain in their own layers.
+  await createKpiReportsTable();
 
   await seedDatabase();
   await fixAzureBlobConnectorSchedules();

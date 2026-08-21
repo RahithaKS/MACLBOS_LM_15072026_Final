@@ -18,6 +18,7 @@ import {
   Pencil,
   Trash2,
   ScrollText,
+  ChartNoAxesCombined,
 } from "lucide-react";
 import { LuLayoutDashboard } from "react-icons/lu";
 import { GoHomeFill } from "react-icons/go";
@@ -85,6 +86,11 @@ const menuItems = [
     url: "/boards",
     icon: LuLayoutDashboard,
     comingSoon: false,
+  },
+  {
+    title: "KPI Reports",
+    url: "/kpi-reports",
+    icon: ChartNoAxesCombined,
   },
   {
     title: "Boards (Standalone)",

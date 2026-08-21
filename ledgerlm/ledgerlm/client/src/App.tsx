@@ -23,6 +23,7 @@ import SuperAdmin from "@/pages/SuperAdmin";
 import AgenticWorkflow from "@/pages/AgenticWorkflow";
 import AdminAgenticWorkflow from "@/pages/AdminAgenticWorkflow";
 import SemanticSqlTest from "@/pages/SemanticSqlTest";
+import KpiReports from "@/pages/KpiReports";
 import NotFound from "@/pages/not-found";
 import Downloads from "@/pages/Downloads";
 import { PersistentStandaloneFrames } from "@/pages/StandaloneEmbed";
@@ -98,6 +99,7 @@ function AuthenticatedRouteContent() {
       <Route path="/super-admin" component={SuperAdmin} />
       <Route path="/agentic-workflow" component={AgenticWorkflow} />
       <Route path="/semantic-sql-test" component={SemanticSqlTest} />
+      <Route path="/kpi-reports" component={KpiReports} />
       <Route component={NotFound} />
     </Switch>
   );
