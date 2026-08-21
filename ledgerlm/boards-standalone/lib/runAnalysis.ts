@@ -3,7 +3,7 @@
 import { getBoard, saveBoard, ensureDatasetsLoaded } from "./store";
 import { getCube } from "./cubes";
 import { projectRecordsForScope } from "./promptData";
-import { standaloneApiPath } from "./apiPath";
+import { standaloneApiPath, standaloneRequestHeaders } from "./apiPath";
 import type {
   AnalysisResult,
   AnalysisThread,
@@ -281,8 +281,12 @@ export async function runBoardAnalysis(
   try {
     res = await fetch(standaloneApiPath("/api/analyze"), {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
+      headers: await standaloneRequestHeaders(
+        { "Content-Type": "application/json", Accept: "application/x-ndjson" },
+        opts.signal,
+      ),
       signal: opts.signal,
+      credentials: "include",
       body: JSON.stringify({
       templateId: board.templateId,
       boardName: board.name,

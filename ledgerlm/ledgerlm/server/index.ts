@@ -9,6 +9,7 @@ import pkg from "pg";
 const { Pool } = pkg;
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { registerStandaloneBoardsProxy } from "./standalone-boards-proxy";
 import { logger } from "./logger";
 import { seedDatabase } from "./seed";
 import { startPythonBackend } from "./python-backend";
@@ -109,13 +110,6 @@ declare module 'http' {
     rawBody: unknown
   }
 }
-app.use(express.json({
-  verify: (req, _res, buf) => {
-    req.rawBody = buf;
-  }
-}));
-app.use(express.urlencoded({ extended: false }));
-
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -196,7 +190,7 @@ if (_sessionAuthMode === 'entra' || _sessionAuthMode === 'hybrid') {
   });
 }
 
-app.use(session({
+const sessionMiddleware = session({
   store: new PgSession({
     pool: sessionPool,
     tableName: 'session',
@@ -212,7 +206,19 @@ app.use(session({
     sameSite: 'strict',
     maxAge: 15 * 60 * 1000,  // 15 minutes — Bosch SG-39 / SG-84 requirement
   },
+});
+app.use(sessionMiddleware);
+
+// Must be registered before body parsers: the proxy forwards the original
+// Boards request stream, while still applying LedgerLM session and CSRF checks.
+const standaloneBoardsProxy = registerStandaloneBoardsProxy(app, csrfProtection, sessionMiddleware);
+
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    req.rawBody = buf;
+  }
 }));
+app.use(express.urlencoded({ extended: false }));
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 const globalApiLimiter = rateLimit({
@@ -298,7 +304,7 @@ function timingSafeStrEqual(a: string, b: string): boolean {
   }
 }
 
-app.use((req: Request, res: Response, next: NextFunction) => {
+function csrfProtection(req: Request, res: Response, next: NextFunction) {
   // Only state-changing methods need CSRF protection
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
   // Exempt public routes
@@ -314,7 +320,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     return res.status(403).json({ error: 'CSRF token validation failed. Please refresh and try again.' });
   }
   next();
-});
+}
+
+app.use(csrfProtection);
 
 (async () => {
   // ── Step 0: ensure required PostgreSQL extensions exist ──────────────────
@@ -487,6 +495,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
+  //
+  // Replit routes the embedded standalone app itself. For local development,
+  // dev:local enables this opt-in bridge so the browser still uses one origin.
+  standaloneBoardsProxy?.attachUpgradeHandler(server);
+
   if (app.get("env") === "development") {
     await setupVite(app, server);
   } else {

@@ -15,7 +15,7 @@ import {
 import AnalysisProgress from "@/components/board/AnalysisProgress";
 import { exportReportPpt, exportReportPdf } from "@/lib/exportReport";
 import { projectRecordsForScope } from "@/lib/promptData";
-import { standaloneApiPath } from "@/lib/apiPath";
+import { standaloneApiPath, standaloneRequestHeaders } from "@/lib/apiPath";
 import type { AnalysisThread, Board, BoardDataSources, Report, RunTrigger } from "@/lib/types";
 import ResultSections from "@/components/board/ResultSections";
 import BoardModal, { type BoardModalResult } from "@/components/board/BoardModal";
@@ -233,7 +233,8 @@ export default function BoardDetailPage() {
       const thread = withUser.threads.find((t) => t.id === activeThread.id)!;
       const res = await fetch(standaloneApiPath("/api/chat"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await standaloneRequestHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
         body: JSON.stringify({
           boardName: board.name,
           systemPrompt: board.systemPrompt,

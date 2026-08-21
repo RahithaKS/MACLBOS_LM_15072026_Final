@@ -17,6 +17,24 @@ OLLAMA_BASE_URL=https://ollama.ledgerlm.ai
 OLLAMA_API_KEY=...
 ```
 
+### Integrated local LedgerLM mode
+
+To run Boards inside the LedgerLM shell on one browser address, install
+dependencies in both `ledgerlm/ledgerlm` and `ledgerlm/boards-standalone`, then
+run this from `ledgerlm/ledgerlm`:
+
+```bash
+npm run dev:local
+```
+
+Open `http://localhost:5000`. The local launcher keeps the Boards server
+internal on port 3000 and routes `/standalone-boards` through LedgerLM, so
+embedded Boards requests use the LedgerLM login session and API.
+
+This starts the application code only. Enterprise cube choices still require a
+locally configured LedgerLM database, a signed-in user, imported cube data, and
+an assigned cube permission.
+
 ## How it works
 
 | Piece | Where | Notes |
