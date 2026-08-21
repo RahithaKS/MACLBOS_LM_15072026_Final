@@ -50,3 +50,9 @@ Embedded standalone list pages keep their action header fixed while only the pag
 **Why:** Native LedgerLM pages retain their title and primary actions during long content scrolls; document-level scrolling made the standalone pages feel inconsistent and hid key actions.
 
 **How to apply:** Use a fixed-height page shell with a non-scrolling header and an internal overflow area for Boards and Enterprise Data, in both direct and embedded layouts.
+
+Local same-origin routing for the embedded standalone app must preserve LedgerLM's security boundary: authenticate every proxied HTTP request, apply LedgerLM CSRF checks to mutating requests, and register the streaming proxy after session setup but before body parsers.
+
+**Why:** Parsing an HTTP body before forwarding consumes the stream, while an unguarded local proxy turns Boards model endpoints into unauthenticated routes. WebSocket upgrades bypass Express entirely and need their own session validation.
+
+**How to apply:** Enable the bridge only by explicit local configuration, bind the companion Next server to loopback, attach the LedgerLM session/CSRF middleware before proxying, and restrict plus session-check any raw HMR upgrade. Keep the coordinated launcher responsible for terminating both service process trees.
