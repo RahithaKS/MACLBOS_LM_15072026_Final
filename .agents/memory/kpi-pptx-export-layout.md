@@ -7,4 +7,4 @@ The PowerPoint template importer captures text, table, chart, and picture region
 
 **Why:** Using the generic template-driven export with a visually structured KPI template places mapped values into text boxes without the slide's background composition, which makes the downloaded slide appear sparse and compressed.
 
-**How to apply:** Keep the KPI Metrics Board on its dedicated Business Metrics PowerPoint renderer. Treat an uploaded KPI template as an editable reference for users; if a future format relies on exact decorative PowerPoint shapes, add a purpose-built renderer instead of relying on generic anatomy alone.
+**How to apply:** Keep the KPI Metrics Board on its dedicated Business Metrics PowerPoint renderer. Treat an uploaded KPI template as an editable reference for users; if a future format relies on exact decorative PowerPoint shapes, add a purpose-built renderer instead of relying on generic anatomy alone. Only use the WW/IN/VN/MX reference panel when the stored report snapshot contains all four governed scope results; label older snapshots as legacy and prompt a re-run rather than inferring missing evidence.

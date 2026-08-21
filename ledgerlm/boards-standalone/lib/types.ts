@@ -350,6 +350,32 @@ export interface GovernedKpiMetric {
   remarks: string[];
 }
 
+/**
+ * The four fixed Business Metrics comparison scopes. These are presentation
+ * labels only; values continue to be calculated by the governed KPI service.
+ */
+export interface GovernedKpiScope {
+  id: "global" | "india" | "vietnam" | "mexico";
+  label: string;
+  code: "WW" | "IN" | "VN" | "MX";
+  entity: string;
+  status: "in_scope";
+  metrics: GovernedKpiMetric[];
+}
+
+/**
+ * A deterministic decision-panel section. Green sections are currently
+ * available from approved sources; red sections disclose Phase 2 scope without
+ * making up a value.
+ */
+export interface GovernedKpiNarrativeSection {
+  id: "revenue" | "internal_utilization" | "external_utilization" | "capacity" | "ebit" | "capex";
+  title: string;
+  status: "in_scope" | "phase_2";
+  summary: string;
+  lines: string[];
+}
+
 /** Deterministic KPI snapshot used by the KPI Metrics Board and its PPTX export. */
 export interface GovernedKpiReport {
   periodLabel: string;
@@ -359,6 +385,8 @@ export interface GovernedKpiReport {
   forecastSourceLabel: string;
   metrics: GovernedKpiMetric[];
   warnings: string[];
+  scopeBadges?: GovernedKpiScope[];
+  narrative?: GovernedKpiNarrativeSection[];
 }
 
 export interface AnalysisResult {

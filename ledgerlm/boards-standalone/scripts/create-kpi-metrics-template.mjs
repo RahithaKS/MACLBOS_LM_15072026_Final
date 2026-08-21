@@ -112,36 +112,51 @@ text("Decision / info to GLs", {
   x: 0.45, y: 1.60, w: 4.6, h: 0.20,
   fontSize: 10.5, bold: true, color: color.magenta,
 });
+text("Green: current plan-excel scope  •  Red: Phase 2 / out of scope", {
+  x: 7.1, y: 1.61, w: 5.4, h: 0.17,
+  fontSize: 7.0, bold: true, color: color.muted, align: "right",
+});
 
 const sections = [
   {
     title: "Budget / Revenue:",
     placeholder:
-      "{{budget_revenue_summary}}\nActual: {{budget_revenue_actual}} | Forecast: {{budget_revenue_forecast}} | Variance: {{budget_revenue_variance}}",
+      "{{budget_revenue_summary}}\n{{budget_revenue_scope_lines}}",
     h: 0.83,
+    color: color.green,
   },
   {
     title: "Internal Utilization:",
     placeholder:
-      "{{internal_utilization_summary}}\nActual: {{internal_utilization_actual}} | Forecast: {{internal_utilization_forecast}} | Variance: {{internal_utilization_variance}}",
+      "{{internal_utilization_summary}}\n{{internal_utilization_scope_lines}}",
     h: 0.77,
+    color: color.green,
   },
   {
     title: "External Utilization:",
     placeholder:
-      "{{external_utilization_summary}}\nActual: {{external_utilization_actual}} | Forecast: {{external_utilization_forecast}} | Variance: {{external_utilization_variance}}",
+      "{{external_utilization_summary}}\n{{external_utilization_scope_lines}}",
     h: 0.77,
+    color: color.green,
   },
   {
     title: "Capacity (Internal + External):",
     placeholder:
-      "{{capacity_summary}}\nActual: {{capacity_actual}} | Forecast: {{capacity_forecast}} | Variance: {{capacity_variance}}",
+      "{{capacity_summary}}\n{{capacity_scope_lines}}",
     h: 0.77,
+    color: color.green,
   },
   {
     title: "EBIT:",
-    placeholder: "{{ebit_commentary_or_risk}}",
-    h: 0.68,
+    placeholder: "{{ebit_phase_2_scope_note}}",
+    h: 0.58,
+    color: color.red,
+  },
+  {
+    title: "Capex:",
+    placeholder: "{{capex_phase_2_scope_note}}",
+    h: 0.48,
+    color: color.red,
   },
 ];
 
@@ -149,11 +164,11 @@ let y = 1.95;
 for (const section of sections) {
   text(section.title, {
     x: 0.47, y, w: 3.4, h: 0.18,
-    fontSize: 9.1, bold: true, color: color.ink,
+    fontSize: 9.1, bold: true, color: section.color,
   });
   text(section.placeholder, {
     x: 0.62, y: y + 0.22, w: 12.0, h: section.h - 0.18,
-    fontSize: 7.6, color: color.ink, breakLine: true, fit: "shrink",
+    fontSize: 7.2, color: section.color, breakLine: true, fit: "shrink",
   });
   y += section.h;
 }

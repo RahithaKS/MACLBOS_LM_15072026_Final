@@ -66,6 +66,9 @@ function normalizedEntity(entity?: string): string | null {
 function actualEntityPredicate(entity?: string) {
   const selected = normalizedEntity(entity);
   if (selected) {
+    if (selected === "WORLD WIDE" || selected === "WORLWIDE") {
+      return sql`upper(trim(coalesce(region_entity, ''))) IN ('WORLD WIDE', 'WORLWIDE')`;
+    }
     return sql`upper(trim(coalesce(region_entity, ''))) = ${selected}`;
   }
   // "All entities" intentionally includes unassigned source rows but excludes
@@ -76,6 +79,9 @@ function actualEntityPredicate(entity?: string) {
 function forecastEntityPredicate(entity?: string) {
   const selected = normalizedEntity(entity);
   if (selected) {
+    if (selected === "WORLD WIDE" || selected === "WORLWIDE") {
+      return sql`upper(trim(coalesce(entity, ''))) IN ('WORLD WIDE', 'WORLWIDE')`;
+    }
     return sql`upper(trim(coalesce(entity, ''))) = ${selected}`;
   }
   return sql`upper(trim(coalesce(entity, ''))) NOT IN ('WORLD WIDE', 'WORLWIDE')`;
@@ -162,7 +168,7 @@ export async function getKpiReportOptions(cubeId: string) {
   };
 }
 
-export async function runKpiReport(request: KpiReportRequest) {
+async function runKpiMetricSnapshot(request: KpiReportRequest) {
   const actualEntity = actualEntityPredicate(request.entity);
   const forecastEntity = forecastEntityPredicate(request.entity);
   const scenario = forecastScenarioPredicate(request.forecastScenario);
@@ -314,17 +320,128 @@ export async function runKpiReport(request: KpiReportRequest) {
   });
 
   return {
-    periodLabel: new Date(Date.UTC(request.year, request.month - 1, 1)).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      timeZone: "UTC",
-    }),
-    entityLabel: request.entity || ALL_ENTITIES_LABEL,
-    forecastScenario: request.forecastScenario,
-    actualSourceLabel: actualLabel,
-    forecastSourceLabel: forecastLabel,
     metrics,
     warnings: Array.from(new Set(warnings)),
+  };
+}
+
+const BUSINESS_METRICS_SCOPES = [
+  { id: "global", label: "World Wide (Global)", code: "WW", entity: "World Wide" },
+  { id: "india", label: "India (BGSW)", code: "IN", entity: "BGSW" },
+  { id: "vietnam", label: "Vietnam (BGSV)", code: "VN", entity: "BGSV" },
+  { id: "mexico", label: "Mexico (NE-MX)", code: "MX", entity: "NE-MX" },
+] as const;
+
+type BusinessMetricsScope = (typeof BUSINESS_METRICS_SCOPES)[number];
+type KpiSnapshot = Awaited<ReturnType<typeof runKpiMetricSnapshot>>;
+
+function displayKpiValue(value: number, unit: (typeof KPI_METRICS)[number]["unit"]): string {
+  if (unit === "percent") return `${(value * 100).toFixed(1)}%`;
+  if (unit === "capacity") return `${Math.round(value).toLocaleString()} HC`;
+  return `${value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} mUSD`;
+}
+
+function comparisonUnit(unit: (typeof KPI_METRICS)[number]["unit"]): string {
+  if (unit === "percent") return "percentage points";
+  if (unit === "capacity") return "HC";
+  return "mUSD";
+}
+
+function narrativeLine(
+  scope: BusinessMetricsScope,
+  metric: KpiSnapshot["metrics"][number] | undefined,
+): string {
+  if (!metric || metric.actual === null || metric.forecast === null || metric.variance === null) {
+    return `${scope.label}: no complete governed Actual-versus-Forecast comparison is available for this period.`;
+  }
+  if (metric.variance === 0) {
+    return `${scope.label}: Actual ${displayKpiValue(metric.actual, metric.unit)} is in line with forecast ${displayKpiValue(metric.forecast, metric.unit)}.`;
+  }
+  const direction = metric.variance > 0 ? "higher" : "lower";
+  return `${scope.label}: Actual ${displayKpiValue(metric.actual, metric.unit)} is ${direction} by ${displayKpiValue(Math.abs(metric.variance), metric.unit === "percent" ? "percent" : metric.unit).replace("%", ` ${comparisonUnit(metric.unit)}`)} compared with forecast ${displayKpiValue(metric.forecast, metric.unit)}.`;
+}
+
+function buildBusinessMetricsNarrative(
+  scopeSnapshots: { scope: BusinessMetricsScope; snapshot: KpiSnapshot }[],
+  phaseTwoPeriod: string,
+) {
+  const metricSections = KPI_METRICS.map((definition) => {
+    const lines = scopeSnapshots.map(({ scope, snapshot }) =>
+      narrativeLine(scope, snapshot.metrics.find((metric) => metric.id === definition.id)),
+    );
+    return {
+      id: definition.id,
+      title: definition.id === "capacity" ? "Capacity (Internal + External)" : definition.label,
+      status: "in_scope" as const,
+      summary: lines[0],
+      lines: lines.slice(1),
+    };
+  });
+
+  return [
+    ...metricSections,
+    {
+      id: "ebit",
+      title: "EBIT",
+      status: "phase_2" as const,
+      summary: `Out of scope for ${phaseTwoPeriod} — planned for Phase 2.`,
+      lines: ["No EBIT number is displayed until an approved governed source mapping and definition are available."],
+    },
+    {
+      id: "capex",
+      title: "Capex",
+      status: "phase_2" as const,
+      summary: `Out of scope for ${phaseTwoPeriod} — planned for Phase 2.`,
+      lines: ["No Capex number is displayed until an approved governed source mapping and definition are available."],
+    },
+  ];
+}
+
+/**
+ * Builds a deterministic report snapshot. The current board selection remains
+ * the headline KPI set, while the fixed Business Metrics panel carries the
+ * governed World Wide, BGSW, BGSV, and NE-MX comparisons side-by-side.
+ */
+export async function runKpiReport(request: KpiReportRequest) {
+  const selectedSnapshot = await runKpiMetricSnapshot(request);
+  const requestedEntity = normalizedEntity(request.entity);
+  const scopeSnapshots = await Promise.all(
+    BUSINESS_METRICS_SCOPES.map(async (scope) => ({
+      scope,
+      snapshot: requestedEntity === normalizedEntity(scope.entity)
+        ? selectedSnapshot
+        : await runKpiMetricSnapshot({ ...request, entity: scope.entity }),
+    })),
+  );
+  const warnings = Array.from(new Set([
+    ...selectedSnapshot.warnings,
+    ...scopeSnapshots.flatMap(({ snapshot }) => snapshot.warnings),
+  ]));
+  const periodLabel = new Date(Date.UTC(request.year, request.month - 1, 1)).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+  const phaseTwoPeriod = new Date(Date.UTC(request.year, request.month - 1, 1)).toLocaleDateString("en-US", {
+    year: "2-digit",
+    month: "short",
+    timeZone: "UTC",
+  });
+
+  return {
+    periodLabel,
+    entityLabel: request.entity || ALL_ENTITIES_LABEL,
+    forecastScenario: request.forecastScenario,
+    actualSourceLabel: "Anaplan actuals · unversioned actual export rows",
+    forecastSourceLabel: `MBR workbook · ${request.forecastScenario}`,
+    metrics: selectedSnapshot.metrics,
+    warnings,
+    scopeBadges: scopeSnapshots.map(({ scope, snapshot }) => ({
+      ...scope,
+      status: "in_scope" as const,
+      metrics: snapshot.metrics,
+    })),
+    narrative: buildBusinessMetricsNarrative(scopeSnapshots, phaseTwoPeriod),
   };
 }
 

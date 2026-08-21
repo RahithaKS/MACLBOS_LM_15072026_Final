@@ -53,6 +53,85 @@ function KpiTile({ kpi }: { kpi: Kpi }) {
   );
 }
 
+function KpiBusinessMetricsPanel({ result }: { result: AnalysisResult }) {
+  const report = result.kpiReport;
+  const sections = report?.narrative ?? [];
+  if (!report || !sections.length) return null;
+
+  const badgeColors: Record<string, string> = {
+    WW: "bg-[#006578]",
+    IN: "bg-[#d8729c]",
+    VN: "bg-[#d9192b]",
+    MX: "bg-[#59a587]",
+  };
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-[#a83678]/30 bg-[#f8f5f7]">
+      <div className="h-1.5 bg-[#a83678]" />
+      <div className="p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[#8c2465]">Business Metrics</p>
+            <h2 className="mt-1 font-display text-xl font-semibold">Decision / info to GLs</h2>
+            <p className="mt-1 text-xs text-muted">
+              {report.periodLabel} · Forecast: {report.forecastScenario} · Actual vs Forecast
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5" aria-label="Business Metrics comparison scopes">
+            {(report.scopeBadges ?? []).map((scope) => (
+              <span
+                key={scope.id}
+                title={scope.label}
+                className={`rounded-md px-2.5 py-1 text-[11px] font-bold text-white ${badgeColors[scope.code] ?? "bg-primary"}`}
+              >
+                {scope.code}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-3 rounded-lg border border-[#777]/40 bg-[#d9d9d9]/60 p-3.5">
+          {sections.map((section) => {
+            const inScope = section.status === "in_scope";
+            return (
+              <article
+                key={section.id}
+                className={`rounded-md border px-3 py-2.5 ${
+                  inScope
+                    ? "border-emerald-400/70 bg-emerald-50 text-emerald-950"
+                    : "border-red-400/70 bg-red-50 text-red-950"
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-bold">{section.title}</h3>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                      inScope ? "bg-emerald-600 text-white" : "bg-red-600 text-white"
+                    }`}
+                  >
+                    {inScope ? "In scope" : "Phase 2"}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm font-semibold leading-relaxed">{section.summary}</p>
+                {section.lines.length > 0 && (
+                  <ul className="mt-1.5 space-y-1 text-xs leading-relaxed">
+                    {section.lines.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                )}
+              </article>
+            );
+          })}
+        </div>
+        <p className="mt-3 text-[11px] text-muted">
+          Green: currently available in the approved plan-excel and actuals scope. Red: out of scope for Aug-26 / Phase 2.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 export default function ResultSections({ result }: { result: AnalysisResult }) {
   return (
     <div className="space-y-6">
@@ -60,6 +139,8 @@ export default function ResultSections({ result }: { result: AnalysisResult }) {
         <h2 className="font-display text-lg font-semibold">Summary</h2>
         <p className="mt-2 text-[15px] leading-relaxed">{tidyProse(result.summary)}</p>
       </section>
+
+      <KpiBusinessMetricsPanel result={result} />
 
       {result.kpis.length > 0 && (
         <section>

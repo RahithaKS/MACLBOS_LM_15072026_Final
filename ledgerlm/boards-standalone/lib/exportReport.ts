@@ -1324,26 +1324,18 @@ function addKpiMetricsSlide(
 ): boolean {
   if (board.templateId !== "kpi-metrics") return false;
   const snapshot = report.result.kpiReport ?? null;
-  const rows = snapshot
-    ? snapshot.metrics.map((metric) => {
-        const value = (amount: number | null) =>
-          amount === null
-            ? "—"
-            : metric.unit === "percent"
-              ? `${(amount * 100).toFixed(1)}%`
-              : `${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}${metric.unit === "mUSD" ? " mUSD" : ""}`;
-        const variance = `${value(metric.variance)}${metric.variancePercent === null ? "" : ` (${(metric.variancePercent * 100).toFixed(1)}%)`}`;
-        return {
-          label: metric.label,
-          values: `Actual: ${value(metric.actual)}   |   Forecast: ${value(metric.forecast)}   |   Variance: ${variance}`,
-          note: `${metric.remarks.join(" ")}  Source rows — Actual: ${metric.actualSourceRows}; Forecast: ${metric.forecastSourceRows}`,
-        };
-      })
-    : report.result.kpis.map((metric) => ({
-        label: metric.label,
-        values: metric.value,
-        note: metric.change ?? "No comparison is available.",
-      }));
+  const hasReferenceNarrative = Boolean(snapshot?.narrative?.length && snapshot.scopeBadges?.length === 4);
+  const sections: Array<{
+    title: string;
+    status: "in_scope" | "phase_2";
+    summary: string;
+    lines: string[];
+  }> = hasReferenceNarrative ? snapshot!.narrative! : report.result.kpis.map((metric) => ({
+    title: metric.label,
+    status: "in_scope" as const,
+    summary: metric.value,
+    lines: [metric.change ?? "No comparison is available."],
+  }));
 
   pptx.defineLayout({ name: "KPI_BUSINESS_METRICS", width: 13.333, height: 9.2 });
   pptx.layout = "KPI_BUSINESS_METRICS";
@@ -1368,6 +1360,13 @@ function addKpiMetricsSlide(
       x: Number(x), y: 0.09, w: Number(w), h: 0.055,
       fill: { color: String(fill) }, line: { color: String(fill), transparency: 100 },
     }));
+  [[-1.15, 0.16, 6.9, 2.95], [7.4, 0.20, 6.9, 3.25]].forEach(([x, y, w, h]) =>
+    slide.addShape(pptx.ShapeType.arc, {
+      x, y, w, h,
+      fill: { color: "F6EFF3", transparency: 28 },
+      line: { color: "F6EFF3", transparency: 100 },
+    }),
+  );
   add(`Business Metrics ${snapshot?.periodLabel ?? ""}`, {
     x: 2.15, y: 0.33, w: 7.8, h: 0.45, fontSize: 25, bold: true,
     italic: true, color: C.magenta, align: "center",
@@ -1376,14 +1375,20 @@ function addKpiMetricsSlide(
     x: 11.87, y: 0.30, w: 1.08, h: 0.56, fontSize: 7.5, bold: true,
     color: C.magenta, breakLine: true,
   });
-  [["WW", C.navy], ["IN", "EE9AB8"], ["VN", C.red], ["MX", "59A587"]].forEach(([label, fill], index) => {
-    const x = 3.1 + index * 1.14;
-    slide.addShape(pptx.ShapeType.rect, {
-      x, y: 0.91, w: 0.88, h: 0.48,
-      fill: { color: fill }, line: { color: fill, transparency: 100 },
+  if (hasReferenceNarrative) {
+    [["WW", C.navy], ["IN", "EE9AB8"], ["VN", C.red], ["MX", "59A587"]].forEach(([label, fill], index) => {
+      const x = 3.1 + index * 1.14;
+      slide.addShape(pptx.ShapeType.rect, {
+        x, y: 0.91, w: 0.88, h: 0.48,
+        fill: { color: fill }, line: { color: fill, transparency: 100 },
+      });
+      add(label, { x, y: 1.035, w: 0.88, h: 0.17, fontSize: 8.5, bold: true, color: "FFFFFF", align: "center" });
     });
-    add(label, { x, y: 1.035, w: 0.88, h: 0.17, fontSize: 8.5, bold: true, color: "FFFFFF", align: "center" });
-  });
+  } else {
+    add("Legacy KPI snapshot", {
+      x: 3.0, y: 1.04, w: 3.2, h: 0.18, fontSize: 9, bold: true, color: C.muted, align: "center",
+    });
+  }
 
   slide.addShape(pptx.ShapeType.rect, {
     x: 0.36, y: 1.52, w: 12.62, h: 7.03,
@@ -1392,30 +1397,43 @@ function addKpiMetricsSlide(
   add("Decision / info to GLs", {
     x: 0.45, y: 1.60, w: 4.6, h: 0.20, fontSize: 10.5, bold: true, color: C.magenta,
   });
-  add(`${snapshot?.entityLabel ?? "Governed KPI selection"}  •  Forecast: ${snapshot?.forecastScenario ?? "As selected"}  •  Actual vs forecast`, {
+  add(hasReferenceNarrative
+    ? "Green: current plan-excel scope  •  Red: Phase 2 / out of scope"
+    : "Re-run this board to generate the four-scope Business Metrics decision panel.", {
     x: 7, y: 1.61, w: 5.55, h: 0.17, fontSize: 7.2, bold: true, color: C.muted, align: "right",
   });
   let y = 1.95;
-  rows.slice(0, 4).forEach((row) => {
-    add(`${row.label}:`, { x: 0.47, y, w: 3.2, h: 0.18, fontSize: 9.1, bold: true });
-    add(row.values, { x: 0.65, y: y + 0.22, w: 11.85, h: 0.20, fontSize: 7.2 });
-    add(row.note || "No additional data note.", {
-      x: 0.65, y: y + 0.46, w: 11.85, h: 0.19, fontSize: 6.7, italic: true, color: C.muted,
+  sections.slice(0, 6).forEach((section) => {
+    const inScope = section.status === "in_scope";
+    const color = inScope ? C.green : C.red;
+    const height = inScope ? 0.87 : 0.54;
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0.45, y: y - 0.025, w: 0.075, h: height - 0.02,
+      fill: { color }, line: { color, transparency: 100 },
     });
-    y += 1.03;
+    add(`${section.title}:`, { x: 0.58, y, w: 3.8, h: 0.16, fontSize: 8.4, bold: true, color });
+    add(section.summary, { x: 0.72, y: y + 0.18, w: 11.72, h: 0.16, fontSize: 6.85, bold: true, color });
+    if (section.lines.length) {
+      add(section.lines.join("\n"), {
+        x: 0.72, y: y + 0.37, w: 11.72, h: height - 0.36,
+        fontSize: 6.05, color, breakLine: true,
+      });
+    }
+    y += height;
   });
-  slide.addShape(pptx.ShapeType.line, { x: 0.48, y: 6.2, w: 12.34, h: 0, line: { color: "AFAFAF", pt: 0.5 } });
+  const governanceY = Math.min(7.06, y + 0.08);
+  slide.addShape(pptx.ShapeType.line, { x: 0.48, y: governanceY, w: 12.34, h: 0, line: { color: "AFAFAF", pt: 0.5 } });
   add("Source & governance", {
-    x: 0.48, y: 6.34, w: 2, h: 0.17, fontSize: 8.4, bold: true, color: C.darkMagenta,
+    x: 0.48, y: governanceY + 0.12, w: 2, h: 0.17, fontSize: 8.4, bold: true, color: C.darkMagenta,
   });
   add(`Actuals: ${snapshot?.actualSourceLabel ?? "governed source"}  •  Forecast: ${snapshot?.forecastSourceLabel ?? "governed source"}`, {
-    x: 0.48, y: 6.57, w: 12.28, h: 0.22, fontSize: 7, color: C.muted,
+    x: 0.48, y: governanceY + 0.35, w: 12.28, h: 0.18, fontSize: 6.55, color: C.muted,
   });
   add(`Warnings / data-quality notes: ${snapshot?.warnings?.join("  •  ") || "No data-quality warnings returned by the governed KPI service."}`, {
-    x: 0.48, y: 6.88, w: 12.28, h: 0.48, fontSize: 6.8, italic: true, color: C.muted,
+    x: 0.48, y: governanceY + 0.58, w: 12.28, h: 0.28, fontSize: 5.9, italic: true, color: C.muted,
   });
   add(`Report generated ${new Date(report.createdAt).toLocaleString()} · LedgerLM KPI Metrics Board`, {
-    x: 0.48, y: 7.53, w: 12.28, h: 0.16, fontSize: 6.2, color: C.muted,
+    x: 0.48, y: 8.43, w: 12.28, h: 0.12, fontSize: 5.6, color: C.muted,
   });
   [[C.navy, 0, 5], [C.red, 5, 2.4], [C.teal, 7.4, 2.6], [C.orange, 10, 3.333]]
     .forEach(([fill, x, w]) => slide.addShape(pptx.ShapeType.rect, {
