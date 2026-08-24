@@ -14,7 +14,13 @@ if str(PYTHON_BACKEND) not in sys.path:
 
 from services import semantic_sql_service as semantic_module
 from services.semantic_sql_service import SemanticSQLService
-from api.routes.entity_pnl import _is_revenue_entity_category
+from api.routes.entity_pnl import (
+    CAPACITY_COMPONENT_ON_ROLL,
+    CAPACITY_COMPONENT_OUTSOURCING,
+    _capacity_component,
+    _capacity_values,
+    _is_revenue_entity_category,
+)
 
 
 class FakeCursor:
@@ -72,6 +78,27 @@ class SupplementalEntityPnlCfIngestionTests(unittest.TestCase):
         self.assertTrue(_is_revenue_entity_category("Revenue"))
         self.assertTrue(_is_revenue_entity_category(""))
         self.assertFalse(_is_revenue_entity_category("Revenue Hardware"))
+
+    def test_capacity_components_split_on_roll_and_outsourcing(self):
+        self.assertEqual(_capacity_component("Internal", ""), CAPACITY_COMPONENT_ON_ROLL)
+        self.assertEqual(_capacity_component("External", ""), CAPACITY_COMPONENT_OUTSOURCING)
+        self.assertEqual(_capacity_component("", "Outsourcing"), CAPACITY_COMPONENT_OUTSOURCING)
+        self.assertIsNone(_capacity_component("INDIRECT", ""))
+
+        capacity = {
+            (2025, 1, "actual", CAPACITY_COMPONENT_ON_ROLL): 100.0,
+            (2025, 2, "actual", CAPACITY_COMPONENT_ON_ROLL): 120.0,
+            (2025, 1, "actual", CAPACITY_COMPONENT_OUTSOURCING): 20.0,
+            (2025, 2, "actual", CAPACITY_COMPONENT_OUTSOURCING): 30.0,
+        }
+        self.assertEqual(
+            _capacity_values(capacity, (2025, 2), "qoq", component=CAPACITY_COMPONENT_ON_ROLL),
+            (120.0, 110.0),
+        )
+        self.assertEqual(
+            _capacity_values(capacity, (2025, 2), "qoq", component=CAPACITY_COMPONENT_OUTSOURCING),
+            (30.0, 25.0),
+        )
 
     def test_wide_cf_workbook_becomes_all_entity_fact_rows(self):
         source = pd.DataFrame(

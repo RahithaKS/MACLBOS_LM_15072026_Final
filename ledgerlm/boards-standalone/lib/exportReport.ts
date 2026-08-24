@@ -1221,7 +1221,18 @@ function addEntityPnlSlide(
   const titlePeriod = pnl.comparison === "yoy" ? `H1'${String(year).slice(-2)}` : `Q${Math.ceil(month / 3)}'${String(year).slice(-2)}`;
   const comparisonCaption = pnl.comparison === "yoy" ? "YoY" : "QoQ";
   const reportTitle = `P&L ${titlePeriod} – ${comparisonCaption} : ${monthLabel}'${String(year).slice(-2)} v ${comparison.replace(/ .*/, "")}'${comparison.match(/\d{4}/)?.[0]?.slice(-2) ?? ""}`;
-  const significantRows = new Set(["Revenue", "Total Expenses", "EBIT", "EBIT%", "End Capacity", "Average Capacity"]);
+  const significantRows = new Set([
+    "Revenue",
+    "Total Expenses",
+    "EBIT",
+    "EBIT%",
+    "End Capacity On-roll",
+    "End Capacity Outsourcing",
+    "Total End",
+    "Avg Capacity Overall",
+    "Avg Capacity Outsourcing",
+    "Total Average",
+  ]);
   const tableRows = [
     [
       { text: pnl.entity, options: { bold: true, color: "FFFFFF", fill: { color: "007D88" }, align: "left" as const } },

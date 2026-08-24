@@ -39,6 +39,16 @@ VISIBLE_COST_LINES = [
     ("Facilities Cost", {"facilities cost", "facility cost"}),
     ("Other Expenses", {"other expenses", "other expense"}),
 ]
+CAPACITY_LINE_LABELS = [
+    "End Capacity On-roll",
+    "End Capacity Outsourcing",
+    "Total End",
+    "Avg Capacity Overall",
+    "Avg Capacity Outsourcing",
+    "Total Average",
+]
+CAPACITY_COMPONENT_ON_ROLL = "on_roll"
+CAPACITY_COMPONENT_OUTSOURCING = "outsourcing"
 
 
 class EntityPnlRequest(BaseModel):
@@ -98,17 +108,31 @@ def _period_values(
     return current
 
 
+def _capacity_component(resource_type: str, source_sub_category: str) -> Optional[str]:
+    """Map governed Internal/External capacity to the Entity P&L presentation."""
+    source = " ".join((source_sub_category or "").lower().replace("-", " ").split())
+    resource = " ".join((resource_type or "").lower().replace("-", " ").split())
+    if source in {"internal", "on roll", "onroll"} or resource in {"internal", "on roll", "onroll"}:
+        return CAPACITY_COMPONENT_ON_ROLL
+    if source in {"outsourcing", "external"} or resource in {"outsourcing", "external"}:
+        return CAPACITY_COMPONENT_OUTSOURCING
+    # INDIRECT and unknown resource categories are deliberately out of scope
+    # for the requested on-roll / outsourcing capacity presentation.
+    return None
+
+
 def _capacity_values(
-    capacity: Dict[Tuple[int, int, str], float],
+    capacity: Dict[Tuple[int, int, str, str], float],
     point: Tuple[int, int],
     comparison: str,
     scenario: str = "actual",
+    component: str = CAPACITY_COMPONENT_ON_ROLL,
 ) -> Tuple[float, float]:
     year, month = point
-    end_value = capacity.get((year, month, scenario), 0.0)
+    end_value = capacity.get((year, month, scenario, component), 0.0)
     # Capacity is a point-in-time measure. Average capacity is the scenario's
     # month-end average year-to-date, never a sum of capacity snapshots.
-    months = [capacity.get((year, index, scenario), 0.0) for index in range(1, month + 1)]
+    months = [capacity.get((year, index, scenario, component), 0.0) for index in range(1, month + 1)]
     available = [value for value in months if value != 0]
     return end_value, (sum(available) / len(available) if available else 0.0)
 
@@ -202,6 +226,8 @@ async def build_entity_pnl(request: EntityPnlRequest):
           END AS scenario,
           TRIM(COALESCE(cost_category, '')) AS cost_category,
           TRIM(COALESCE(entity_category, '')) AS entity_category,
+           TRIM(COALESCE(resource_type, '')) AS resource_type,
+           TRIM(COALESCE(row_data ->> 'source_sub_category', '')) AS source_sub_category,
           COALESCE(SUM(COALESCE({currency_column}, 0)), 0) AS amount,
           COALESCE(SUM(COALESCE(capacity, 0)), 0) AS capacity
         FROM cube_fact_data
@@ -213,11 +239,11 @@ async def build_entity_pnl(request: EntityPnlRequest):
             TRIM(COALESCE(cost_category, '')) IN ('Revenue Summary', 'Cost Summary')
             OR TRIM(COALESCE(cost_category, '')) ILIKE '%%END Capacity%%'
           )
-        GROUP BY year, month, scenario, cost_category, entity_category
+        GROUP BY year, month, scenario, cost_category, entity_category, resource_type, source_sub_category
     """
 
     snapshots: Dict[Tuple[int, int, str, str], float] = defaultdict(float)
-    capacity: Dict[Tuple[int, int, str], float] = defaultdict(float)
+    capacity: Dict[Tuple[int, int, str, str], float] = defaultdict(float)
     conn = semantic_sql_service.get_db_connection()
     cursor = conn.cursor()
     try:
@@ -231,14 +257,26 @@ async def build_entity_pnl(request: EntityPnlRequest):
         conn.close()
 
     for row in rows:
-        row_year, row_month, scenario, cost_category, entity_category, amount, capacity_value = row
+        (
+            row_year,
+            row_month,
+            scenario,
+            cost_category,
+            entity_category,
+            resource_type,
+            source_sub_category,
+            amount,
+            capacity_value,
+        ) = row
         scenario = str(scenario or "").strip()
         if scenario != "actual" and scenario != (request.cf_version or ""):
             continue
         value = float(amount or 0)
         key_prefix = (int(row_year), int(row_month), scenario)
         if "end capacity" in str(cost_category or "").lower():
-            capacity[key_prefix] += float(capacity_value or 0)
+            component = _capacity_component(str(resource_type or ""), str(source_sub_category or ""))
+            if component:
+                capacity[(*key_prefix, component)] += float(capacity_value or 0)
             continue
         if cost_category == "Revenue Summary" and _is_revenue_entity_category(entity_category):
             snapshots[(*key_prefix, "Revenue")] += value
@@ -270,8 +308,7 @@ async def build_entity_pnl(request: EntityPnlRequest):
         "Total Expenses",
         "EBIT",
         "EBIT%",
-        "End Capacity",
-        "Average Capacity",
+        *CAPACITY_LINE_LABELS,
     ]
     values: Dict[str, Dict[str, Optional[float]]] = {label: {} for label in line_labels}
     for label in ["Revenue", *[line for line, _ in VISIBLE_COST_LINES], "Total Expenses"]:
@@ -290,19 +327,44 @@ async def build_entity_pnl(request: EntityPnlRequest):
         values["EBIT"][column] = ebit
         values["EBIT%"][column] = (ebit / revenue * 100) if revenue else None
 
-    for point, column in [(current_point, current_label), (comparison_point, comparison_label), (year_end_point, _label(*year_end_point, "YE"))]:
-        end_capacity, average_capacity = _capacity_values(capacity, point, request.comparison)
-        values["End Capacity"][column] = end_capacity
-        values["Average Capacity"][column] = average_capacity
+    for point, column in [
+        (current_point, current_label),
+        (comparison_point, comparison_label),
+        (year_end_point, _label(*year_end_point, "YE")),
+    ]:
+        on_roll_end, on_roll_average = _capacity_values(
+            capacity, point, request.comparison, component=CAPACITY_COMPONENT_ON_ROLL
+        )
+        outsourcing_end, outsourcing_average = _capacity_values(
+            capacity, point, request.comparison, component=CAPACITY_COMPONENT_OUTSOURCING
+        )
+        values["End Capacity On-roll"][column] = on_roll_end
+        values["End Capacity Outsourcing"][column] = outsourcing_end
+        values["Total End"][column] = on_roll_end + outsourcing_end
+        values["Avg Capacity Overall"][column] = on_roll_average
+        values["Avg Capacity Outsourcing"][column] = outsourcing_average
+        values["Total Average"][column] = on_roll_average + outsourcing_average
     if request.cf_version:
-        end_capacity, average_capacity = _capacity_values(
+        on_roll_end, on_roll_average = _capacity_values(
             capacity,
             current_point,
             request.comparison,
             request.cf_version,
+            CAPACITY_COMPONENT_ON_ROLL,
         )
-        values["End Capacity"][columns[2]] = end_capacity
-        values["Average Capacity"][columns[2]] = average_capacity
+        outsourcing_end, outsourcing_average = _capacity_values(
+            capacity,
+            current_point,
+            request.comparison,
+            request.cf_version,
+            CAPACITY_COMPONENT_OUTSOURCING,
+        )
+        values["End Capacity On-roll"][columns[2]] = on_roll_end
+        values["End Capacity Outsourcing"][columns[2]] = outsourcing_end
+        values["Total End"][columns[2]] = on_roll_end + outsourcing_end
+        values["Avg Capacity Overall"][columns[2]] = on_roll_average
+        values["Avg Capacity Outsourcing"][columns[2]] = outsourcing_average
+        values["Total Average"][columns[2]] = on_roll_average + outsourcing_average
 
     lines = [{"label": label, "values": {column: values[label].get(column) for column in columns}} for label in line_labels]
     current_revenue = values["Revenue"][current_label] or 0.0
@@ -359,9 +421,9 @@ async def build_entity_pnl(request: EntityPnlRequest):
                     "direction": "up" if (values["EBIT%"][current_label] or 0) >= (values["EBIT%"][comparison_label] or 0) else "down",
                 },
                 {
-                    "label": "End Capacity",
-                    "value": f"{values['End Capacity'][current_label]:,.0f}",
-                    "change": f"Average {values['Average Capacity'][current_label]:,.0f} YTD",
+                    "label": "Total End",
+                    "value": f"{values['Total End'][current_label]:,.0f}",
+                    "change": f"Total average {values['Total Average'][current_label]:,.0f} YTD",
                     "direction": "flat",
                 },
             ],
@@ -409,7 +471,7 @@ async def build_entity_pnl(request: EntityPnlRequest):
                                         if line["label"] == "EBIT%"
                                         else (
                                             f"{line['values'][column]:,.0f}"
-                                            if "Capacity" in line["label"]
+                                            if line["label"] in CAPACITY_LINE_LABELS
                                             else _format_amount(line["values"][column], request.currency)
                                         )
                                     )
