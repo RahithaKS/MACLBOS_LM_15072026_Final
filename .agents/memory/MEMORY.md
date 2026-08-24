@@ -7,3 +7,4 @@
 - [KPI PPTX export layout](kpi-pptx-export-layout.md) — imported template anatomy retains text regions, not decorative shapes; Business Metrics KPIs need a dedicated renderer.
 - [Supplemental Entity P&L CF imports](supplemental-entity-pnl-cf-imports.md) — wide monthly CF plans are all-entity data, stored as CF scenario facts with financial YTD snapshots and point-in-time capacity.
 - [Entity P&L capacity presentation](entity-pnl-capacity-presentation.md) — display on-roll and outsourcing separately; exclude INDIRECT from capacity totals.
+- [Replit uv publishing environment](replit-uv-publish-environment.md) — publish builds need a writable project venv; Nix system site-packages are read-only.
