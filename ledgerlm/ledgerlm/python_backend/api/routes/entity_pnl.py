@@ -96,12 +96,13 @@ def _capacity_values(
     capacity: Dict[Tuple[int, int, str], float],
     point: Tuple[int, int],
     comparison: str,
+    scenario: str = "actual",
 ) -> Tuple[float, float]:
     year, month = point
-    end_value = capacity.get((year, month, "actual"), 0.0)
-    # Capacity is a point-in-time measure. Average capacity is the actual
+    end_value = capacity.get((year, month, scenario), 0.0)
+    # Capacity is a point-in-time measure. Average capacity is the scenario's
     # month-end average year-to-date, never a sum of capacity snapshots.
-    months = [capacity.get((year, index, "actual"), 0.0) for index in range(1, month + 1)]
+    months = [capacity.get((year, index, scenario), 0.0) for index in range(1, month + 1)]
     available = [value for value in months if value != 0]
     return end_value, (sum(available) / len(available) if available else 0.0)
 
@@ -231,8 +232,7 @@ async def build_entity_pnl(request: EntityPnlRequest):
         value = float(amount or 0)
         key_prefix = (int(row_year), int(row_month), scenario)
         if "end capacity" in str(cost_category or "").lower():
-            if scenario == "actual":
-                capacity[key_prefix] += float(capacity_value or 0)
+            capacity[key_prefix] += float(capacity_value or 0)
             continue
         if cost_category == "Revenue Summary":
             snapshots[(*key_prefix, "Revenue")] += value
@@ -289,8 +289,14 @@ async def build_entity_pnl(request: EntityPnlRequest):
         values["End Capacity"][column] = end_capacity
         values["Average Capacity"][column] = average_capacity
     if request.cf_version:
-        values["End Capacity"][columns[2]] = None
-        values["Average Capacity"][columns[2]] = None
+        end_capacity, average_capacity = _capacity_values(
+            capacity,
+            current_point,
+            request.comparison,
+            request.cf_version,
+        )
+        values["End Capacity"][columns[2]] = end_capacity
+        values["Average Capacity"][columns[2]] = average_capacity
 
     lines = [{"label": label, "values": {column: values[label].get(column) for column in columns}} for label in line_labels]
     current_revenue = values["Revenue"][current_label] or 0.0

@@ -4,6 +4,7 @@ import logging
 import sys
 import os
 import asyncio
+import re
 
 # Add paths for existing modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../attached_assets'))
@@ -140,6 +141,10 @@ async def process_enterprise_document_background(document_id: str, company_id: s
                     is_plan_data = ('plan/actual' in columns_lower or 
                                    'particulars' in columns_lower or
                                    any('particulars' in c for c in columns_lower))
+                    is_supplemental_entity_pnl_cf = (
+                        {'fiscalyear', 'month', 'category', 'sub_category'}.issubset(columns_lower)
+                        and any(re.fullmatch(r'cf\d{2}', column) for column in columns_lower)
+                    )
                     
                     # Investment/CAPEX/PMO format: has 'fiscalyear' + 'projdisplayid' columns
                     is_investment_data = (
@@ -151,6 +156,18 @@ async def process_enterprise_document_background(document_id: str, company_id: s
                     if is_investment_data:
                         logger.info(f"Detected Investment/CAPEX/PMO format - loading into cube_investment_data")
                         result = sql_service.ingest_investment_data(absolute_path, cube_id, job_id=job_id)
+                    elif is_supplemental_entity_pnl_cf:
+                        logger.info(
+                            "Detected supplemental Entity P&L CF format - "
+                            "loading normalized CF facts into cube_fact_data"
+                        )
+                        result = sql_service.ingest_supplemental_entity_pnl_cf(
+                            absolute_path,
+                            cube_id,
+                            source_document_id=document_id,
+                            source_file=file_name,
+                            job_id=job_id,
+                        )
                     elif is_plan_data:
                         logger.info(f"Detected Plan data format (Manual inputs MBR Master) - loading into cube_plan_data")
                         result = sql_service.ingest_plan_data(
@@ -170,7 +187,11 @@ async def process_enterprise_document_background(document_id: str, company_id: s
                 
                 if result.get('success'):
                     rows_inserted = result.get('rows_inserted', 0)
-                    target_table = 'cube_investment_data' if is_investment_data else ('cube_plan_data' if is_plan_data else 'cube_fact_data')
+                    target_table = (
+                        'cube_investment_data'
+                        if is_investment_data
+                        else ('cube_plan_data' if is_plan_data else 'cube_fact_data')
+                    )
                     logger.info(f"SQL ingestion complete: {rows_inserted} rows loaded into {target_table}")
                     
                     # Update status to completed (synchronous call for reliability)

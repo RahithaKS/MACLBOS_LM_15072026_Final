@@ -5,3 +5,4 @@
 - [Entity P&L PowerPoint Format](entity-pnl-powerpoint-format.md) — Entity P&L exports use the fixed Bosch financial-statement layout, not generic template-table mapping.
 - [Workspace Frame Standards](workspace-frame-standards.md) — authenticated pages share one full-height frame, stable header, and internal scroll model.
 - [KPI PPTX export layout](kpi-pptx-export-layout.md) — imported template anatomy retains text regions, not decorative shapes; Business Metrics KPIs need a dedicated renderer.
+- [Supplemental Entity P&L CF imports](supplemental-entity-pnl-cf-imports.md) — wide monthly CF plans are all-entity data, stored as CF scenario facts with financial YTD snapshots and point-in-time capacity.

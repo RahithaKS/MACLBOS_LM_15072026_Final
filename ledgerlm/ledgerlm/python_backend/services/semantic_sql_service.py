@@ -4043,6 +4043,353 @@ IMPORTANT: When in doubt, preserve the original text. Only fix clear typos."""
             logger.error(f"Error getting cubes: {e}")
             return []
 
+    @staticmethod
+    def is_supplemental_entity_pnl_cf_workbook(columns: List[Any]) -> bool:
+        """Return whether columns match the supported wide Entity P&L CF layout."""
+        normalized = {str(column).strip().lower() for column in columns}
+        required = {'fiscalyear', 'month', 'category', 'sub_category'}
+        return required.issubset(normalized) and any(
+            re.fullmatch(r'cf\d{2}', column) for column in normalized
+        )
+
+    @staticmethod
+    def _supplemental_entity_pnl_category(category: Any) -> Optional[Dict[str, str]]:
+        """
+        Map the source workbook's Category to the governed Entity P&L structure.
+
+        Average Capacity is deliberately not written: the report derives it from
+        the imported End Capacity snapshots for the requested scenario.
+        """
+        source_category = str(category or '').strip()
+        normalized = " ".join(source_category.lower().split())
+
+        if normalized == 'average capacity':
+            return None
+        if normalized == 'end capacity':
+            return {
+                'cost_category': 'GB Wise END Capacity',
+                'entity_category': 'End Capacity',
+                'value_field': 'capacity',
+            }
+        if normalized in {'revenue', 'revenue hardware'}:
+            return {
+                'cost_category': 'Revenue Summary',
+                'entity_category': source_category,
+                'value_field': 'amount_inr',
+            }
+        if normalized in {
+            'revenue software',
+            'travel expenses',
+            'welfare cost',
+            'consultancy charges',
+            'depreciation',
+            'employee benefit',
+            'facility cost',
+            'material cost',
+            'other expenses',
+            'outsourcing cost',
+        }:
+            return {
+                'cost_category': 'Cost Summary',
+                'entity_category': source_category,
+                'value_field': 'amount_inr',
+            }
+        return None
+
+    def ingest_supplemental_entity_pnl_cf(
+        self,
+        file_path: str,
+        cube_id: str,
+        source_document_id: Optional[str] = None,
+        source_file: Optional[str] = None,
+        job_id: Optional[str] = None,
+        batch_size: int = 5000,
+    ) -> Dict[str, Any]:
+        """
+        Convert the all-entity Entity P&L CF workbook into fact rows.
+
+        The source layout is intentionally wide (one CF scenario per column).
+        Each populated CF value becomes a separate fact row with an exact CF
+        version such as CF05. A missing entity field remains NULL so a blank
+        Entity P&L selector aggregates these supplemental values as all-entity
+        data; it is never defaulted to a particular legal entity.
+        """
+        start_time = datetime.now()
+        conn = None
+        cursor = None
+
+        try:
+            if not self.validate_cube_exists(cube_id):
+                return {
+                    'success': False,
+                    'error': f"Cube ID '{cube_id}' does not exist",
+                }
+
+            workbook = pd.ExcelFile(file_path, engine='openpyxl')
+            frames = [
+                pd.read_excel(workbook, sheet_name=sheet)
+                for sheet in workbook.sheet_names
+            ]
+            source = pd.concat(frames, ignore_index=True)
+            column_lookup = {
+                str(column).strip().lower(): column for column in source.columns
+            }
+
+            if not self.is_supplemental_entity_pnl_cf_workbook(list(source.columns)):
+                return {
+                    'success': False,
+                    'error': (
+                        'Unsupported supplemental Entity P&L workbook. Expected '
+                        'FiscalYear, Month, Category, Sub_Category, and at least '
+                        'one CFxx column.'
+                    ),
+                }
+
+            cf_columns = [
+                original
+                for normalized, original in column_lookup.items()
+                if re.fullmatch(r'cf\d{2}', normalized)
+            ]
+            entity_column = next(
+                (
+                    column_lookup.get(candidate)
+                    for candidate in ('region/entity', 'region entity', 'entity', 'region_entity')
+                    if column_lookup.get(candidate)
+                ),
+                None,
+            )
+
+            records = []
+            unknown_categories = set()
+            invalid_values = []
+            for source_index, row in source.iterrows():
+                year_value = pd.to_numeric(row[column_lookup['fiscalyear']], errors='coerce')
+                month_value = pd.to_numeric(row[column_lookup['month']], errors='coerce')
+                category = row[column_lookup['category']]
+                mapping = self._supplemental_entity_pnl_category(category)
+
+                if pd.isna(year_value) or pd.isna(month_value):
+                    return {
+                        'success': False,
+                        'error': (
+                            f"Row {source_index + 2} has an invalid FiscalYear or Month. "
+                            'No supplemental rows were written.'
+                        ),
+                    }
+                if not 1 <= int(month_value) <= 12:
+                    return {
+                        'success': False,
+                        'error': (
+                            f"Row {source_index + 2} has month {month_value}; "
+                            'Month must be between 1 and 12.'
+                        ),
+                    }
+                if mapping is None:
+                    if " ".join(str(category or '').lower().split()) != 'average capacity':
+                        unknown_categories.add(str(category))
+                    continue
+
+                entity_value = None
+                if entity_column is not None and pd.notna(row[entity_column]):
+                    entity_value = str(row[entity_column]).strip() or None
+                sub_category = row[column_lookup['sub_category']]
+
+                for cf_column in cf_columns:
+                    source_value = row[cf_column]
+                    if pd.isna(source_value) or str(source_value).strip() == '':
+                        continue
+                    numeric_value = pd.to_numeric(source_value, errors='coerce')
+                    if pd.isna(numeric_value):
+                        invalid_values.append(
+                            f"row {source_index + 2}, {cf_column}={source_value!r}"
+                        )
+                        continue
+
+                    version = str(cf_column).strip().upper()
+                    amount_inr = float(numeric_value) if mapping['value_field'] == 'amount_inr' else None
+                    capacity = float(numeric_value) if mapping['value_field'] == 'capacity' else None
+                    row_metadata = json.dumps({
+                        'ingestion_type': 'entity_pnl_supplemental_cf',
+                        'source_document_id': source_document_id,
+                        'source_file': source_file,
+                        'source_category': str(category),
+                        'source_sub_category': None if pd.isna(sub_category) else str(sub_category),
+                        'entity_scope': 'all_entities' if entity_value is None else 'entity',
+                    })
+                    records.append((
+                        cube_id,
+                        int(year_value),
+                        int(month_value),
+                        entity_value,
+                        mapping['cost_category'],
+                        mapping['entity_category'],
+                        version,
+                        amount_inr,
+                        capacity,
+                        source_index + 2,
+                        row_metadata,
+                    ))
+
+            if unknown_categories:
+                return {
+                    'success': False,
+                    'error': (
+                        'Unsupported Entity P&L categories: '
+                        + ', '.join(sorted(unknown_categories))
+                    ),
+                }
+            if invalid_values:
+                return {
+                    'success': False,
+                    'error': (
+                        'Supplemental CF workbook contains non-numeric CF values: '
+                        + '; '.join(invalid_values[:5])
+                    ),
+                }
+            if not records:
+                return {
+                    'success': False,
+                    'error': (
+                        'No populated CF values were found. CF09 and CF11 blank '
+                        'columns are intentionally not imported.'
+                    ),
+                }
+
+            # The supplemental workbook stores monthly P&L values. The Entity
+            # P&L report stores and compares cumulative YTD snapshots, deriving
+            # QoQ MTD by subtracting consecutive snapshots. Convert only
+            # financial lines to cumulative snapshots; End Capacity remains a
+            # point-in-time monthly value.
+            financial_months = {}
+            point_in_time_records = []
+            for record in records:
+                if record[7] is None:
+                    point_in_time_records.append(record)
+                    continue
+                metadata = json.loads(record[10])
+                financial_key = (
+                    record[0],
+                    record[1],
+                    record[3],
+                    record[4],
+                    record[5],
+                    record[6],
+                    metadata.get('source_sub_category'),
+                )
+                month_records = financial_months.setdefault(financial_key, {})
+                existing = month_records.get(record[2])
+                if existing is None:
+                    month_records[record[2]] = [record[7], record]
+                else:
+                    existing[0] += record[7]
+
+            cumulative_records = []
+            for month_records in financial_months.values():
+                running_total = 0.0
+                for month in sorted(month_records):
+                    monthly_amount, source_record = month_records[month]
+                    running_total += monthly_amount
+                    metadata = json.loads(source_record[10])
+                    metadata['value_semantics'] = 'cumulative_ytd_snapshot'
+                    cumulative_records.append((
+                        source_record[0],
+                        source_record[1],
+                        month,
+                        source_record[3],
+                        source_record[4],
+                        source_record[5],
+                        source_record[6],
+                        running_total,
+                        None,
+                        source_record[9],
+                        json.dumps(metadata),
+                    ))
+            records = []
+            for record in point_in_time_records:
+                metadata = json.loads(record[10])
+                metadata['value_semantics'] = 'point_in_time'
+                records.append((*record[:10], json.dumps(metadata)))
+            records.extend(cumulative_records)
+            records.sort(key=lambda record: (record[1], record[2], record[4], record[5], record[6]))
+
+            if job_id:
+                self.update_ingestion_job(
+                    job_id,
+                    status='running',
+                    total_rows=len(records),
+                    processed_rows=0,
+                )
+
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            if source_document_id:
+                cursor.execute(
+                    """
+                    DELETE FROM cube_fact_data
+                     WHERE cube_id = %s
+                       AND row_data ->> 'ingestion_type' = 'entity_pnl_supplemental_cf'
+                       AND row_data ->> 'source_document_id' = %s
+                    """,
+                    (cube_id, source_document_id),
+                )
+
+            insert_sql = """
+                INSERT INTO cube_fact_data (
+                    cube_id, year, month, region_entity, cost_category,
+                    entity_category, version, amount_inr, capacity,
+                    source_row_number, row_data
+                )
+                VALUES %s
+            """
+            inserted_rows = 0
+            for start in range(0, len(records), batch_size):
+                batch = records[start:start + batch_size]
+                execute_values(
+                    cursor,
+                    insert_sql,
+                    batch,
+                    template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)",
+                    page_size=batch_size,
+                )
+                inserted_rows += len(batch)
+                if job_id:
+                    self.update_ingestion_job(job_id, processed_rows=inserted_rows)
+            conn.commit()
+
+            self._store_cost_categories(
+                cube_id,
+                ['Revenue Summary', 'Cost Summary', 'GB Wise END Capacity'],
+            )
+            elapsed = (datetime.now() - start_time).total_seconds()
+            if job_id:
+                self.update_ingestion_job(
+                    job_id,
+                    status='succeeded',
+                    total_rows=len(records),
+                    processed_rows=inserted_rows,
+                )
+
+            return {
+                'success': True,
+                'rows_processed': len(source),
+                'rows_inserted': inserted_rows,
+                'cost_categories': ['Revenue Summary', 'Cost Summary', 'GB Wise END Capacity'],
+                'dimensions': {'entity_scope': ['All entities'] if entity_column is None else []},
+                'elapsed_seconds': elapsed,
+            }
+        except Exception as error:
+            if conn:
+                conn.rollback()
+            logger.error(f"Supplemental Entity P&L CF ingestion failed: {error}")
+            if job_id:
+                self.update_ingestion_job(job_id, status='failed', error_message=str(error))
+            return {'success': False, 'error': str(error)}
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
     def ingest_excel_to_facts(self,
                               file_path: str,
                               cube_id: str,
