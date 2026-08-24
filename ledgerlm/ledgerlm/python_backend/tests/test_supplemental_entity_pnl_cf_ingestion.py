@@ -14,6 +14,7 @@ if str(PYTHON_BACKEND) not in sys.path:
 
 from services import semantic_sql_service as semantic_module
 from services.semantic_sql_service import SemanticSQLService
+from api.routes.entity_pnl import _is_revenue_entity_category
 
 
 class FakeCursor:
@@ -66,6 +67,11 @@ class SupplementalEntityPnlCfIngestionTests(unittest.TestCase):
 
     def capture_insert(self, cursor, query, records, **kwargs):
         cursor.inserted.extend(records)
+
+    def test_revenue_line_excludes_revenue_hardware(self):
+        self.assertTrue(_is_revenue_entity_category("Revenue"))
+        self.assertTrue(_is_revenue_entity_category(""))
+        self.assertFalse(_is_revenue_entity_category("Revenue Hardware"))
 
     def test_wide_cf_workbook_becomes_all_entity_fact_rows(self):
         source = pd.DataFrame(

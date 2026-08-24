@@ -70,6 +70,12 @@ def _bucket_entity_category(value: str) -> Optional[str]:
     return None
 
 
+def _is_revenue_entity_category(value: str) -> bool:
+    """Count only explicit Revenue rows; preserve legacy blank categories."""
+    normalized = " ".join((value or "").lower().split())
+    return normalized in {"", "revenue"}
+
+
 def _format_amount(value: Optional[float], currency: str) -> str:
     if value is None:
         return "—"
@@ -234,7 +240,7 @@ async def build_entity_pnl(request: EntityPnlRequest):
         if "end capacity" in str(cost_category or "").lower():
             capacity[key_prefix] += float(capacity_value or 0)
             continue
-        if cost_category == "Revenue Summary":
+        if cost_category == "Revenue Summary" and _is_revenue_entity_category(entity_category):
             snapshots[(*key_prefix, "Revenue")] += value
         elif cost_category == "Cost Summary":
             # This total deliberately covers every governed Entity P&L cost
