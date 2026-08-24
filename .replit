@@ -47,3 +47,4 @@ packages = ["cargo", "freetype", "glibcLocales", "lcms2", "libiconv", "libimageq
 [userenv]
 
 [userenv.shared]
+UV_PROJECT_ENVIRONMENT = ".venv"
