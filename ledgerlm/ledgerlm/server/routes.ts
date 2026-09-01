@@ -66,6 +66,12 @@ import { writeAuditLog, extractIp } from "./services/auditLogger";
 import { runBackup, listBackups } from "./services/backupService";
 import { listRetentionPolicies, updateRetentionPolicy, runRetentionEngine } from "./services/retentionEngine";
 import {
+  CURRENT_TERMS_DOCUMENT_HASH,
+  CURRENT_TERMS_EFFECTIVE_DATE,
+  CURRENT_TERMS_ISSUED_BY,
+  CURRENT_TERMS_VERSION,
+} from "@shared/legalTerms";
+import {
   getKpiReportOptions,
   listSavedKpiReports,
   runKpiReport,
@@ -721,6 +727,142 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch {
       return res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // ── Terms & Conditions ───────────────────────────────────────────────────
+  // Acceptance is account-scoped and server-authoritative. Browser storage is
+  // intentionally not used as proof of acceptance.
+  app.get("/api/legal/terms/status", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const result = await db.execute(sql`
+        SELECT
+          tv.id,
+          tv.version,
+          tv.effective_date,
+          tv.issued_by,
+          tv.document_hash,
+          ta.accepted_at
+        FROM terms_versions tv
+        LEFT JOIN terms_acceptances ta
+          ON ta.terms_version_id = tv.id
+         AND ta.user_id = ${userId}
+        WHERE tv.is_active = true
+        ORDER BY tv.effective_date DESC, tv.created_at DESC
+        LIMIT 1
+      `);
+
+      const current = result.rows[0] as any;
+      if (!current) {
+        return res.status(503).json({ error: "No active Terms and Conditions version is configured." });
+      }
+
+      return res.json({
+        required: !current.accepted_at,
+        currentVersion: {
+          id: current.id,
+          version: current.version,
+          effectiveDate: current.effective_date,
+          issuedBy: current.issued_by,
+          documentHash: current.document_hash,
+        },
+        acceptedAt: current.accepted_at ?? null,
+      });
+    } catch (error: any) {
+      console.error("Terms status error:", error);
+      return res.status(500).json({ error: "Could not load Terms acceptance status." });
+    }
+  });
+
+  app.post("/api/legal/terms/accept", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const ipAddress = extractIp(req);
+      const userAgent = req.get("user-agent")?.slice(0, 2000) ?? null;
+
+      // Neon HTTP does not expose a transaction API. A single data-modifying
+      // CTE keeps the legal record and its audit event atomic at PostgreSQL.
+      const result = await db.execute(sql`
+        WITH current_terms AS MATERIALIZED (
+          SELECT id, version, effective_date, issued_by, document_hash
+          FROM terms_versions
+          WHERE is_active = true
+          ORDER BY effective_date DESC, created_at DESC
+          LIMIT 1
+        ),
+        inserted_acceptance AS (
+          INSERT INTO terms_acceptances (
+            user_id, terms_version_id, accepted_at, ip_address, user_agent
+          )
+          SELECT
+            ${userId}, ct.id, NOW(), ${ipAddress}, ${userAgent}
+          FROM current_terms ct
+          ON CONFLICT (user_id, terms_version_id) DO NOTHING
+          RETURNING id, terms_version_id, accepted_at
+        ),
+        existing_acceptance AS (
+          SELECT ta.id, ta.terms_version_id, ta.accepted_at
+          FROM terms_acceptances ta
+          JOIN current_terms ct ON ct.id = ta.terms_version_id
+          WHERE ta.user_id = ${userId}
+          LIMIT 1
+        ),
+        inserted_audit AS (
+          INSERT INTO audit_logs (
+            user_id, action, resource, resource_id, ip_address, status, details
+          )
+          SELECT
+            ${userId},
+            ${"TERMS_ACCEPTED"},
+            ${"terms"},
+            ct.id,
+            ${ipAddress},
+            ${"success"},
+            jsonb_build_object(
+              'termsVersion', ct.version,
+              'effectiveDate', ct.effective_date,
+              'issuedBy', ct.issued_by,
+              'documentHash', ct.document_hash,
+              'acceptanceId', ia.id,
+              'triggeredBy', 'user_acceptance'
+            )
+          FROM inserted_acceptance ia
+          JOIN current_terms ct ON ct.id = ia.terms_version_id
+          RETURNING id
+        )
+        SELECT
+          COALESCE(ia.id, ea.id) AS id,
+          COALESCE(ia.accepted_at, ea.accepted_at) AS accepted_at,
+          ct.version,
+          ct.effective_date,
+          (ia.id IS NOT NULL) AS created,
+          audit.id AS audit_log_id
+        FROM current_terms ct
+        LEFT JOIN inserted_acceptance ia ON ia.terms_version_id = ct.id
+        LEFT JOIN existing_acceptance ea ON ea.terms_version_id = ct.id
+        LEFT JOIN inserted_audit audit ON true
+        LIMIT 1
+      `);
+
+      const row = result.rows[0] as any;
+      if (!row?.id) {
+        throw new Error("No active Terms and Conditions version is configured.");
+      }
+
+      const acceptance = {
+        id: row.id,
+        acceptedAt: row.accepted_at,
+        version: row.version,
+        effectiveDate: row.effective_date,
+        created: row.created,
+        auditLogId: row.audit_log_id ?? null,
+      };
+
+      return res.status(200).json({ success: true, acceptance });
+    } catch (error: any) {
+      console.error("Terms acceptance error:", error);
+      return res.status(500).json({ error: "Could not record Terms acceptance. Please try again." });
     }
   });
 

@@ -1650,6 +1650,31 @@ export const auditLogs = pgTable("audit_logs", {
   createdAtIdx: index("audit_logs_created_at_idx").on(table.createdAt),
 }));
 
+export const termsVersions = pgTable("terms_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  version: varchar("version", { length: 50 }).notNull().unique(),
+  effectiveDate: timestamp("effective_date", { withTimezone: true }).notNull(),
+  issuedBy: varchar("issued_by", { length: 200 }).notNull(),
+  documentHash: varchar("document_hash", { length: 200 }).notNull(),
+  isActive: boolean("is_active").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const termsAcceptances = pgTable("terms_acceptances", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  termsVersionId: varchar("terms_version_id").notNull().references(() => termsVersions.id, { onDelete: "restrict" }),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  userIdIdx: index("terms_acceptances_user_id_idx").on(table.userId),
+  versionIdIdx: index("terms_acceptances_version_id_idx").on(table.termsVersionId),
+  acceptedAtIdx: index("terms_acceptances_accepted_at_idx").on(table.acceptedAt),
+  userVersionUnique: unique("terms_acceptances_user_version_unique").on(table.userId, table.termsVersionId),
+}));
+
 // Zod schema for password validation
 export const strongPasswordSchema = z.string()
   .min(PASSWORD_REQUIREMENTS.minLength, `Password must be at least ${PASSWORD_REQUIREMENTS.minLength} characters`)

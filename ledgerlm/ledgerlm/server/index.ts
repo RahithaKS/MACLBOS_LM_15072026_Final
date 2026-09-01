@@ -47,6 +47,7 @@ import { addSsoGroupMappings } from "./migrations/add-sso-group-mappings";
 import { createBoardReportsTable } from "./migrations/create-board-reports";
 import { addVarianceDataColumn } from "./migrations/add-variance-data-column";
 import { createKpiReportsTable } from "./migrations/create-kpi-reports";
+import { createTermsAcceptanceTables } from "./migrations/create-terms-acceptance";
 import { runRetentionEngine } from "./services/retentionEngine";
 import { runBackup } from "./services/backupService";
 import { startSsoSyncJob } from "./services/ssoSyncJob";
@@ -407,6 +408,7 @@ app.use(csrfProtection);
   await addCustomerColumns();
   await createAuditLogTable();
   await createRetentionPoliciesTable();
+  await createTermsAcceptanceTables();
 
   // Create Investment/CAPEX/PMO fact table and add schema_type to cubes
   await runInvestmentTablesMigration();

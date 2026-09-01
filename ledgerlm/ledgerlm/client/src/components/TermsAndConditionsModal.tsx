@@ -2,23 +2,68 @@ import { useState, useEffect } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { apiRequest } from '@/lib/queryClient';
 import { ScrollText, ShieldCheck, UserCheck, Lock, AlertTriangle, Brain, Database, Copyright, EyeOff, Server, Activity, Scale, RefreshCw, XCircle, Gavel, Sparkles, Phone } from 'lucide-react';
-
-const SESSION_KEY = 'ledgerlm_terms_accepted_session';
+import {
+  CURRENT_TERMS_EFFECTIVE_DATE,
+  CURRENT_TERMS_ISSUED_BY,
+  CURRENT_TERMS_VERSION,
+} from '@shared/legalTerms';
 
 interface TermsAndConditionsModalProps {
   open?: boolean;
   onClose?: () => void;
 }
 
+interface TermsStatus {
+  required: boolean;
+  currentVersion: {
+    id: string;
+    version: string;
+    effectiveDate: string;
+    issuedBy: string;
+    documentHash: string;
+  };
+  acceptedAt: string | null;
+}
+
+const FALLBACK_TERMS_VERSION: TermsStatus['currentVersion'] = {
+  id: '',
+  version: CURRENT_TERMS_VERSION,
+  effectiveDate: CURRENT_TERMS_EFFECTIVE_DATE,
+  issuedBy: CURRENT_TERMS_ISSUED_BY,
+  documentHash: '',
+};
+
 export function TermsAndConditionsModal({ open: controlledOpen, onClose }: TermsAndConditionsModalProps = {}) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [termsVersion, setTermsVersion] = useState<TermsStatus['currentVersion']>(FALLBACK_TERMS_VERSION);
 
   useEffect(() => {
-    if (controlledOpen === undefined && !sessionStorage.getItem(SESSION_KEY)) {
-      setInternalOpen(true);
-    }
+    if (controlledOpen !== undefined) return;
+
+    let cancelled = false;
+    apiRequest<TermsStatus>('GET', '/api/legal/terms/status')
+      .then((status) => {
+        if (cancelled) return;
+        setTermsVersion(status.currentVersion);
+        setInternalOpen(status.required);
+        setError(null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Fail closed: an unknown acceptance state must not silently allow
+        // access to continue without showing the required modal.
+        setInternalOpen(true);
+        setError('We could not verify your Terms acceptance. Please try again.');
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [controlledOpen]);
 
   // Reset checkbox whenever modal opens
@@ -30,12 +75,25 @@ export function TermsAndConditionsModal({ open: controlledOpen, onClose }: Terms
   const isViewOnly = controlledOpen !== undefined;
   const open = isViewOnly ? controlledOpen : internalOpen;
 
-  const handleAccept = () => {
+  const effectiveDateLabel = new Date(`${termsVersion.effectiveDate.slice(0, 10)}T00:00:00Z`)
+    .toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+
+  const handleAccept = async () => {
     if (isViewOnly) {
       onClose?.();
-    } else {
-      sessionStorage.setItem(SESSION_KEY, '1');
+      return;
+    }
+
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await apiRequest('POST', '/api/legal/terms/accept', {});
       setInternalOpen(false);
+    } catch {
+      setError('We could not record your acceptance. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -54,11 +112,11 @@ export function TermsAndConditionsModal({ open: controlledOpen, onClose }: Terms
           </div>
           <h2 className="text-xl font-bold text-foreground text-center">Terms and Conditions for LedgerLM</h2>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="bg-muted px-2 py-0.5 rounded-full font-medium">Version 1.0</span>
+            <span className="bg-muted px-2 py-0.5 rounded-full font-medium">Version {termsVersion.version}</span>
             <span>•</span>
-            <span>Effective: July 15, 2026</span>
+            <span>Effective: {effectiveDateLabel}</span>
             <span>•</span>
-            <span>Issued by BGSW</span>
+            <span>Issued by {termsVersion.issuedBy}</span>
           </div>
         </div>
 
@@ -242,12 +300,18 @@ export function TermsAndConditionsModal({ open: controlledOpen, onClose }: Terms
             </span>
           </label>
 
+          {error && (
+            <p role="alert" className="text-xs text-destructive bg-destructive/10 rounded-md px-3 py-2">
+              {error}
+            </p>
+          )}
+
           <Button
             onClick={handleAccept}
-            disabled={!isViewOnly && !acknowledged}
+            disabled={!isViewOnly && (!acknowledged || isSubmitting || !termsVersion.id)}
             className="w-full h-11 text-base font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isViewOnly ? 'Close' : 'Accept & Close'}
+            {isViewOnly ? 'Close' : isSubmitting ? 'Saving acceptance…' : 'Accept & Close'}
           </Button>
         </div>
       </DialogContent>
