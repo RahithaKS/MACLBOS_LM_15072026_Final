@@ -18,9 +18,10 @@ logical_id = "70ef05b5-c8a5-4507-89c0-f64de1da4ea8"
 [[outputs]]
 id = "SwqIGXdablOoUCqI-r54X"
 uri = "file://ledgerlm_security_scan_report.html"
-type = "unspecified"
+type = "text"
 title = "LedgerLM Security Scanning Report"
 logical_id = "b14a6a71-523d-43b0-9a1a-3e3a1051e1be"
+content_type = "text/html"
 
 [[outputs]]
 id = "2oRwxNWZcXW-TVnCIYWsB"
@@ -83,4 +84,18 @@ size = 77197
 mtime_ms = 1787323999340
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:8fb1e782-d061-4eb4-a946-88f35142b823/9363d6c0-9040-47ea-a403-1c382ec746a5/e2e66667-dd1c-4602-8dc0-a360724e0c3d"
 storage_version_token = "1787324216119099"
+content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+[[outputs]]
+id = "oIoKE3OcSD0JkY3pfn5bZ"
+uri = "file://attached_assets/kpi_business_metrics_four_entity_template.pptx"
+type = "slides"
+title = "Business Metrics — Four Entity KPI Template"
+description = "Editable four-slide KPI template for Worldwide, BGSW India, BGSV Vietnam, and Mexico. Each slide contains entity-prefixed placeholders for the later LedgerLM implementation."
+logical_id = "750f43db-1197-48ce-9307-ebc9aecdfb56"
+content_hash = "sha256:66578468dbc7629a268dd1405f0d272d6364b8ad856d0d1f830953bd561697cf"
+size = 234341
+mtime_ms = 1788348254464
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:344f585d-fc33-446e-8d4f-93a2369545ed/750f43db-1197-48ce-9307-ebc9aecdfb56/c2e97134-ff88-4270-9e8c-acc51fd3f3dd"
+storage_version_token = "1788348266490676"
 content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
