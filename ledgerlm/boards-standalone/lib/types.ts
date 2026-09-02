@@ -394,6 +394,10 @@ export interface GovernedKpiGreenSection {
     id: string;
     label: string;
     value: GovernedKpiValue;
+    comparisons?: {
+      priorYearYtd: GovernedKpiValue;
+      previousMonthYtd: GovernedKpiValue;
+    };
   }>;
   comparisons?: {
     priorYearYtd: GovernedKpiValue;

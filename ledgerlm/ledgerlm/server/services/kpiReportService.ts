@@ -39,7 +39,7 @@ const ENTITY_PAGE_PREDICATE = sql`
 `;
 const UTILIZATION_PAGE_PREDICATE = sql`
   upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g'))
-    IN ('MS VIEW')
+    IN ('', 'BLANK')
 `;
 const numericText = (column: "cost_value" | "value_percent") => sql.raw(
   `CASE WHEN replace(trim(coalesce(${column}, '')), ',', '') ~ '^-?(?:\\d+\\.?\\d*|\\.\\d+)$'
@@ -348,20 +348,16 @@ async function runKpiMetricSnapshot(request: KpiReportRequest) {
 }
 
 const GREEN_BREAKDOWNS = [
-  { id: "ms", label: "MS", actualGroups: ["XC", "PS", "VM"], forecastPages: ["MS VIEW"] },
-  { id: "mm", label: "MM", actualGroups: ["BD", "GS", "SO"], forecastPages: ["NE-MM"] },
-  { id: "sds", label: "SDS", actualGroups: ["SDS"], forecastPages: ["SDS VIEW"] },
+  { id: "ms", label: "MS" },
+  { id: "mm", label: "MM" },
+  { id: "sds", label: "SDS" },
   {
     id: "ms_external",
     label: "MS-External",
-    actualGroups: ["MOBILITY SOLUTIONS EXTERNAL"],
-    forecastPages: ["SX VIEW"],
   },
   {
     id: "integrated_service",
     label: "Integrated Service",
-    actualGroups: ["INTEGRATED SERVICE", "INTEGRATED SERVICES"],
-    forecastPages: ["INTEGRATED SERVICE", "INTEGRATED SERVICES"],
   },
 ] as const;
 
@@ -371,20 +367,26 @@ async function runGreenBreakdowns(request: KpiReportRequest) {
   const scenario = forecastScenarioPredicate(request.forecastScenario);
   const actualGroup = sql`
     CASE
-      WHEN upper(trim(coalesce(project_gb, ''))) IN ('XC', 'PS', 'VM') THEN 'ms'
-      WHEN upper(trim(coalesce(project_gb, ''))) IN ('BD', 'GS', 'SO') THEN 'mm'
-      WHEN upper(trim(coalesce(project_gb, ''))) = 'SDS' THEN 'sds'
-      WHEN upper(trim(coalesce(project_gb, ''))) = 'MOBILITY SOLUTIONS EXTERNAL' THEN 'ms_external'
-      WHEN upper(trim(coalesce(project_gb, ''))) IN ('INTEGRATED SERVICE', 'INTEGRATED SERVICES') THEN 'integrated_service'
+      WHEN upper(trim(coalesce(project_gb, ''))) IN ('BD', 'GS', 'SO') THEN 'integrated_service'
+      WHEN upper(trim(coalesce(project_gb, ''))) IN ('ITRAMS', 'MOBILITY SOLUTIONS EXTERNAL') THEN 'ms_external'
+      WHEN upper(trim(coalesce(project_gb, ''))) IN ('SDS', 'SDS_CORPORATE', 'CORP-SDS') THEN 'sds'
+      WHEN upper(trim(coalesce(project_gb, ''))) IN ('SX_DELIVERY', 'SX-UNALLOCATED', 'CORP-SX') THEN 'mm'
+      WHEN upper(trim(coalesce(project_gb, ''))) IN ('M-OTHERS')
+        OR upper(trim(coalesce(project_gb, ''))) LIKE 'XC%'
+        OR upper(trim(coalesce(project_gb, ''))) LIKE 'PS%'
+        OR upper(trim(coalesce(project_gb, ''))) LIKE 'VM%'
+        THEN 'ms'
     END
   `;
   const forecastGroup = sql`
     CASE
-      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) = 'MS VIEW' THEN 'ms'
-      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) = 'NE-MM' THEN 'mm'
-      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) = 'SDS VIEW' THEN 'sds'
-      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) = 'SX VIEW' THEN 'ms_external'
+      WHEN upper(trim(coalesce(gb, ''))) IN ('BD', 'GS', 'SO') THEN 'integrated_service'
+      WHEN upper(trim(coalesce(gb, ''))) = 'ITRAMS' THEN 'ms_external'
+      WHEN upper(trim(coalesce(gb, ''))) = 'SDS' THEN 'sds'
       WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) IN ('INTEGRATED SERVICE', 'INTEGRATED SERVICES') THEN 'integrated_service'
+      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) = 'SDS VIEW' THEN 'sds'
+      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) = 'MS VIEW' THEN 'ms'
+      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) IN ('SX VIEW', 'NE-MM') THEN 'mm'
     END
   `;
   const [actualResult, forecastResult] = await Promise.all([
@@ -628,11 +630,13 @@ export async function runKpiReport(request: KpiReportRequest) {
   const priorMonth = previousMonth(request.year, request.month);
   const historicalSnapshots = await Promise.all(
     BUSINESS_METRICS_SCOPES.map(async (scope) => {
-      const [priorYear, previousYtd] = await Promise.all([
+      const [priorYear, previousYtd, priorYearBreakdowns, previousYtdBreakdowns] = await Promise.all([
         runKpiMetricSnapshot({ ...request, year: request.year - 1, entity: scope.entity }),
         runKpiMetricSnapshot({ ...request, ...priorMonth, entity: scope.entity }),
+        runGreenBreakdowns({ ...request, year: request.year - 1, entity: scope.entity }),
+        runGreenBreakdowns({ ...request, ...priorMonth, entity: scope.entity }),
       ]);
-      return { scope, priorYear, previousYtd };
+      return { scope, priorYear, previousYtd, priorYearBreakdowns, previousYtdBreakdowns };
     }),
   );
   const periodLabel = new Date(Date.UTC(request.year, request.month - 1, 1)).toLocaleDateString("en-US", {
@@ -689,6 +693,16 @@ export async function runKpiReport(request: KpiReportRequest) {
               label: breakdown.label,
               value: breakdown.metrics.find((item) => item.id === definition.id)
                 ?? greenValue(undefined),
+              comparisons: definition.id.includes("utilization")
+                ? {
+                    priorYearYtd: historical?.priorYearBreakdowns
+                      .find((item) => item.id === breakdown.id)?.metrics
+                      .find((item) => item.id === definition.id) ?? greenValue(undefined),
+                    previousMonthYtd: historical?.previousYtdBreakdowns
+                      .find((item) => item.id === breakdown.id)?.metrics
+                      .find((item) => item.id === definition.id) ?? greenValue(undefined),
+                  }
+                : undefined,
             })),
             comparisons: definition.id.includes("utilization")
               ? {

@@ -60,17 +60,36 @@ export function buildGovernedSectionNarrative(
     periodCode,
   ).replace(`${subject}: `, "")}`;
 
-  const details = section.breakdowns
-    .filter((item) => item.value.actual !== null || item.value.forecast !== null)
-    .map((item) =>
-      comparisonSentence(
+  const details = section.breakdowns.map((item) => {
+    let line = comparisonSentence(
         item.label,
         item.value.actual,
         item.value.forecast,
         section.unit,
         periodCode,
-      ),
-    );
+      );
+    if (section.id.includes("utilization") && item.comparisons) {
+      const historical: string[] = [];
+      if (item.comparisons.previousMonthYtd.actual !== null) {
+        historical.push(
+          `previous-month YTD ${governedValue(
+            item.comparisons.previousMonthYtd.actual,
+            section.unit,
+          )}`,
+        );
+      }
+      if (item.comparisons.priorYearYtd.actual !== null) {
+        historical.push(
+          `prior-year YTD ${governedValue(
+            item.comparisons.priorYearYtd.actual,
+            section.unit,
+          )}`,
+        );
+      }
+      if (historical.length) line += ` Historical comparison: ${historical.join("; ")}.`;
+    }
+    return line;
+  });
 
   if (section.comparisons && section.total.actual !== null) {
     const historical: string[] = [];
