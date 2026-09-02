@@ -45,6 +45,7 @@ export interface BoardModalResult {
   reportTemplate: string;
   templateTheme: PptTheme | null;
   templateAnatomy: PptTemplateAnatomy | null;
+  templatePptx: Board["templatePptx"];
   cubeId: string | null;
   entityPnl: EntityPnlSettings | null;
   kpiReport: KpiReportSettings | null;
@@ -434,6 +435,9 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
   const [templateAnatomy, setTemplateAnatomy] = useState<PptTemplateAnatomy | null>(
     board?.templateAnatomy ?? null,
   );
+  const [templatePptx, setTemplatePptx] = useState<Board["templatePptx"]>(
+    board?.templatePptx ?? null,
+  );
   const asOfYear = new Date().getFullYear();
   const asOfMin = `${asOfYear - 5}-01`;
   const asOfMax = `${asOfYear + 5}-12`;
@@ -449,6 +453,13 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
         // Capture the layout as well as the text, so what fills each region is
         // recorded and reviewable rather than re-derived at export time.
         setTemplateAnatomy(await extractPptxAnatomy(file));
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let binary = "";
+        const chunkSize = 0x8000;
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+        }
+        setTemplatePptx({ fileName: file.name, base64: btoa(binary) });
         if (!theme) {
           setTemplateError("Slides imported, but no theme found in the file — exports keep LedgerLM styling.");
         }
@@ -464,6 +475,7 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
       return;
     }
     const reader = new FileReader();
+    setTemplatePptx(null);
     reader.onload = () => {
       if (typeof reader.result === "string") setReportTemplate(reader.result.trim());
     };
@@ -763,6 +775,7 @@ export default function BoardModal({ mode, template, board, onClose, onSubmit }:
       reportTemplate,
       templateTheme,
       templateAnatomy,
+      templatePptx,
       cubeId,
       entityPnl: isEntityPnl ? entityPnl : null,
       kpiReport: isKpiReport ? kpiReport : null,

@@ -3,6 +3,7 @@
 import type { AnalysisResult, GovernedKpiGreenSection, Kpi } from "@/lib/types";
 import ResultCharts from "./ResultCharts";
 import { tidyProse } from "@/lib/prose";
+import { buildGovernedSectionNarrative } from "@/lib/kpiNarrative";
 
 // Written out in full so Tailwind keeps these classes at build time.
 const KPI_GRID_COLS: Record<number, string> = {
@@ -102,36 +103,24 @@ function KpiBusinessMetricsPanel({ result }: { result: AnalysisResult }) {
                   </div>
                 </header>
                 <div className="space-y-2 p-3">
-                  {entity.sections.map((section) => (
+                  {entity.sections.map((section) => {
+                    const narrative = buildGovernedSectionNarrative(section, report.greenScope!.period);
+                    return (
                     <div key={section.id} className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2">
                       <p className="text-xs font-bold text-emerald-900">{section.title}</p>
-                      <p className="mt-1 text-xs tabular-nums text-emerald-950">
-                        Actual <strong>{greenValue(section.total.actual, section.unit)}</strong>
-                        {" · "}Forecast <strong>{greenValue(section.total.forecast, section.unit)}</strong>
-                        {" · "}Variance <strong>{greenValue(section.total.variance, section.unit)}</strong>
+                      <p className="mt-1 text-xs leading-relaxed text-emerald-950">
+                        {narrative.summary}
                       </p>
-                      {section.breakdowns.some(
-                        (item) => item.value.actual !== null || item.value.forecast !== null,
-                      ) && (
-                        <ul className="mt-1.5 grid gap-x-3 gap-y-0.5 text-[10px] text-emerald-800 sm:grid-cols-2">
-                          {section.breakdowns
-                            .filter((item) => item.value.actual !== null || item.value.forecast !== null)
-                            .map((item) => (
-                              <li key={item.id}>
-                                <strong>{item.label}:</strong> A {greenValue(item.value.actual, section.unit)}
-                                {" · "}F {greenValue(item.value.forecast, section.unit)}
-                              </li>
-                            ))}
+                      {narrative.details.length > 0 && (
+                        <ul className="mt-1.5 space-y-0.5 text-[10px] leading-relaxed text-emerald-800">
+                          {narrative.details.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
                         </ul>
                       )}
-                      {section.comparisons && (
-                        <p className="mt-1 text-[10px] tabular-nums text-emerald-800">
-                          Prior-year YTD actual {greenValue(section.comparisons.priorYearYtd.actual, section.unit)}
-                          {" · "}Previous-month YTD actual {greenValue(section.comparisons.previousMonthYtd.actual, section.unit)}
-                        </p>
-                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </article>
             ))}

@@ -143,6 +143,7 @@ function normalize(board: Partial<Board> & Pick<Board, "id" | "name" | "template
     reportTemplate: "",
     templateTheme: null,
     templateAnatomy: null,
+    templatePptx: null,
     cubeId: null,
     entityPnl: null,
     kpiReport: null,

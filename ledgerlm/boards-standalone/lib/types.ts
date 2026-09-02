@@ -466,6 +466,15 @@ export interface Board {
   templateTheme: PptTheme | null;
   /** Slide-by-slide layout of that template, and what fills each region. */
   templateAnatomy: PptTemplateAnatomy | null;
+  /**
+   * Original uploaded PowerPoint, retained only so a recognized governed KPI
+   * template can be populated without rebuilding or losing decorative shapes.
+   * Optional for compatibility with boards saved before exact-template export.
+   */
+  templatePptx?: {
+    fileName: string;
+    base64: string;
+  } | null;
   cubeId: string | null;
   /** Saved selection for a read-only Enterprise Data Entity P&L run. */
   entityPnl?: EntityPnlSettings | null;

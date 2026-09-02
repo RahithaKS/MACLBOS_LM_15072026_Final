@@ -1,10 +1,16 @@
 "use client";
 
 import { tidyProse } from "@/lib/prose";
+import {
+  buildGovernedSectionNarrative,
+  governedPeriodCode,
+} from "@/lib/kpiNarrative";
 import type {
   BalanceSheetLine,
   Board,
   ChartSpec,
+  GovernedKpiGreenEntity,
+  GovernedKpiReport,
   PptTemplateAnatomy,
   PptTheme,
   Report,
@@ -1436,6 +1442,138 @@ function addFourEntityKpiSlides(
   return true;
 }
 
+function recognizedFourEntityTemplate(board: Board) {
+  const templateText = `${board.templateAnatomy?.sourceFile ?? ""}\n${board.reportTemplate ?? ""}`.toLowerCase();
+  return (
+    /four[-_\s]?entity|kpi_business_metrics_four_entity/.test(templateText) ||
+    (templateText.includes("{{ww_") && templateText.includes("{{mx_"))
+  );
+}
+
+function xmlEscape(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function replacePptxPlaceholder(xml: string, key: string, value: string) {
+  const token = `{{${key}}}`;
+  const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const run = new RegExp(
+    `<a:r>([\\s\\S]*?)<a:t>${escapedToken}</a:t>([\\s\\S]*?)</a:r>`,
+    "g",
+  );
+  let replaced = false;
+  const withRuns = xml.replace(run, (_match, before: string, after: string) => {
+    replaced = true;
+    return value
+      .split("\n")
+      .map((line) => `<a:r>${before}<a:t>${xmlEscape(line)}</a:t>${after}</a:r>`)
+      .join("<a:br/>");
+  });
+  return replaced
+    ? withRuns
+    : withRuns.replace(new RegExp(escapedToken, "g"), xmlEscape(value));
+}
+
+function entityTemplateValues(
+  snapshot: GovernedKpiReport,
+  entity: GovernedKpiGreenEntity,
+) {
+  const prefix = entity.code.toLowerCase() === "in" ? "in" : entity.code.toLowerCase();
+  const section = (id: string) => entity.sections.find((item) => item.id === id);
+  const narrative = (id: string) => {
+    const item = section(id);
+    return item
+      ? buildGovernedSectionNarrative(item, snapshot.greenScope!.period)
+      : { summary: "No governed value is available.", details: [] as string[] };
+  };
+  const revenue = narrative("revenue");
+  const internal = narrative("internal_utilization");
+  const external = narrative("external_utilization");
+  const capacity = narrative("capacity");
+  const periodCode = governedPeriodCode(snapshot.greenScope!.period);
+  const values: Record<string, string> = {
+    report_month: snapshot.periodLabel,
+    [`${prefix}_budget_revenue_summary`]: revenue.summary,
+    [`${prefix}_budget_revenue_detail`]: revenue.details.join("\n"),
+    [`${prefix}_internal_utilization_summary`]: internal.summary,
+    [`${prefix}_internal_utilization_detail`]: internal.details.join("\n"),
+    [`${prefix}_external_utilization_summary`]: external.summary,
+    [`${prefix}_external_utilization_detail`]: external.details.join("\n"),
+    [`${prefix}_capacity_summary`]: capacity.summary,
+    [`${prefix}_capacity_detail`]: capacity.details.join("\n"),
+    [`${prefix}_attrition_summary`]: "Phase 2 / out of scope.",
+    [`${prefix}_attrition_detail_or_phase_2_note`]:
+      "No attrition value is displayed until an approved governed source mapping is available.",
+    [`${prefix}_ebit_summary`]: "Phase 2 / out of scope.",
+    [`${prefix}_ebit_detail_or_phase_2_note`]:
+      "No EBIT value is displayed until an approved governed source mapping is available.",
+    [`${prefix}_source_note`]: "Governed green scope",
+    [`${prefix}_actual_source_label`]: snapshot.actualSourceLabel,
+    [`${prefix}_forecast_source_label`]: snapshot.forecastSourceLabel,
+    [`${prefix}_period_label`]: periodCode,
+    [`${prefix}_warnings`]:
+      snapshot.warnings.join(" • ") || "No governed data-quality warnings.",
+    [`${prefix}_entity_label`]: entity.label,
+  };
+  return values;
+}
+
+async function writeFourEntityKpiTemplate(
+  board: Board,
+  report: Report,
+  fileName: string,
+) {
+  const snapshot = report.result.kpiReport;
+  const green = snapshot?.greenScope;
+  if (
+    board.templateId !== "kpi-metrics" ||
+    !snapshot ||
+    green?.version !== "green-v1" ||
+    green.entities.length !== 4 ||
+    !recognizedFourEntityTemplate(board) ||
+    !board.templatePptx?.base64
+  ) {
+    return false;
+  }
+
+  const JSZip = (await import("jszip")).default;
+  const binary = atob(board.templatePptx.base64);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  const zip = await JSZip.loadAsync(bytes);
+  const slideNames = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+    .sort((a, b) => Number(a.match(/\d+/)![0]) - Number(b.match(/\d+/)![0]));
+  if (slideNames.length < 4) return false;
+
+  for (const [index, entity] of green.entities.entries()) {
+    const slideName = slideNames[index];
+    let xml = await zip.file(slideName)!.async("string");
+    for (const [key, value] of Object.entries(entityTemplateValues(snapshot, entity))) {
+      xml = replacePptxPlaceholder(xml, key, value);
+    }
+    zip.file(slideName, xml);
+  }
+
+  const output = await zip.generateAsync({
+    type: "blob",
+    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  });
+  const url = URL.createObjectURL(output);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return true;
+}
+
 /**
  * Direct Business Metrics output for KPI boards. An imported PPTX stores only
  * text-region anatomy, not its decorative panel shapes; rendering this fixed
@@ -2074,6 +2212,8 @@ async function writePptxFile(
 }
 
 export async function exportReportPpt(board: Board, report: Report) {
+  const fileName = `${fileStamp(board, report)}.pptx`;
+  if (await writeFourEntityKpiTemplate(board, report, fileName)) return;
   const PptxGenJS = (await import("pptxgenjs")).default;
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE"; // 13.33 x 7.5 in
@@ -2083,29 +2223,29 @@ export async function exportReportPpt(board: Board, report: Report) {
   // table structure. It must not fall through to the generic template mapper,
   // which collapses its year-end / forecast / variance columns.
   if (addEntityPnlSlide(pptx, board, report)) {
-    await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
+    await writePptxFile(pptx, fileName);
     return;
   }
   if (addFourEntityKpiSlides(pptx, board, report)) {
-    await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
+    await writePptxFile(pptx, fileName);
     return;
   }
   // KPI Metrics uses its own governed Business Metrics layout. The imported
   // file is an editable reference template, while this renderer retains the
   // graphic panel and section layout in the downloaded report.
   if (addKpiMetricsSlide(pptx, board, report)) {
-    await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
+    await writePptxFile(pptx, fileName);
     return;
   }
   // A board with an uploaded report format gets exactly that format. Without
   // one, balance sheet boards use the house layout and everything else the
   // generic deck.
   if (addTemplateDrivenSlides(pptx, board, report)) {
-    await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
+    await writePptxFile(pptx, fileName);
     return;
   }
   if (addBalanceSheetSlides(pptx, board, report)) {
-    await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
+    await writePptxFile(pptx, fileName);
     return;
   }
   const result = report.result;
