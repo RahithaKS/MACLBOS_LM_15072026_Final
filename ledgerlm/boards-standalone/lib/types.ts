@@ -376,6 +376,39 @@ export interface GovernedKpiNarrativeSection {
   lines: string[];
 }
 
+export interface GovernedKpiValue {
+  actual: number | null;
+  forecast: number | null;
+  variance: number | null;
+  variancePercent: number | null;
+  actualSourceRows: number;
+  forecastSourceRows: number;
+}
+
+export interface GovernedKpiGreenSection {
+  id: "revenue" | "internal_utilization" | "external_utilization" | "capacity";
+  title: string;
+  unit: GovernedKpiMetric["unit"];
+  total: GovernedKpiValue;
+  breakdowns: Array<{
+    id: string;
+    label: string;
+    value: GovernedKpiValue;
+  }>;
+  comparisons?: {
+    priorYearYtd: GovernedKpiValue;
+    previousMonthYtd: GovernedKpiValue;
+  };
+}
+
+export interface GovernedKpiGreenEntity {
+  id: GovernedKpiScope["id"];
+  code: GovernedKpiScope["code"];
+  label: string;
+  entity: string;
+  sections: GovernedKpiGreenSection[];
+}
+
 /** Deterministic KPI snapshot used by the KPI Metrics Board and its PPTX export. */
 export interface GovernedKpiReport {
   periodLabel: string;
@@ -386,6 +419,11 @@ export interface GovernedKpiReport {
   metrics: GovernedKpiMetric[];
   warnings: string[];
   scopeBadges?: GovernedKpiScope[];
+  greenScope?: {
+    version: "green-v1";
+    period: { year: number; month: number };
+    entities: GovernedKpiGreenEntity[];
+  };
   narrative?: GovernedKpiNarrativeSection[];
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import type { AnalysisResult, Kpi } from "@/lib/types";
+import type { AnalysisResult, GovernedKpiGreenSection, Kpi } from "@/lib/types";
 import ResultCharts from "./ResultCharts";
 import { tidyProse } from "@/lib/prose";
 
@@ -53,10 +53,17 @@ function KpiTile({ kpi }: { kpi: Kpi }) {
   );
 }
 
+function greenValue(value: number | null, unit: GovernedKpiGreenSection["unit"]) {
+  if (value === null) return "—";
+  if (unit === "percent") return `${(value * 100).toFixed(1)}%`;
+  if (unit === "mUSD") return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} mUSD`;
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} HC`;
+}
+
 function KpiBusinessMetricsPanel({ result }: { result: AnalysisResult }) {
   const report = result.kpiReport;
   const sections = report?.narrative ?? [];
-  if (!report || !sections.length) return null;
+  if (!report) return null;
 
   const badgeColors: Record<string, string> = {
     WW: "bg-[#006578]",
@@ -64,6 +71,80 @@ function KpiBusinessMetricsPanel({ result }: { result: AnalysisResult }) {
     VN: "bg-[#d9192b]",
     MX: "bg-[#59a587]",
   };
+
+  if (report.greenScope?.version === "green-v1" && report.greenScope.entities.length === 4) {
+    return (
+      <section className="overflow-hidden rounded-xl border border-[#a83678]/30 bg-[#f8f5f7]">
+        <div className="h-1.5 bg-[#a83678]" />
+        <div className="p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-[#8c2465]">Business Metrics</p>
+          <div className="mt-1 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 className="font-display text-xl font-semibold">Four-entity green scope</h2>
+              <p className="mt-1 text-xs text-muted">
+                {report.periodLabel} · {report.forecastScenario} · Revenue and utilization are YTD; capacity is month-end
+              </p>
+            </div>
+            <span className="rounded-full bg-emerald-600 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+              Governed green scope
+            </span>
+          </div>
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            {report.greenScope.entities.map((entity) => (
+              <article key={entity.id} className="overflow-hidden rounded-lg border border-[#777]/35 bg-white">
+                <header className="flex items-center gap-2 border-b border-[#777]/25 bg-[#d9d9d9]/55 px-4 py-3">
+                  <span className={`rounded-md px-2.5 py-1 text-[11px] font-bold text-white ${badgeColors[entity.code]}`}>
+                    {entity.code}
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-bold">{entity.label}</h3>
+                    <p className="text-[10px] text-muted">{entity.entity}</p>
+                  </div>
+                </header>
+                <div className="space-y-2 p-3">
+                  {entity.sections.map((section) => (
+                    <div key={section.id} className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2">
+                      <p className="text-xs font-bold text-emerald-900">{section.title}</p>
+                      <p className="mt-1 text-xs tabular-nums text-emerald-950">
+                        Actual <strong>{greenValue(section.total.actual, section.unit)}</strong>
+                        {" · "}Forecast <strong>{greenValue(section.total.forecast, section.unit)}</strong>
+                        {" · "}Variance <strong>{greenValue(section.total.variance, section.unit)}</strong>
+                      </p>
+                      {section.breakdowns.some(
+                        (item) => item.value.actual !== null || item.value.forecast !== null,
+                      ) && (
+                        <ul className="mt-1.5 grid gap-x-3 gap-y-0.5 text-[10px] text-emerald-800 sm:grid-cols-2">
+                          {section.breakdowns
+                            .filter((item) => item.value.actual !== null || item.value.forecast !== null)
+                            .map((item) => (
+                              <li key={item.id}>
+                                <strong>{item.label}:</strong> A {greenValue(item.value.actual, section.unit)}
+                                {" · "}F {greenValue(item.value.forecast, section.unit)}
+                              </li>
+                            ))}
+                        </ul>
+                      )}
+                      {section.comparisons && (
+                        <p className="mt-1 text-[10px] tabular-nums text-emerald-800">
+                          Prior-year YTD actual {greenValue(section.comparisons.priorYearYtd.actual, section.unit)}
+                          {" · "}Previous-month YTD actual {greenValue(section.comparisons.previousMonthYtd.actual, section.unit)}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] text-muted">
+            Missing governed rows are shown as —. EBIT, Capex, attrition and red commentary are intentionally excluded.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!sections.length) return null;
 
   return (
     <section className="overflow-hidden rounded-xl border border-[#a83678]/30 bg-[#f8f5f7]">

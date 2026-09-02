@@ -29,6 +29,8 @@ type AggregateRow = {
   capacity_rows: string | number | null;
 };
 
+type BreakdownRow = AggregateRow & { group_key: string };
+
 const ALL_ENTITIES_LABEL = "All entities";
 const ACTUAL_VERSION_PREDICATE = sql`(version IS NULL OR trim(version) = '')`;
 const ENTITY_PAGE_PREDICATE = sql`
@@ -67,7 +69,10 @@ function actualEntityPredicate(entity?: string) {
   const selected = normalizedEntity(entity);
   if (selected) {
     if (selected === "WORLD WIDE" || selected === "WORLWIDE") {
-      return sql`upper(trim(coalesce(region_entity, ''))) IN ('WORLD WIDE', 'WORLWIDE')`;
+      return sql`upper(trim(coalesce(region_entity, ''))) IN ('BGSW', 'BGSV', 'BGSW/NE-MX')`;
+    }
+    if (selected === "NE-MX" || selected === "MEXICO") {
+      return sql`upper(trim(coalesce(region_entity, ''))) IN ('NE-MX', 'BGSW/NE-MX')`;
     }
     return sql`upper(trim(coalesce(region_entity, ''))) = ${selected}`;
   }
@@ -176,8 +181,18 @@ async function runKpiMetricSnapshot(request: KpiReportRequest) {
   const [actualResult, forecastResult] = await Promise.all([
     db.execute(sql`
       SELECT
-        SUM(CASE WHEN cost_category = 'Revenue' THEN amount_usd END) / 1000000.0 AS revenue_value,
-        COUNT(*) FILTER (WHERE cost_category = 'Revenue' AND amount_usd IS NOT NULL) AS revenue_rows,
+        SUM(CASE
+          WHEN cost_category = 'Revenue'
+            AND lower(trim(coalesce(sub_cost_category, ''))) <> 'revenue hardware'
+            AND lower(trim(coalesce(cost_category_class, ''))) <> 'revenue hardware'
+          THEN amount_usd
+        END) / 1000000.0 AS revenue_value,
+        COUNT(*) FILTER (
+          WHERE cost_category = 'Revenue'
+            AND lower(trim(coalesce(sub_cost_category, ''))) <> 'revenue hardware'
+            AND lower(trim(coalesce(cost_category_class, ''))) <> 'revenue hardware'
+            AND amount_usd IS NOT NULL
+        ) AS revenue_rows,
         SUM(billed_capacity) FILTER (
           WHERE cost_category = 'Billing Utilization'
             AND lower(trim(coalesce(resource_type, ''))) = 'internal'
@@ -202,14 +217,21 @@ async function runKpiMetricSnapshot(request: KpiReportRequest) {
             AND lower(trim(coalesce(resource_type, ''))) = 'external'
             AND allocated_capacity IS NOT NULL
         ) AS external_rows,
-        SUM(capacity) FILTER (WHERE cost_category = 'GB Wise END Capacity') AS capacity_value,
+        SUM(capacity) FILTER (
+          WHERE cost_category = 'GB Wise END Capacity'
+            AND month = ${request.month}
+            AND upper(trim(coalesce(sector, ''))) <> 'INDIRECT'
+        ) AS capacity_value,
         COUNT(*) FILTER (
-          WHERE cost_category = 'GB Wise END Capacity' AND capacity IS NOT NULL
+          WHERE cost_category = 'GB Wise END Capacity'
+            AND month = ${request.month}
+            AND upper(trim(coalesce(sector, ''))) <> 'INDIRECT'
+            AND capacity IS NOT NULL
         ) AS capacity_rows
       FROM cube_fact_data
       WHERE cube_id = ${request.cubeId}
         AND year = ${request.year}
-        AND month = ${request.month}
+        AND month BETWEEN 1 AND ${request.month}
         AND ${ACTUAL_VERSION_PREDICATE}
         AND ${actualEntity}
     `),
@@ -325,6 +347,171 @@ async function runKpiMetricSnapshot(request: KpiReportRequest) {
   };
 }
 
+const GREEN_BREAKDOWNS = [
+  { id: "ms", label: "MS", actualGroups: ["XC", "PS", "VM"], forecastPages: ["MS VIEW"] },
+  { id: "mm", label: "MM", actualGroups: ["BD", "GS", "SO"], forecastPages: ["NE-MM"] },
+  { id: "sds", label: "SDS", actualGroups: ["SDS"], forecastPages: ["SDS VIEW"] },
+  {
+    id: "ms_external",
+    label: "MS-External",
+    actualGroups: ["MOBILITY SOLUTIONS EXTERNAL"],
+    forecastPages: ["SX VIEW"],
+  },
+  {
+    id: "integrated_service",
+    label: "Integrated Service",
+    actualGroups: ["INTEGRATED SERVICE", "INTEGRATED SERVICES"],
+    forecastPages: ["INTEGRATED SERVICE", "INTEGRATED SERVICES"],
+  },
+] as const;
+
+async function runGreenBreakdowns(request: KpiReportRequest) {
+  const actualEntity = actualEntityPredicate(request.entity);
+  const forecastEntity = forecastEntityPredicate(request.entity);
+  const scenario = forecastScenarioPredicate(request.forecastScenario);
+  const actualGroup = sql`
+    CASE
+      WHEN upper(trim(coalesce(project_gb, ''))) IN ('XC', 'PS', 'VM') THEN 'ms'
+      WHEN upper(trim(coalesce(project_gb, ''))) IN ('BD', 'GS', 'SO') THEN 'mm'
+      WHEN upper(trim(coalesce(project_gb, ''))) = 'SDS' THEN 'sds'
+      WHEN upper(trim(coalesce(project_gb, ''))) = 'MOBILITY SOLUTIONS EXTERNAL' THEN 'ms_external'
+      WHEN upper(trim(coalesce(project_gb, ''))) IN ('INTEGRATED SERVICE', 'INTEGRATED SERVICES') THEN 'integrated_service'
+    END
+  `;
+  const forecastGroup = sql`
+    CASE
+      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) = 'MS VIEW' THEN 'ms'
+      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) = 'NE-MM' THEN 'mm'
+      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) = 'SDS VIEW' THEN 'sds'
+      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) = 'SX VIEW' THEN 'ms_external'
+      WHEN upper(regexp_replace(trim(coalesce(page, '')), '\\s+', ' ', 'g')) IN ('INTEGRATED SERVICE', 'INTEGRATED SERVICES') THEN 'integrated_service'
+    END
+  `;
+  const [actualResult, forecastResult] = await Promise.all([
+    db.execute(sql`
+      SELECT
+        ${actualGroup} AS group_key,
+        SUM(amount_usd) FILTER (
+          WHERE cost_category = 'Revenue'
+            AND lower(trim(coalesce(sub_cost_category, ''))) <> 'revenue hardware'
+            AND lower(trim(coalesce(cost_category_class, ''))) <> 'revenue hardware'
+        ) / 1000000.0 AS revenue_value,
+        COUNT(*) FILTER (WHERE cost_category = 'Revenue' AND amount_usd IS NOT NULL) AS revenue_rows,
+        SUM(billed_capacity) FILTER (
+          WHERE cost_category = 'Billing Utilization' AND lower(trim(coalesce(resource_type, ''))) = 'internal'
+        ) / NULLIF(SUM(allocated_capacity) FILTER (
+          WHERE cost_category = 'Billing Utilization' AND lower(trim(coalesce(resource_type, ''))) = 'internal'
+        ), 0) AS internal_value,
+        COUNT(*) FILTER (
+          WHERE cost_category = 'Billing Utilization'
+            AND lower(trim(coalesce(resource_type, ''))) = 'internal'
+            AND allocated_capacity IS NOT NULL
+        ) AS internal_rows,
+        SUM(billed_capacity) FILTER (
+          WHERE cost_category = 'Billing Utilization' AND lower(trim(coalesce(resource_type, ''))) = 'external'
+        ) / NULLIF(SUM(allocated_capacity) FILTER (
+          WHERE cost_category = 'Billing Utilization' AND lower(trim(coalesce(resource_type, ''))) = 'external'
+        ), 0) AS external_value,
+        COUNT(*) FILTER (
+          WHERE cost_category = 'Billing Utilization'
+            AND lower(trim(coalesce(resource_type, ''))) = 'external'
+            AND allocated_capacity IS NOT NULL
+        ) AS external_rows,
+        SUM(capacity) FILTER (
+          WHERE cost_category = 'GB Wise END Capacity'
+            AND month = ${request.month}
+            AND upper(trim(coalesce(sector, ''))) <> 'INDIRECT'
+        ) AS capacity_value,
+        COUNT(*) FILTER (
+          WHERE cost_category = 'GB Wise END Capacity'
+            AND month = ${request.month}
+            AND upper(trim(coalesce(sector, ''))) <> 'INDIRECT'
+            AND capacity IS NOT NULL
+        ) AS capacity_rows
+      FROM cube_fact_data
+      WHERE cube_id = ${request.cubeId}
+        AND year = ${request.year}
+        AND month BETWEEN 1 AND ${request.month}
+        AND ${ACTUAL_VERSION_PREDICATE}
+        AND ${actualEntity}
+        AND ${actualGroup} IS NOT NULL
+      GROUP BY 1
+    `),
+    db.execute(sql`
+      SELECT
+        ${forecastGroup} AS group_key,
+        SUM(${numericText("cost_value")}) FILTER (
+          WHERE lower(trim(coalesce(particulars, ''))) = 'budget (musd)'
+        ) AS revenue_value,
+        COUNT(*) FILTER (
+          WHERE lower(trim(coalesce(particulars, ''))) = 'budget (musd)'
+            AND ${numericText("cost_value")} IS NOT NULL
+        ) AS revenue_rows,
+        AVG(${numericText("value_percent")}) FILTER (
+          WHERE lower(trim(coalesce(particulars, ''))) = 'internal utilization (%)'
+        ) AS internal_value,
+        COUNT(*) FILTER (
+          WHERE lower(trim(coalesce(particulars, ''))) = 'internal utilization (%)'
+            AND ${numericText("value_percent")} IS NOT NULL
+        ) AS internal_rows,
+        AVG(${numericText("value_percent")}) FILTER (
+          WHERE lower(trim(coalesce(particulars, ''))) = 'outsourcing utilization (%)'
+        ) AS external_value,
+        COUNT(*) FILTER (
+          WHERE lower(trim(coalesce(particulars, ''))) = 'outsourcing utilization (%)'
+            AND ${numericText("value_percent")} IS NOT NULL
+        ) AS external_rows,
+        SUM(${numericText("cost_value")}) FILTER (
+          WHERE lower(trim(coalesce(particulars, ''))) IN ('offshore capacity', 'outsourcing capacity', 'onsite capacity')
+            AND lower(trim(coalesce(sub_category, ''))) = 'end'
+        ) AS capacity_value,
+        COUNT(*) FILTER (
+          WHERE lower(trim(coalesce(particulars, ''))) IN ('offshore capacity', 'outsourcing capacity', 'onsite capacity')
+            AND lower(trim(coalesce(sub_category, ''))) = 'end'
+            AND ${numericText("cost_value")} IS NOT NULL
+        ) AS capacity_rows
+      FROM cube_plan_data
+      WHERE cube_id = ${request.cubeId}
+        AND year = ${request.year}
+        AND month = ${request.month}
+        AND ${scenario}
+        AND ${forecastEntity}
+        AND ${forecastGroup} IS NOT NULL
+      GROUP BY 1
+    `),
+  ]);
+  const actual = new Map(rowsOf(actualResult).map((row: BreakdownRow) => [row.group_key, row]));
+  const forecast = new Map(rowsOf(forecastResult).map((row: BreakdownRow) => [row.group_key, row]));
+  return GREEN_BREAKDOWNS.map((definition) => {
+    const actualRow = actual.get(definition.id);
+    const forecastRow = forecast.get(definition.id);
+    return {
+      id: definition.id,
+      label: definition.label,
+      metrics: KPI_METRICS.map((metric) => {
+        const field = metric.id === "revenue" ? "revenue"
+          : metric.id === "internal_utilization" ? "internal"
+            : metric.id === "external_utilization" ? "external" : "capacity";
+        const actualRows = numeric(actualRow?.[`${field}_rows` as keyof BreakdownRow] as any) ?? 0;
+        const forecastRows = numeric(forecastRow?.[`${field}_rows` as keyof BreakdownRow] as any) ?? 0;
+        const actualValue = valueOrNull(numeric(actualRow?.[`${field}_value` as keyof BreakdownRow] as any), actualRows);
+        const forecastValue = valueOrNull(numeric(forecastRow?.[`${field}_value` as keyof BreakdownRow] as any), forecastRows);
+        return { id: metric.id, ...greenValue({
+          ...metric,
+          actual: actualValue,
+          forecast: forecastValue,
+          variance: actualValue !== null && forecastValue !== null ? actualValue - forecastValue : null,
+          variancePercent: actualValue !== null && forecastValue !== null && forecastValue !== 0
+            ? (actualValue - forecastValue) / forecastValue : null,
+          actualSourceRows: actualRows,
+          forecastSourceRows: forecastRows,
+          remarks: [],
+        }) };
+      }),
+    };
+  });
+}
+
 const BUSINESS_METRICS_SCOPES = [
   { id: "global", label: "World Wide (Global)", code: "WW", entity: "World Wide" },
   { id: "india", label: "India (BGSW)", code: "IN", entity: "BGSW" },
@@ -334,6 +521,21 @@ const BUSINESS_METRICS_SCOPES = [
 
 type BusinessMetricsScope = (typeof BUSINESS_METRICS_SCOPES)[number];
 type KpiSnapshot = Awaited<ReturnType<typeof runKpiMetricSnapshot>>;
+
+function previousMonth(year: number, month: number) {
+  return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+}
+
+function greenValue(metric: KpiSnapshot["metrics"][number] | undefined) {
+  return {
+    actual: metric?.actual ?? null,
+    forecast: metric?.forecast ?? null,
+    variance: metric?.variance ?? null,
+    variancePercent: metric?.variancePercent ?? null,
+    actualSourceRows: metric?.actualSourceRows ?? 0,
+    forecastSourceRows: metric?.forecastSourceRows ?? 0,
+  };
+}
 
 function displayKpiValue(value: number, unit: (typeof KPI_METRICS)[number]["unit"]): string {
   if (unit === "percent") return `${(value * 100).toFixed(1)}%`;
@@ -413,10 +615,26 @@ export async function runKpiReport(request: KpiReportRequest) {
         : await runKpiMetricSnapshot({ ...request, entity: scope.entity }),
     })),
   );
+  const scopeBreakdowns = await Promise.all(
+    BUSINESS_METRICS_SCOPES.map(async (scope) => ({
+      scope,
+      breakdowns: await runGreenBreakdowns({ ...request, entity: scope.entity }),
+    })),
+  );
   const warnings = Array.from(new Set([
     ...selectedSnapshot.warnings,
     ...scopeSnapshots.flatMap(({ snapshot }) => snapshot.warnings),
   ]));
+  const priorMonth = previousMonth(request.year, request.month);
+  const historicalSnapshots = await Promise.all(
+    BUSINESS_METRICS_SCOPES.map(async (scope) => {
+      const [priorYear, previousYtd] = await Promise.all([
+        runKpiMetricSnapshot({ ...request, year: request.year - 1, entity: scope.entity }),
+        runKpiMetricSnapshot({ ...request, ...priorMonth, entity: scope.entity }),
+      ]);
+      return { scope, priorYear, previousYtd };
+    }),
+  );
   const periodLabel = new Date(Date.UTC(request.year, request.month - 1, 1)).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
@@ -441,6 +659,47 @@ export async function runKpiReport(request: KpiReportRequest) {
       status: "in_scope" as const,
       metrics: snapshot.metrics,
     })),
+    greenScope: {
+      version: "green-v1" as const,
+      period: { year: request.year, month: request.month },
+      entities: scopeSnapshots.map(({ scope, snapshot }) => {
+        const historical = historicalSnapshots.find((item) => item.scope.id === scope.id);
+        const breakdowns = scopeBreakdowns.find((item) => item.scope.id === scope.id)?.breakdowns ?? [];
+        const metric = (source: KpiSnapshot, id: KpiMetricId) =>
+          source.metrics.find((item) => item.id === id);
+        const currentMetric = (id: KpiMetricId) => metric(snapshot, id);
+        const priorYearMetric = (id: KpiMetricId) =>
+          historical ? metric(historical.priorYear, id) : undefined;
+        const previousYtdMetric = (id: KpiMetricId) =>
+          historical ? metric(historical.previousYtd, id) : undefined;
+        return {
+          id: scope.id,
+          code: scope.code,
+          label: scope.label,
+          entity: scope.entity,
+          sections: KPI_METRICS.map((definition) => ({
+            id: definition.id,
+            title: definition.id === "capacity"
+              ? "Capacity (Internal + External)"
+              : definition.label,
+            unit: definition.unit,
+            total: greenValue(currentMetric(definition.id)),
+            breakdowns: breakdowns.map((breakdown) => ({
+              id: breakdown.id,
+              label: breakdown.label,
+              value: breakdown.metrics.find((item) => item.id === definition.id)
+                ?? greenValue(undefined),
+            })),
+            comparisons: definition.id.includes("utilization")
+              ? {
+                  priorYearYtd: greenValue(priorYearMetric(definition.id)),
+                  previousMonthYtd: greenValue(previousYtdMetric(definition.id)),
+                }
+              : undefined,
+          })),
+        };
+      }),
+    },
     narrative: buildBusinessMetricsNarrative(scopeSnapshots, phaseTwoPeriod),
   };
 }

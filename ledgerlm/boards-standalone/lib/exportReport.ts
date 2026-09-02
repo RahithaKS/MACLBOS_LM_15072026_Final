@@ -1324,6 +1324,119 @@ function addEntityPnlSlide(
 }
 
 /**
+ * Four-slide green-scope KPI output. It is deliberately double-guarded by the
+ * versioned API payload and the uploaded four-entity template signature so an
+ * older KPI board cannot silently change export format.
+ */
+function addFourEntityKpiSlides(
+  pptx: InstanceType<typeof import("pptxgenjs").default>,
+  board: Board,
+  report: Report,
+): boolean {
+  if (board.templateId !== "kpi-metrics") return false;
+  const snapshot = report.result.kpiReport;
+  if (!snapshot) return false;
+  const green = snapshot?.greenScope;
+  const templateText = `${board.templateAnatomy?.sourceFile ?? ""}\n${board.reportTemplate ?? ""}`.toLowerCase();
+  const recognizedTemplate =
+    /four[-_\s]?entity|kpi_business_metrics_four_entity/.test(templateText) ||
+    (templateText.includes("{{ww_") && templateText.includes("{{mx_"));
+  if (green?.version !== "green-v1" || green.entities.length !== 4 || !recognizedTemplate) return false;
+  const governedSnapshot = snapshot;
+
+  pptx.defineLayout({ name: "KPI_GREEN_FOUR_ENTITY", width: 13.333, height: 9.2 });
+  pptx.layout = "KPI_GREEN_FOUR_ENTITY";
+  const colors: Record<string, string> = {
+    WW: "006578",
+    IN: "D8729C",
+    VN: "D9192B",
+    MX: "59A587",
+  };
+  const format = (value: number | null, unit: string) => {
+    if (value === null) return "—";
+    if (unit === "percent") return `${(value * 100).toFixed(1)}%`;
+    if (unit === "mUSD") return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} mUSD`;
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} HC`;
+  };
+
+  green.entities.forEach((entity) => {
+    const slide = pptx.addSlide();
+    slide.background = { color: "FFFFFF" };
+    const accent = colors[entity.code] ?? "A83678";
+    const add = (text: string, options: Record<string, unknown>) =>
+      slide.addText(text, {
+        fontFace: "Arial", color: "303030", margin: 0, fit: "shrink", valign: "top", ...options,
+      });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0, y: 0, w: 13.333, h: 0.14,
+      fill: { color: accent }, line: { color: accent, transparency: 100 },
+    });
+    add(`Business Metrics ${governedSnapshot.periodLabel}`, {
+      x: 2.1, y: 0.35, w: 9.1, h: 0.45, fontSize: 25, bold: true,
+      italic: true, color: "A83678", align: "center",
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0.48, y: 1.05, w: 1.0, h: 0.5,
+      fill: { color: accent }, line: { color: accent, transparency: 100 },
+    });
+    add(entity.code, {
+      x: 0.48, y: 1.18, w: 1.0, h: 0.18, fontSize: 9, bold: true, color: "FFFFFF", align: "center",
+    });
+    add(`Decision / info to GLs — ${entity.label}`, {
+      x: 1.68, y: 1.10, w: 8.4, h: 0.28, fontSize: 14, bold: true, color: "8C2465",
+    });
+    add(`${entity.entity} · ${governedSnapshot.forecastScenario}`, {
+      x: 1.68, y: 1.40, w: 8.4, h: 0.2, fontSize: 8, color: "626262",
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0.36, y: 1.82, w: 12.62, h: 5.65,
+      fill: { color: "D9D9D9" }, line: { color: "777777", pt: 0.65 },
+    });
+
+    let y = 2.15;
+    entity.sections.forEach((section) => {
+      slide.addShape(pptx.ShapeType.rect, {
+        x: 0.55, y: y - 0.03, w: 0.08, h: 1.03,
+        fill: { color: "009B76" }, line: { color: "009B76", transparency: 100 },
+      });
+      add(`${section.title}:`, {
+        x: 0.76, y, w: 4.0, h: 0.2, fontSize: 10.5, bold: true, color: "007F62",
+      });
+      add(
+        `Actual ${format(section.total.actual, section.unit)}   •   Forecast ${format(section.total.forecast, section.unit)}   •   Variance ${format(section.total.variance, section.unit)}`,
+        { x: 0.98, y: y + 0.29, w: 11.2, h: 0.24, fontSize: 9.2, bold: true, color: "174F42" },
+      );
+      const detail = section.breakdowns
+        .filter((item) => item.value.actual !== null || item.value.forecast !== null)
+        .map((item) => `${item.label}: A ${format(item.value.actual, section.unit)} / F ${format(item.value.forecast, section.unit)}`)
+        .join("   •   ");
+      if (detail) {
+        add(detail, {
+          x: 0.98, y: y + 0.54, w: 11.2, h: 0.2, fontSize: 7.2, color: "315F55",
+        });
+      }
+      if (section.comparisons) {
+        add(
+          `Prior-year YTD actual ${format(section.comparisons.priorYearYtd.actual, section.unit)}   •   Previous-month YTD actual ${format(section.comparisons.previousMonthYtd.actual, section.unit)}`,
+          { x: 0.98, y: y + 0.79, w: 11.2, h: 0.18, fontSize: 6.8, color: "315F55" },
+        );
+      }
+      y += 1.18;
+    });
+    add(`Actuals: ${governedSnapshot.actualSourceLabel}  •  Forecast: ${governedSnapshot.forecastSourceLabel}`, {
+      x: 0.48, y: 7.72, w: 12.2, h: 0.2, fontSize: 7.2, color: "626262",
+    });
+    add(`Warnings: ${governedSnapshot.warnings.join(" • ") || "No governed data-quality warnings."}`, {
+      x: 0.48, y: 8.02, w: 12.2, h: 0.36, fontSize: 6.4, italic: true, color: "626262",
+    });
+    add("Green governed scope only · EBIT, Capex, attrition and red commentary excluded", {
+      x: 0.48, y: 8.62, w: 12.2, h: 0.2, fontSize: 7, bold: true, color: "007F62",
+    });
+  });
+  return true;
+}
+
+/**
  * Direct Business Metrics output for KPI boards. An imported PPTX stores only
  * text-region anatomy, not its decorative panel shapes; rendering this fixed
  * layout prevents the values from collapsing into a thin strip at the top.
@@ -1970,6 +2083,10 @@ export async function exportReportPpt(board: Board, report: Report) {
   // table structure. It must not fall through to the generic template mapper,
   // which collapses its year-end / forecast / variance columns.
   if (addEntityPnlSlide(pptx, board, report)) {
+    await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
+    return;
+  }
+  if (addFourEntityKpiSlides(pptx, board, report)) {
     await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
     return;
   }
