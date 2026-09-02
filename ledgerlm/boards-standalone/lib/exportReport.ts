@@ -1,5 +1,3 @@
-"use client";
-
 import { tidyProse } from "@/lib/prose";
 import {
   buildGovernedSectionNarrative,
@@ -30,6 +28,11 @@ function fileStamp(board: Board, report: Report) {
   return `${board.name.replace(/[^\w\- ]+/g, "")} — ${new Date(report.createdAt)
     .toLocaleString([], { dateStyle: "short", timeStyle: "short" })
     .replace(/[/:]/g, "-")}`;
+}
+
+export interface ExportDateLabels {
+  full: string;
+  medium: string;
 }
 
 /** Align a ChartSpec's series onto a shared x-label axis. */
@@ -1526,8 +1529,7 @@ function entityTemplateValues(
 async function writeFourEntityKpiTemplate(
   board: Board,
   report: Report,
-  fileName: string,
-) {
+): Promise<Blob | null> {
   const snapshot = report.result.kpiReport;
   const green = snapshot?.greenScope;
   if (
@@ -1538,7 +1540,7 @@ async function writeFourEntityKpiTemplate(
     !recognizedFourEntityTemplate(board) ||
     !board.templatePptx?.base64
   ) {
-    return false;
+    return null;
   }
 
   const JSZip = (await import("jszip")).default;
@@ -1548,7 +1550,7 @@ async function writeFourEntityKpiTemplate(
   const slideNames = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
     .sort((a, b) => Number(a.match(/\d+/)![0]) - Number(b.match(/\d+/)![0]));
-  if (slideNames.length < 4) return false;
+  if (slideNames.length < 4) return null;
 
   for (const [index, entity] of green.entities.entries()) {
     const slideName = slideNames[index];
@@ -1563,15 +1565,7 @@ async function writeFourEntityKpiTemplate(
     type: "blob",
     mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   });
-  const url = URL.createObjectURL(output);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  return true;
+  return output;
 }
 
 /**
@@ -1583,6 +1577,7 @@ function addKpiMetricsSlide(
   pptx: InstanceType<typeof import("pptxgenjs").default>,
   board: Board,
   report: Report,
+  dateLabels?: ExportDateLabels,
 ): boolean {
   if (board.templateId !== "kpi-metrics") return false;
   const snapshot = report.result.kpiReport ?? null;
@@ -1694,7 +1689,7 @@ function addKpiMetricsSlide(
   add(`Warnings / data-quality notes: ${snapshot?.warnings?.join("  •  ") || "No data-quality warnings returned by the governed KPI service."}`, {
     x: 0.48, y: governanceY + 0.58, w: 12.28, h: 0.28, fontSize: 5.9, italic: true, color: C.muted,
   });
-  add(`Report generated ${new Date(report.createdAt).toLocaleString()} · LedgerLM KPI Metrics Board`, {
+  add(`Report generated ${dateLabels?.full ?? new Date(report.createdAt).toLocaleString()} · LedgerLM KPI Metrics Board`, {
     x: 0.48, y: 8.43, w: 12.28, h: 0.12, fontSize: 5.6, color: C.muted,
   });
   [[C.navy, 0, 5], [C.red, 5, 2.4], [C.teal, 7.4, 2.6], [C.orange, 10, 3.333]]
@@ -2172,29 +2167,19 @@ function addTemplateDrivenSlides(
  * written into each chart part before the file is handed over. The labels are
  * already broken into two short lines, so they fit upright.
  */
-async function writePptxFile(
+async function buildPptxFile(
   pptx: InstanceType<typeof import("pptxgenjs").default>,
-  fileName: string,
-): Promise<void> {
+): Promise<Blob> {
   const JSZip = (await import("jszip")).default;
   const blob = (await pptx.write({ outputType: "blob" })) as Blob;
-  const zip = await JSZip.loadAsync(blob);
+  // JSZip accepts Blob in browsers but not in Node. ArrayBuffer works in both,
+  // allowing the same renderer to run behind the background export endpoint.
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer());
   const charts = Object.keys(zip.files).filter((n) => /^ppt\/charts\/chart\d+\.xml$/.test(n));
-  const download = (file: Blob) => {
-    const url = URL.createObjectURL(file);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  };
   // Entity P&L slides have no charts. Preserve the document produced by
   // PptxGenJS byte-for-byte rather than unnecessarily repackaging it.
   if (!charts.length) {
-    download(blob);
-    return;
+    return blob;
   }
   for (const name of charts) {
     const xml = await zip.file(name)!.async("string");
@@ -2208,12 +2193,31 @@ async function writePptxFile(
     type: "blob",
     mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   });
-  download(out);
+  return out;
 }
 
-export async function exportReportPpt(board: Board, report: Report) {
-  const fileName = `${fileStamp(board, report)}.pptx`;
-  if (await writeFourEntityKpiTemplate(board, report, fileName)) return;
+export function reportFileName(board: Board, report: Report, extension: "pptx" | "pdf") {
+  return `${fileStamp(board, report)}.${extension}`;
+}
+
+export function downloadExportFile(file: Blob, fileName: string) {
+  const url = URL.createObjectURL(file);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+export async function generateReportPpt(
+  board: Board,
+  report: Report,
+  dateLabels?: ExportDateLabels,
+): Promise<Blob> {
+  const templateOutput = await writeFourEntityKpiTemplate(board, report);
+  if (templateOutput) return templateOutput;
   const PptxGenJS = (await import("pptxgenjs")).default;
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE"; // 13.33 x 7.5 in
@@ -2223,30 +2227,25 @@ export async function exportReportPpt(board: Board, report: Report) {
   // table structure. It must not fall through to the generic template mapper,
   // which collapses its year-end / forecast / variance columns.
   if (addEntityPnlSlide(pptx, board, report)) {
-    await writePptxFile(pptx, fileName);
-    return;
+    return buildPptxFile(pptx);
   }
   if (addFourEntityKpiSlides(pptx, board, report)) {
-    await writePptxFile(pptx, fileName);
-    return;
+    return buildPptxFile(pptx);
   }
   // KPI Metrics uses its own governed Business Metrics layout. The imported
   // file is an editable reference template, while this renderer retains the
   // graphic panel and section layout in the downloaded report.
-  if (addKpiMetricsSlide(pptx, board, report)) {
-    await writePptxFile(pptx, fileName);
-    return;
+  if (addKpiMetricsSlide(pptx, board, report, dateLabels)) {
+    return buildPptxFile(pptx);
   }
   // A board with an uploaded report format gets exactly that format. Without
   // one, balance sheet boards use the house layout and everything else the
   // generic deck.
   if (addTemplateDrivenSlides(pptx, board, report)) {
-    await writePptxFile(pptx, fileName);
-    return;
+    return buildPptxFile(pptx);
   }
   if (addBalanceSheetSlides(pptx, board, report)) {
-    await writePptxFile(pptx, fileName);
-    return;
+    return buildPptxFile(pptx);
   }
   const result = report.result;
   const style = exportStyle(board);
@@ -2267,7 +2266,7 @@ export async function exportReportPpt(board: Board, report: Report) {
       ...(style.fontHead ? { fontFace: style.fontHead } : {}),
     });
     slide.addText(
-      `${report.trigger === "scheduled" ? "Scheduled" : "Ad-hoc"} analysis · ${new Date(report.createdAt).toLocaleString()}\nGenerated by LedgerLM${board.templateTheme ? ` · theme: ${board.templateTheme.sourceFile}` : ""}`,
+      `${report.trigger === "scheduled" ? "Scheduled" : "Ad-hoc"} analysis · ${dateLabels?.full ?? new Date(report.createdAt).toLocaleString()}\nGenerated by LedgerLM${board.templateTheme ? ` · theme: ${board.templateTheme.sourceFile}` : ""}`,
       {
         x: 0.8, y: 3.5, w: W - 1.6, h: 0.9, fontSize: 16, color: style.muted,
         ...(style.fontBody ? { fontFace: style.fontBody } : {}),
@@ -2483,7 +2482,12 @@ export async function exportReportPpt(board: Board, report: Report) {
     }
   }
 
-  await writePptxFile(pptx, `${fileStamp(board, report)}.pptx`);
+  return buildPptxFile(pptx);
+}
+
+export async function exportReportPpt(board: Board, report: Report) {
+  const output = await generateReportPpt(board, report);
+  downloadExportFile(output, reportFileName(board, report, "pptx"));
 }
 
 /** Snapshot a rendered SVG chart to a PNG data URL, optionally remapping series colors. */
@@ -2520,6 +2524,40 @@ async function svgToPng(
   ctx.scale(scale, scale);
   ctx.drawImage(img, 0, 0);
   return { dataUrl: canvas.toDataURL("image/png"), w: rect.width, h: rect.height };
+}
+
+export interface PdfChartSnapshot {
+  dataUrl: string;
+  w: number;
+  h: number;
+}
+
+function pdfChartColorMap() {
+  const palette = SERIES_PALETTE.map(rgbOf);
+  return new Map(
+    SERIES_COLORS.map((c, i) => {
+      const [r, g, b] = palette[i % palette.length];
+      return [`#${c}`, `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`];
+    }),
+  );
+}
+
+/**
+ * Chart SVGs require the live document for layout and rasterisation. Capture
+ * those small inputs on the page, then let the export worker build the PDF.
+ */
+export async function capturePdfCharts(chartsRoot: HTMLElement | null): Promise<PdfChartSnapshot[]> {
+  const svgs = chartsRoot
+    ? [...chartsRoot.querySelectorAll<SVGSVGElement>("svg.recharts-surface")].filter(
+        (svg) => !svg.closest(".recharts-legend-wrapper") && svg.getBoundingClientRect().width > 80,
+      )
+    : [];
+  const colorMap = pdfChartColorMap();
+  const snapshots: PdfChartSnapshot[] = [];
+  for (const svg of svgs) {
+    snapshots.push(await svgToPng(svg, colorMap));
+  }
+  return snapshots;
 }
 
 // ---------------------------------------------------------------------------
@@ -2606,7 +2644,12 @@ const PDF_ORDER: SectionKind[] = [
   "actions",
 ];
 
-export async function exportReportPdf(board: Board, report: Report, chartsRoot: HTMLElement | null) {
+export async function generateReportPdf(
+  board: Board,
+  report: Report,
+  chartSnapshots: PdfChartSnapshot[] = [],
+  dateLabels?: ExportDateLabels,
+): Promise<Blob> {
   const { jsPDF } = await import("jspdf");
   const autoTable = (await import("jspdf-autotable")).default;
   const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -2634,20 +2677,14 @@ export async function exportReportPdf(board: Board, report: Report, chartsRoot: 
     white: [255, 255, 255] as Rgb,
   };
   const palette = SERIES_PALETTE.map(rgbOf);
-  // On-screen chart colours are remapped to the report palette in the snapshot.
-  const chartColorMap = new Map(
-    SERIES_COLORS.map((c, i) => {
-      const [r, g, b] = palette[i % palette.length];
-      return [`#${c}`, `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`];
-    }),
-  );
-
   const asOf = bs?.periods[bs.periods.length - 1] ?? null;
   const units = bs?.units ?? "";
-  const generated = new Date(report.createdAt).toLocaleString([], {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  const generated =
+    dateLabels?.medium ??
+    new Date(report.createdAt).toLocaleString([], {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
 
   let y = M;
   const bottom = () => pageH - FOOT - 8;
@@ -2792,15 +2829,6 @@ export async function exportReportPdf(board: Board, report: Report, chartsRoot: 
     doc.text(label, M + 9, y + 1);
     y += 22;
   }
-
-  // Only the chart surfaces themselves. Recharts also emits a 10x10
-  // "recharts-surface" SVG for every legend swatch; picking those up by index
-  // put a legend dot in the report, stretched to page width as a solid block.
-  const svgs = chartsRoot
-    ? [...chartsRoot.querySelectorAll<SVGSVGElement>("svg.recharts-surface")].filter(
-        (svg) => !svg.closest(".recharts-legend-wrapper") && svg.getBoundingClientRect().width > 80,
-      )
-    : [];
 
   // Section order: the board's template when it has one, else the executive order.
   let sections = planReportSections(board, result);
@@ -2951,13 +2979,13 @@ export async function exportReportPdf(board: Board, report: Report, chartsRoot: 
     // ---- Charts: full width, two to a page ---------------------------------
     if (section.kind === "charts") {
       const idxs = section.items ?? result.charts.map((_, n) => n);
-      const available = idxs.filter((i) => result.charts[i] && svgs[i]);
+      const available = idxs.filter((i) => result.charts[i] && chartSnapshots[i]);
       if (available.length) {
         sectionHeading(section.title, 200);
         for (const i of available) {
           const spec = result.charts[i];
           try {
-            const png = await svgToPng(svgs[i], chartColorMap);
+            const png = chartSnapshots[i]!;
             const w = contentW;
             const h = Math.min((png.h / png.w) * w, 215);
             ensure(h + 44);
@@ -3088,5 +3116,11 @@ export async function exportReportPdf(board: Board, report: Report, chartsRoot: 
     doc.text(`Page ${p} of ${pages}`, pageW - M, pageH - FOOT + 17, { align: "right" });
   }
 
-  doc.save(`${fileStamp(board, report)}.pdf`);
+  return doc.output("blob") as Blob;
+}
+
+export async function exportReportPdf(board: Board, report: Report, chartsRoot: HTMLElement | null) {
+  const chartSnapshots = await capturePdfCharts(chartsRoot);
+  const output = await generateReportPdf(board, report, chartSnapshots);
+  downloadExportFile(output, reportFileName(board, report, "pdf"));
 }

@@ -13,7 +13,7 @@ import {
   type AnalysisProgress as Progress,
 } from "@/lib/runAnalysis";
 import AnalysisProgress from "@/components/board/AnalysisProgress";
-import { exportReportPpt, exportReportPdf } from "@/lib/exportReport";
+import { exportReportInBackground } from "@/lib/exportClient";
 import { projectRecordsForScope } from "@/lib/promptData";
 import { standaloneApiPath, standaloneRequestHeaders } from "@/lib/apiPath";
 import type { AnalysisThread, Board, BoardDataSources, Report, RunTrigger } from "@/lib/types";
@@ -193,8 +193,7 @@ export default function BoardDetailPage() {
     setExporting({ kind, reportId: report.id });
     setError(null);
     try {
-      if (kind === "ppt") await exportReportPpt(board, report);
-      else await exportReportPdf(board, report, reportRoot.current);
+      await exportReportInBackground(kind, board, report, reportRoot.current);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export failed unexpectedly.");
     } finally {
