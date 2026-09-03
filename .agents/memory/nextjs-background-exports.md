@@ -20,3 +20,9 @@ Starting an async export without awaiting it is not background execution when it
 **Why:** A real template export stayed at its initial percentage while the Next server used 100% CPU. The job existed, but no status request could be served until the same process finished its ZIP work.
 
 **How to apply:** Run exact-template package work in a child process, report progress over IPC, and use a module-relative JavaScript worker URL so Turbopack emits an executable server asset. Inspect that emitted asset after production builds.
+
+Throttle ZIP progress before sending it over child-process IPC. Compression hooks may fire far more often than the UI can display; forwarding every callback can make the progress channel compete with completion.
+
+**Why:** A real retained-template job remained alive and pollable but did not deliver completion before its safety timeout, while bounded progress updates completed the same worker path in milliseconds.
+
+**How to apply:** Send progress only when the visible percentage changes or a short interval passes. Keep a generous outer timeout, log milestone timings, and include the last worker stage in timeout errors.

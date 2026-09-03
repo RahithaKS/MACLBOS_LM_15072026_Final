@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { ExportProgress, FourEntityKpiTemplatePayload } from "@/lib/exportReport";
 
 const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const WORKER_TIMEOUT_MS = 15 * 60 * 1000;
 
 export async function generateFourEntityTemplateInWorker(
   payload: FourEntityKpiTemplatePayload,
@@ -30,10 +31,16 @@ export async function generateFourEntityTemplateInWorker(
       });
       let completed = false;
       let stderr = "";
+      let lastStage = "starting the worker";
+      const startedAt = Date.now();
       const timeout = setTimeout(() => {
         child.kill("SIGKILL");
-        reject(new Error("PowerPoint template processing timed out."));
-      }, 5 * 60 * 1000);
+        reject(
+          new Error(
+            `PowerPoint template processing timed out after 15 minutes during ${lastStage}.`,
+          ),
+        );
+      }, WORKER_TIMEOUT_MS);
 
       child.stderr?.on("data", (chunk) => {
         stderr += String(chunk);
@@ -41,10 +48,17 @@ export async function generateFourEntityTemplateInWorker(
       child.on("message", (message: unknown) => {
         const update = message as { type?: string; percent?: number; stage?: string; error?: string };
         if (update.type === "progress" && typeof update.percent === "number" && update.stage) {
+          lastStage = update.stage;
           onProgress(update.percent, update.stage);
+          if (update.percent === 12 || update.percent === 28 || update.percent === 48 || update.percent >= 96) {
+            console.info(
+              `[export] PPT worker ${update.percent}% ${update.stage} (${Date.now() - startedAt}ms)`,
+            );
+          }
         } else if (update.type === "completed") {
           completed = true;
           clearTimeout(timeout);
+          console.info(`[export] PPT worker completed in ${Date.now() - startedAt}ms`);
           resolve();
         } else if (update.type === "error") {
           clearTimeout(timeout);

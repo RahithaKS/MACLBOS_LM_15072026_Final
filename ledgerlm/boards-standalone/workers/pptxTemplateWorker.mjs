@@ -7,6 +7,27 @@ function send(message) {
   if (process.send) process.send(message);
 }
 
+let lastProgressPercent = -1;
+let lastProgressAt = 0;
+
+function sendProgress(percent, stage, force = false) {
+  const roundedPercent = Math.max(0, Math.min(99, Math.round(percent)));
+  const now = Date.now();
+  // JSZip can call its update hook many times per second for a large
+  // presentation. Throttling IPC prevents the child-process channel from
+  // becoming the bottleneck while keeping the UI's percentage meaningful.
+  if (
+    !force &&
+    roundedPercent === lastProgressPercent &&
+    now - lastProgressAt < 250
+  ) {
+    return;
+  }
+  lastProgressPercent = roundedPercent;
+  lastProgressAt = now;
+  send({ type: "progress", percent: roundedPercent, stage });
+}
+
 function xmlEscape(value) {
   return value
     .replace(/&/g, "&amp;")
@@ -37,7 +58,7 @@ function replacePptxPlaceholder(xml, key, value) {
 }
 
 async function run() {
-  send({ type: "progress", percent: 12, stage: "Loading the Bosch PowerPoint template" });
+  sendProgress(12, "Loading the Bosch PowerPoint template", true);
   const [template, entitiesJson] = await Promise.all([
     readFile(inputPath),
     readFile(valuesPath, "utf8"),
@@ -56,11 +77,11 @@ async function run() {
       xml = replacePptxPlaceholder(xml, key, value);
     }
     zip.file(slideName, xml);
-    send({
-      type: "progress",
-      percent: 30 + Math.round(((index + 1) / entities.length) * 15),
-      stage: `Populating ${entity.label}`,
-    });
+    sendProgress(
+      30 + Math.round(((index + 1) / entities.length) * 15),
+      `Populating ${entity.label}`,
+      true,
+    );
   }
 
   const output = await zip.generateAsync(
@@ -70,11 +91,7 @@ async function run() {
       compressionOptions: { level: 1 },
     },
     (metadata) =>
-      send({
-        type: "progress",
-        percent: 48 + Math.round(metadata.percent * 0.47),
-        stage: "Compressing the PowerPoint",
-      }),
+      sendProgress(48 + Math.round(metadata.percent * 0.47), "Compressing the PowerPoint"),
   );
   await writeFile(outputPath, output);
   send({ type: "completed" });

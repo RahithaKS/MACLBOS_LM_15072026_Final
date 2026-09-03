@@ -60,7 +60,7 @@ export async function exportReportInBackground(
   if (!started.jobId) throw new Error("Export did not return a job ID.");
   onProgress?.(started.percent, started.stage);
 
-  const deadline = Date.now() + 5 * 60 * 1000;
+  const deadline = Date.now() + 15 * 60 * 1000;
   let status = started;
   while (status.state !== "completed") {
     if (status.state === "failed") throw new Error(status.error || "Export failed unexpectedly.");
