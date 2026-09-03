@@ -1512,8 +1512,9 @@ function replacePptxPlaceholder(xml: string, key: string, value: string) {
     `<a:r>(${runContent})<a:t>${escapedToken}</a:t>(${runContent})</a:r>`,
     "g",
   );
+  const paragraphContent = `(?:(?!</a:p>)[\\s\\S])*?`;
   const paragraph = new RegExp(
-    `(<a:p\\b[^>]*>)([\\s\\S]*${escapedToken}[\\s\\S]*?)(</a:p>)`,
+    `(<a:p\\b[^>]*>)(${paragraphContent}${escapedToken}${paragraphContent})(</a:p>)`,
     "g",
   );
   let replaced = false;

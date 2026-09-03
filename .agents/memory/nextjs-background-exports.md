@@ -27,8 +27,8 @@ Throttle ZIP progress before sending it over child-process IPC. Compression hook
 
 **How to apply:** Send progress only when the visible percentage changes or a short interval passes. Keep a generous outer timeout, log milestone timings, and include the last worker stage in timeout errors.
 
-PowerPoint placeholder replacement must be bounded to a single DrawingML `<a:r>` run. Never use an unrestricted cross-run match around `<a:t>` tokens.
+PowerPoint placeholder replacement must be bounded to a single DrawingML `<a:r>` run and its containing `<a:p>` paragraph. Never let a matcher used for text or paragraph formatting cross either closing boundary.
 
-**Why:** A cross-run regex copied preceding slide markup once per multiline detail, inflating a small deck to tens of megabytes and leaving PowerPoint with duplicated or partially rendered narrative.
+**Why:** A cross-run regex copied preceding slide markup once per multiline detail, inflating a small deck to tens of megabytes and leaving PowerPoint with duplicated or partially rendered narrative. A later line-spacing change showed that a paragraph matcher also needs its own explicit boundary.
 
-**How to apply:** Use a run-bounded match, then regression-test multiline replacements for one header, one copy of every detail line, zero unresolved tokens, and a bounded output size.
+**How to apply:** Use run- and paragraph-bounded matches, then regression-test multiline replacements for one header, one copy of every detail line, zero unresolved tokens, parseable XML, and a bounded output size.
