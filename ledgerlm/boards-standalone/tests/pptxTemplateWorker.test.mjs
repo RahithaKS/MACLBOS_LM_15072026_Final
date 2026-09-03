@@ -50,7 +50,10 @@ test("multiline placeholders do not duplicate surrounding slide XML", async () =
           `<a:r><a:rPr/><a:t>PRELUDE-${prefix}</a:t></a:r>` +
           `<a:r><a:rPr/><a:t>{{${key}}}</a:t></a:r>` +
           `<a:r><a:rPr/><a:t>TAIL-${prefix}</a:t></a:r>` +
-          `</a:p></p:sld>`,
+          `</a:p>` +
+          `<p:sp><p:txBody><a:p><a:r><a:t>Attrition:</a:t></a:r></a:p>` +
+          `<a:p><a:r><a:t>Red: Phase 2 / out of scope</a:t></a:r></a:p>` +
+          `</p:txBody></p:sp></p:sld>`,
       );
     });
     await writeFile(inputPath, await zip.generateAsync({ type: "nodebuffer" }));
@@ -86,6 +89,9 @@ test("multiline placeholders do not duplicate surrounding slide XML", async () =
           ?.length,
         1,
       );
+      assert.match(xml, /<a:lnSpc><a:spcPct val="112000"\/><\/a:lnSpc>/);
+      assert.match(xml, /<a:spcAft><a:spcPts val="40"\/><\/a:spcAft>/);
+      assert.doesNotMatch(xml, /Attrition:|Phase 2|out of scope/);
       assert.doesNotMatch(xml, /\{\{[^}]+\}\}/);
     }
   } finally {

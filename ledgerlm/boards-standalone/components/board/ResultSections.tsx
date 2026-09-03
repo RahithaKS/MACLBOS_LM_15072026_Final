@@ -126,7 +126,7 @@ function KpiBusinessMetricsPanel({ result }: { result: AnalysisResult }) {
             ))}
           </div>
           <p className="mt-3 text-[11px] text-muted">
-            Missing governed rows are shown as —. EBIT, Capex, attrition and red commentary are intentionally excluded.
+            Missing governed rows are shown as —.
           </p>
         </div>
       </section>
@@ -134,6 +134,9 @@ function KpiBusinessMetricsPanel({ result }: { result: AnalysisResult }) {
   }
 
   if (!sections.length) return null;
+
+  const inScopeSections = sections.filter((section) => section.status === "in_scope");
+  if (!inScopeSections.length) return null;
 
   return (
     <section className="overflow-hidden rounded-xl border border-[#a83678]/30 bg-[#f8f5f7]">
@@ -161,26 +164,14 @@ function KpiBusinessMetricsPanel({ result }: { result: AnalysisResult }) {
         </div>
 
         <div className="mt-4 space-y-3 rounded-lg border border-[#777]/40 bg-[#d9d9d9]/60 p-3.5">
-          {sections.map((section) => {
-            const inScope = section.status === "in_scope";
+          {inScopeSections.map((section) => {
             return (
               <article
                 key={section.id}
-                className={`rounded-md border px-3 py-2.5 ${
-                  inScope
-                    ? "border-emerald-400/70 bg-emerald-50 text-emerald-950"
-                    : "border-red-400/70 bg-red-50 text-red-950"
-                }`}
+                className="rounded-md border border-emerald-400/70 bg-emerald-50 px-3 py-2.5 text-emerald-950"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-bold">{section.title}</h3>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                      inScope ? "bg-emerald-600 text-white" : "bg-red-600 text-white"
-                    }`}
-                  >
-                    {inScope ? "In scope" : "Phase 2"}
-                  </span>
                 </div>
                 <p className="mt-1 text-sm font-semibold leading-relaxed">{section.summary}</p>
                 {section.lines.length > 0 && (
@@ -195,7 +186,7 @@ function KpiBusinessMetricsPanel({ result }: { result: AnalysisResult }) {
           })}
         </div>
         <p className="mt-3 text-[11px] text-muted">
-          Green: currently available in the approved plan-excel and actuals scope. Red: out of scope for Aug-26 / Phase 2.
+          Missing governed rows are shown as —.
         </p>
       </div>
     </section>

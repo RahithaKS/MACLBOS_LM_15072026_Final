@@ -213,7 +213,7 @@ function addSlide(scope, slideNumber) {
     x: 0.48, y: 1.77, w: 5.8, h: 0.20,
     fontSize: 10.5, bold: true, color: C.magenta,
   });
-  addText(slide, "Green: governed scope  •  Red: Phase 2 / out of scope", {
+  addText(slide, "Governed green scope", {
     x: 7.05, y: 1.78, w: 5.42, h: 0.17,
     fontSize: 7.0, bold: true, color: C.muted, align: "right",
   });
@@ -239,17 +239,6 @@ function addSlide(scope, slideNumber) {
     `{{${p}_capacity_summary}}\n{{${p}_capacity_detail}}`,
     4.54, 0.76, true,
   );
-  addSection(
-    slide, scope, "Attrition:",
-    `{{${p}_attrition_summary}}\n{{${p}_attrition_detail_or_phase_2_note}}`,
-    5.30, 0.64, false,
-  );
-  addSection(
-    slide, scope, "EBIT:",
-    `{{${p}_ebit_summary}}\n{{${p}_ebit_detail_or_phase_2_note}}`,
-    5.94, 0.64, false,
-  );
-
   slide.addShape(pptx.ShapeType.line, {
     x: 0.48, y: 6.78, w: 12.34, h: 0,
     line: { color: "AFAFAF", pt: 0.5 },

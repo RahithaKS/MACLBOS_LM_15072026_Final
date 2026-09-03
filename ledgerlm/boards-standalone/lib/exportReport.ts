@@ -1448,7 +1448,7 @@ function addFourEntityKpiSlides(
     add(`Warnings: ${governedSnapshot.warnings.join(" • ") || "No governed data-quality warnings."}`, {
       x: 0.48, y: 8.02, w: 12.2, h: 0.36, fontSize: 6.4, italic: true, color: "626262",
     });
-    add("Green governed scope only · EBIT, Capex, attrition and red commentary excluded", {
+    add("Governed green scope", {
       x: 0.48, y: 8.62, w: 12.2, h: 0.2, fontSize: 7, bold: true, color: "007F62",
     });
   });
@@ -1472,6 +1472,35 @@ function xmlEscape(value: string) {
     .replace(/'/g, "&apos;");
 }
 
+function removeNonScopePptxContent(xml: string) {
+  // The imported four-entity template has separate shapes for the red
+  // headings, values, and legend. Remove those shapes rather than replacing
+  // their placeholders with an empty string, which would leave red labels
+  // behind in the exported deck.
+  const shape = /<p:sp\b[\s\S]*?<\/p:sp>/gi;
+  return xml.replace(shape, (candidate) =>
+    /Attrition:|EBIT:|attrition_|ebit_|Red:\s*Phase 2|out of scope/i.test(candidate)
+      ? ""
+      : candidate,
+  );
+}
+
+function addNarrativeParagraphSpacing(content: string) {
+  const spacing =
+    '<a:lnSpc><a:spcPct val="112000"/></a:lnSpc><a:spcAft><a:spcPts val="40"/></a:spcAft>';
+  const selfClosing = content.match(/<a:pPr\b([^>]*)\/>/);
+  if (selfClosing) {
+    return content.replace(
+      selfClosing[0],
+      `<a:pPr${selfClosing[1]}>${spacing}</a:pPr>`,
+    );
+  }
+  if (/<a:pPr\b[^>]*>/.test(content)) {
+    return content.replace(/(<a:pPr\b[^>]*>)/, `$1${spacing}`);
+  }
+  return `<a:pPr>${spacing}</a:pPr>${content}`;
+}
+
 function replacePptxPlaceholder(xml: string, key: string, value: string) {
   const token = `{{${key}}}`;
   const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1483,17 +1512,29 @@ function replacePptxPlaceholder(xml: string, key: string, value: string) {
     `<a:r>(${runContent})<a:t>${escapedToken}</a:t>(${runContent})</a:r>`,
     "g",
   );
+  const paragraph = new RegExp(
+    `(<a:p\\b[^>]*>)([\\s\\S]*${escapedToken}[\\s\\S]*?)(</a:p>)`,
+    "g",
+  );
   let replaced = false;
-  const withRuns = xml.replace(run, (_match, before: string, after: string) => {
-    replaced = true;
-    return value
-      .split("\n")
-      .map((line) => `<a:r>${before}<a:t>${xmlEscape(line)}</a:t>${after}</a:r>`)
-      .join("<a:br/>");
-  });
+  const withParagraphs = xml.replace(
+    paragraph,
+    (whole: string, open: string, content: string, close: string) => {
+      const withRuns = content.replace(run, (_match, before: string, after: string) => {
+        replaced = true;
+        return value
+          .split("\n")
+          .map((line) => `<a:r>${before}<a:t>${xmlEscape(line)}</a:t>${after}</a:r>`)
+          .join("<a:br/>");
+      });
+      return withRuns === content
+        ? whole
+        : `${open}${addNarrativeParagraphSpacing(withRuns)}${close}`;
+    },
+  );
   return replaced
-    ? withRuns
-    : withRuns.replace(new RegExp(escapedToken, "g"), xmlEscape(value));
+    ? withParagraphs
+    : withParagraphs.replace(new RegExp(escapedToken, "g"), xmlEscape(value));
 }
 
 function entityTemplateValues(
@@ -1512,7 +1553,6 @@ function entityTemplateValues(
   const internal = narrative("internal_utilization");
   const external = narrative("external_utilization");
   const capacity = narrative("capacity");
-  const governedEbit = snapshot.narrative?.find((item) => item.id === "ebit");
   const periodCode = governedPeriodCode(snapshot.greenScope!.period);
   const values: Record<string, string> = {
     report_month: snapshot.periodLabel,
@@ -1524,13 +1564,6 @@ function entityTemplateValues(
     [`${prefix}_external_utilization_detail`]: external.details.join("\n"),
     [`${prefix}_capacity_summary`]: capacity.summary,
     [`${prefix}_capacity_detail`]: capacity.details.join("\n"),
-    [`${prefix}_attrition_summary`]: "Phase 2 / out of scope.",
-    [`${prefix}_attrition_detail_or_phase_2_note`]:
-      "No attrition value is displayed until an approved governed source mapping is available.",
-    [`${prefix}_ebit_summary`]: governedEbit?.summary ?? "Phase 2 / out of scope.",
-    [`${prefix}_ebit_detail_or_phase_2_note`]:
-      governedEbit?.lines.join("\n") ||
-      "No EBIT value is displayed until an approved governed source mapping is available.",
     [`${prefix}_source_note`]: "Governed green scope",
     [`${prefix}_actual_source_label`]: snapshot.actualSourceLabel,
     [`${prefix}_forecast_source_label`]: snapshot.forecastSourceLabel,
@@ -1589,7 +1622,7 @@ async function writeFourEntityKpiTemplate(
 
   for (const [index, entity] of payload.entities.entries()) {
     const slideName = slideNames[index];
-    let xml = await zip.file(slideName)!.async("string");
+    let xml = removeNonScopePptxContent(await zip.file(slideName)!.async("string"));
     for (const [key, value] of Object.entries(entity.values)) {
       xml = replacePptxPlaceholder(xml, key, value);
     }
@@ -1630,12 +1663,12 @@ function addKpiMetricsSlide(
     status: "in_scope" | "phase_2";
     summary: string;
     lines: string[];
-  }> = hasReferenceNarrative ? snapshot!.narrative! : report.result.kpis.map((metric) => ({
+  }> = (hasReferenceNarrative ? snapshot!.narrative! : report.result.kpis.map((metric) => ({
     title: metric.label,
     status: "in_scope" as const,
     summary: metric.value,
     lines: [metric.change ?? "No comparison is available."],
-  }));
+  }))).filter((section) => section.status === "in_scope");
 
   pptx.defineLayout({ name: "KPI_BUSINESS_METRICS", width: 13.333, height: 9.2 });
   pptx.layout = "KPI_BUSINESS_METRICS";
@@ -1698,15 +1731,14 @@ function addKpiMetricsSlide(
     x: 0.45, y: 1.60, w: 4.6, h: 0.20, fontSize: 10.5, bold: true, color: C.magenta,
   });
   add(hasReferenceNarrative
-    ? "Green: current plan-excel scope  •  Red: Phase 2 / out of scope"
+    ? "Governed green scope"
     : "Re-run this board to generate the four-scope Business Metrics decision panel.", {
     x: 7, y: 1.61, w: 5.55, h: 0.17, fontSize: 7.2, bold: true, color: C.muted, align: "right",
   });
   let y = 1.95;
   sections.slice(0, 6).forEach((section) => {
-    const inScope = section.status === "in_scope";
-    const color = inScope ? C.green : C.red;
-    const height = inScope ? 0.87 : 0.54;
+    const color = C.green;
+    const height = 0.87;
     slide.addShape(pptx.ShapeType.rect, {
       x: 0.45, y: y - 0.025, w: 0.075, h: height - 0.02,
       fill: { color }, line: { color, transparency: 100 },

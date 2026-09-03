@@ -37,6 +37,31 @@ function xmlEscape(value) {
     .replace(/'/g, "&apos;");
 }
 
+function removeNonScopePptxContent(xml) {
+  const shape = /<p:sp\b[\s\S]*?<\/p:sp>/gi;
+  return xml.replace(shape, (candidate) =>
+    /Attrition:|EBIT:|attrition_|ebit_|Red:\s*Phase 2|out of scope/i.test(candidate)
+      ? ""
+      : candidate,
+  );
+}
+
+function addNarrativeParagraphSpacing(content) {
+  const spacing =
+    '<a:lnSpc><a:spcPct val="112000"/></a:lnSpc><a:spcAft><a:spcPts val="40"/></a:spcAft>';
+  const selfClosing = content.match(/<a:pPr\b([^>]*)\/>/);
+  if (selfClosing) {
+    return content.replace(
+      selfClosing[0],
+      `<a:pPr${selfClosing[1]}>${spacing}</a:pPr>`,
+    );
+  }
+  if (/<a:pPr\b[^>]*>/.test(content)) {
+    return content.replace(/(<a:pPr\b[^>]*>)/, `$1${spacing}`);
+  }
+  return `<a:pPr>${spacing}</a:pPr>${content}`;
+}
+
 function replacePptxPlaceholder(xml, key, value) {
   const token = `{{${key}}}`;
   const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -47,17 +72,26 @@ function replacePptxPlaceholder(xml, key, value) {
     `<a:r>(${runContent})<a:t>${escapedToken}</a:t>(${runContent})</a:r>`,
     "g",
   );
+  const paragraph = new RegExp(
+    `(<a:p\\b[^>]*>)([\\s\\S]*${escapedToken}[\\s\\S]*?)(</a:p>)`,
+    "g",
+  );
   let replaced = false;
-  const withRuns = xml.replace(run, (_match, before, after) => {
-    replaced = true;
-    return value
-      .split("\n")
-      .map((line) => `<a:r>${before}<a:t>${xmlEscape(line)}</a:t>${after}</a:r>`)
-      .join("<a:br/>");
+  const withParagraphs = xml.replace(paragraph, (whole, open, content, close) => {
+    const withRuns = content.replace(run, (_match, before, after) => {
+      replaced = true;
+      return value
+        .split("\n")
+        .map((line) => `<a:r>${before}<a:t>${xmlEscape(line)}</a:t>${after}</a:r>`)
+        .join("<a:br/>");
+    });
+    return withRuns === content
+      ? whole
+      : `${open}${addNarrativeParagraphSpacing(withRuns)}${close}`;
   });
   return replaced
-    ? withRuns
-    : withRuns.replace(new RegExp(escapedToken, "g"), xmlEscape(value));
+    ? withParagraphs
+    : withParagraphs.replace(new RegExp(escapedToken, "g"), xmlEscape(value));
 }
 
 async function run() {
@@ -75,7 +109,7 @@ async function run() {
 
   for (const [index, entity] of entities.entries()) {
     const slideName = slideNames[index];
-    let xml = await zip.file(slideName).async("string");
+    let xml = removeNonScopePptxContent(await zip.file(slideName).async("string"));
     for (const [key, value] of Object.entries(entity.values)) {
       xml = replacePptxPlaceholder(xml, key, value);
     }

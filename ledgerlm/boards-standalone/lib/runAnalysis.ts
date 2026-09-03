@@ -38,12 +38,9 @@ function kpiBoardResult(report: GovernedKpiReport): AnalysisResult {
   const inScopeNarrative = (report.narrative ?? [])
     .filter((section) => section.status === "in_scope")
     .flatMap((section) => [section.summary, ...section.lines]);
-  const phaseTwoNotes = (report.narrative ?? [])
-    .filter((section) => section.status === "phase_2")
-    .map((section) => `${section.title}: ${section.summary}`);
   return {
     kpiReport: report,
-    summary: `${report.periodLabel} · ${report.entityLabel} · ${report.forecastScenario}. Green sections are available from the approved plan-excel and actuals sources; red sections are Phase 2. Actuals: ${report.actualSourceLabel}. Forecast: ${report.forecastSourceLabel}.`,
+    summary: `${report.periodLabel} · ${report.entityLabel} · ${report.forecastScenario}. Governed sections are available from the approved plan-excel and actuals sources. Actuals: ${report.actualSourceLabel}. Forecast: ${report.forecastSourceLabel}.`,
     kpis: report.metrics.map((metric) => ({
       label: metric.label,
       value: `Actual ${formatGovernedKpiValue(metric.actual, metric.unit)} · Forecast ${formatGovernedKpiValue(metric.forecast, metric.unit)}`,
@@ -79,7 +76,7 @@ function kpiBoardResult(report: GovernedKpiReport): AnalysisResult {
     ],
     insights: inScopeNarrative.length ? inScopeNarrative : report.metrics.flatMap((metric) => metric.remarks),
     commentary: [],
-    risks: [...report.warnings, ...phaseTwoNotes],
+    risks: report.warnings,
     tables: [
       {
         title: "Governed KPI comparison",

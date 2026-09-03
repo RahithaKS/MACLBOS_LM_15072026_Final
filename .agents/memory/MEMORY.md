@@ -11,3 +11,4 @@
 - [LedgerLM preview process ownership](ledgerlm-preview-process-ownership.md) — orphaned port-5000 processes can leave Preview tied to a failed workflow.
 - [Neon HTTP atomic writes](neon-http-atomic-writes.md) — use one data-modifying CTE, not db.transaction(), for coupled LedgerLM writes.
 - [Next.js background exports](nextjs-background-exports.md) — verify emitted worker assets; Turbopack can pass builds while serving raw TypeScript workers.
+- [Business Metrics scope presentation](business-metrics-scope-presentation.md) — show only governed implemented sections; suppress future/non-scope metric labels and notes.
