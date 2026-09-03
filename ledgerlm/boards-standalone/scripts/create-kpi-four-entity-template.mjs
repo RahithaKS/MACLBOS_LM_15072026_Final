@@ -222,37 +222,37 @@ function addSlide(scope, slideNumber) {
   addSection(
     slide, scope, "Budget / Revenue:",
     `{{${p}_budget_revenue_summary}}\n{{${p}_budget_revenue_detail}}`,
-    2.14, 0.88, true,
+    2.14, 1.12, true,
   );
   addSection(
     slide, scope, "Internal Utilization:",
     `{{${p}_internal_utilization_summary}}\n{{${p}_internal_utilization_detail}}`,
-    3.02, 0.76, true,
+    3.29, 1.06, true,
   );
   addSection(
     slide, scope, "External Utilization:",
     `{{${p}_external_utilization_summary}}\n{{${p}_external_utilization_detail}}`,
-    3.78, 0.76, true,
+    4.40, 1.06, true,
   );
   addSection(
     slide, scope, "Capacity (Internal + External):",
     `{{${p}_capacity_summary}}\n{{${p}_capacity_detail}}`,
-    4.54, 0.76, true,
+    5.51, 1.06, true,
   );
   slide.addShape(pptx.ShapeType.line, {
-    x: 0.48, y: 6.78, w: 12.34, h: 0,
+    x: 0.48, y: 6.72, w: 12.34, h: 0,
     line: { color: "AFAFAF", pt: 0.5 },
   });
   addText(slide, "Source & governance", {
-    x: 0.48, y: 6.90, w: 2.0, h: 0.17,
+    x: 0.48, y: 6.84, w: 2.0, h: 0.17,
     fontSize: 8.4, bold: true, color: C.darkMagenta,
   });
   addText(slide, `{{${p}_source_note}}  •  Actuals: {{${p}_actual_source_label}}  •  Forecast: {{${p}_forecast_source_label}}  •  {{${p}_period_label}}`, {
-    x: 0.48, y: 7.13, w: 12.28, h: 0.30,
+    x: 0.48, y: 7.07, w: 12.28, h: 0.30,
     fontSize: 6.7, color: C.muted, fit: "shrink",
   });
   addText(slide, `Warnings / data-quality notes: {{${p}_warnings}}`, {
-    x: 0.48, y: 7.49, w: 12.28, h: 0.24,
+    x: 0.48, y: 7.42, w: 12.28, h: 0.24,
     fontSize: 6.6, italic: true, color: C.muted, fit: "shrink",
   });
   addText(slide, `{{${p}_entity_label}}  •  Slide ${slideNumber} of 4`, {
