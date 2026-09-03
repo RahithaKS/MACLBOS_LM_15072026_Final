@@ -37,6 +37,14 @@ export interface ExportDateLabels {
 
 export type ExportProgress = (percent: number, stage: string) => void;
 
+export type FourEntityKpiTemplatePayload = {
+  base64: string;
+  entities: Array<{
+    label: string;
+    values: Record<string, string>;
+  }>;
+};
+
 /** Align a ChartSpec's series onto a shared x-label axis. */
 function alignSeries(spec: ChartSpec): { labels: string[]; series: { name: string; values: (number | null)[] }[] } {
   const labels: string[] = [];
@@ -1528,11 +1536,10 @@ function entityTemplateValues(
   return values;
 }
 
-async function writeFourEntityKpiTemplate(
+export function getFourEntityKpiTemplatePayload(
   board: Board,
   report: Report,
-  onProgress?: ExportProgress,
-): Promise<Blob | null> {
+): FourEntityKpiTemplatePayload | null {
   const snapshot = report.result.kpiReport;
   const green = snapshot?.greenScope;
   if (
@@ -1546,9 +1553,26 @@ async function writeFourEntityKpiTemplate(
     return null;
   }
 
+  return {
+    base64: board.templatePptx.base64,
+    entities: green.entities.map((entity) => ({
+      label: entity.label,
+      values: entityTemplateValues(snapshot, entity),
+    })),
+  };
+}
+
+async function writeFourEntityKpiTemplate(
+  board: Board,
+  report: Report,
+  onProgress?: ExportProgress,
+): Promise<Blob | null> {
+  const payload = getFourEntityKpiTemplatePayload(board, report);
+  if (!payload) return null;
+
   const JSZip = (await import("jszip")).default;
   onProgress?.(12, "Loading the Bosch PowerPoint template");
-  const binary = atob(board.templatePptx.base64);
+  const binary = atob(payload.base64);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   const zip = await JSZip.loadAsync(bytes);
   onProgress?.(28, "Preparing the four entity slides");
@@ -1557,14 +1581,14 @@ async function writeFourEntityKpiTemplate(
     .sort((a, b) => Number(a.match(/\d+/)![0]) - Number(b.match(/\d+/)![0]));
   if (slideNames.length < 4) return null;
 
-  for (const [index, entity] of green.entities.entries()) {
+  for (const [index, entity] of payload.entities.entries()) {
     const slideName = slideNames[index];
     let xml = await zip.file(slideName)!.async("string");
-    for (const [key, value] of Object.entries(entityTemplateValues(snapshot, entity))) {
+    for (const [key, value] of Object.entries(entity.values)) {
       xml = replacePptxPlaceholder(xml, key, value);
     }
     zip.file(slideName, xml);
-    onProgress?.(30 + Math.round(((index + 1) / green.entities.length) * 15), `Populating ${entity.label}`);
+    onProgress?.(30 + Math.round(((index + 1) / payload.entities.length) * 15), `Populating ${entity.label}`);
   }
 
   onProgress?.(48, "Compressing the PowerPoint");

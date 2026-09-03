@@ -1,10 +1,12 @@
 import {
   generateReportPdf,
   generateReportPpt,
+  getFourEntityKpiTemplatePayload,
   type ExportDateLabels,
   type ExportProgress,
   type PdfChartSnapshot,
 } from "@/lib/exportReport";
+import { generateFourEntityTemplateInWorker } from "@/lib/serverPptxTemplateWorker";
 import type { Board, Report } from "@/lib/types";
 
 export type ExportJobKind = "ppt" | "pdf";
@@ -79,8 +81,12 @@ async function processExportJob(
   try {
     onProgress(1, "Starting export");
     job.state = "running";
+    const fourEntityTemplate =
+      input.kind === "ppt" ? getFourEntityKpiTemplatePayload(input.board, input.report) : null;
     job.output =
-      input.kind === "ppt"
+      fourEntityTemplate
+        ? await generateFourEntityTemplateInWorker(fourEntityTemplate, onProgress)
+        : input.kind === "ppt"
         ? await generateReportPpt(input.board, input.report, input.dateLabels, onProgress)
         : await generateReportPdf(
             input.board,

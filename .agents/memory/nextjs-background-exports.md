@@ -14,3 +14,9 @@ Template-based PPTX exporters that reopen a presentation with JSZip must explici
 **Why:** Retaining an exact presentation template produced a file over 25 MB from a template under 250 KB. The document contents were valid; uncompressed ZIP packaging made the buffered proxy response slow and vulnerable to a 502.
 
 **How to apply:** Keep template rendering and financial logic unchanged, compress only at the package boundary, and verify both slide anatomy and output size. For live percentage reporting, separate job creation, status polling, and final download.
+
+Starting an async export without awaiting it is not background execution when its libraries do CPU-bound synchronous work; it can still pin the Next.js event loop and prevent progress polling.
+
+**Why:** A real template export stayed at its initial percentage while the Next server used 100% CPU. The job existed, but no status request could be served until the same process finished its ZIP work.
+
+**How to apply:** Run exact-template package work in a child process, report progress over IPC, and use a module-relative JavaScript worker URL so Turbopack emits an executable server asset. Inspect that emitted asset after production builds.
