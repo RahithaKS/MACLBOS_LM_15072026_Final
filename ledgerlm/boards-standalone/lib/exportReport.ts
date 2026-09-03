@@ -35,6 +35,8 @@ export interface ExportDateLabels {
   medium: string;
 }
 
+export type ExportProgress = (percent: number, stage: string) => void;
+
 /** Align a ChartSpec's series onto a shared x-label axis. */
 function alignSeries(spec: ChartSpec): { labels: string[]; series: { name: string; values: (number | null)[] }[] } {
   const labels: string[] = [];
@@ -1529,6 +1531,7 @@ function entityTemplateValues(
 async function writeFourEntityKpiTemplate(
   board: Board,
   report: Report,
+  onProgress?: ExportProgress,
 ): Promise<Blob | null> {
   const snapshot = report.result.kpiReport;
   const green = snapshot?.greenScope;
@@ -1544,9 +1547,11 @@ async function writeFourEntityKpiTemplate(
   }
 
   const JSZip = (await import("jszip")).default;
+  onProgress?.(12, "Loading the Bosch PowerPoint template");
   const binary = atob(board.templatePptx.base64);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   const zip = await JSZip.loadAsync(bytes);
+  onProgress?.(28, "Preparing the four entity slides");
   const slideNames = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
     .sort((a, b) => Number(a.match(/\d+/)![0]) - Number(b.match(/\d+/)![0]));
@@ -1559,12 +1564,20 @@ async function writeFourEntityKpiTemplate(
       xml = replacePptxPlaceholder(xml, key, value);
     }
     zip.file(slideName, xml);
+    onProgress?.(30 + Math.round(((index + 1) / green.entities.length) * 15), `Populating ${entity.label}`);
   }
 
-  const output = await zip.generateAsync({
-    type: "blob",
-    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  });
+  onProgress?.(48, "Compressing the PowerPoint");
+  const output = await zip.generateAsync(
+    {
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 },
+    },
+    (metadata) => onProgress?.(48 + Math.round(metadata.percent * 0.47), "Compressing the PowerPoint"),
+  );
+  onProgress?.(96, "Finalizing the PowerPoint");
   return output;
 }
 
@@ -2169,9 +2182,12 @@ function addTemplateDrivenSlides(
  */
 async function buildPptxFile(
   pptx: InstanceType<typeof import("pptxgenjs").default>,
+  onProgress?: ExportProgress,
 ): Promise<Blob> {
   const JSZip = (await import("jszip")).default;
+  onProgress?.(55, "Building the PowerPoint package");
   const blob = (await pptx.write({ outputType: "blob" })) as Blob;
+  onProgress?.(72, "Patching chart labels");
   // JSZip accepts Blob in browsers but not in Node. ArrayBuffer works in both,
   // allowing the same renderer to run behind the background export endpoint.
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
@@ -2179,6 +2195,7 @@ async function buildPptxFile(
   // Entity P&L slides have no charts. Preserve the document produced by
   // PptxGenJS byte-for-byte rather than unnecessarily repackaging it.
   if (!charts.length) {
+    onProgress?.(96, "Finalizing the PowerPoint");
     return blob;
   }
   for (const name of charts) {
@@ -2189,10 +2206,16 @@ async function buildPptxFile(
     );
     if (patched !== xml) zip.file(name, patched);
   }
-  const out = await zip.generateAsync({
-    type: "blob",
-    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  });
+  const out = await zip.generateAsync(
+    {
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 },
+    },
+    (metadata) => onProgress?.(72 + Math.round(metadata.percent * 0.24), "Compressing the PowerPoint"),
+  );
+  onProgress?.(96, "Finalizing the PowerPoint");
   return out;
 }
 
@@ -2215,10 +2238,13 @@ export async function generateReportPpt(
   board: Board,
   report: Report,
   dateLabels?: ExportDateLabels,
+  onProgress?: ExportProgress,
 ): Promise<Blob> {
-  const templateOutput = await writeFourEntityKpiTemplate(board, report);
+  onProgress?.(5, "Preparing the export");
+  const templateOutput = await writeFourEntityKpiTemplate(board, report, onProgress);
   if (templateOutput) return templateOutput;
   const PptxGenJS = (await import("pptxgenjs")).default;
+  onProgress?.(22, "Building the report slides");
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE"; // 13.33 x 7.5 in
   const W = 13.33;
@@ -2227,25 +2253,25 @@ export async function generateReportPpt(
   // table structure. It must not fall through to the generic template mapper,
   // which collapses its year-end / forecast / variance columns.
   if (addEntityPnlSlide(pptx, board, report)) {
-    return buildPptxFile(pptx);
+    return buildPptxFile(pptx, onProgress);
   }
   if (addFourEntityKpiSlides(pptx, board, report)) {
-    return buildPptxFile(pptx);
+    return buildPptxFile(pptx, onProgress);
   }
   // KPI Metrics uses its own governed Business Metrics layout. The imported
   // file is an editable reference template, while this renderer retains the
   // graphic panel and section layout in the downloaded report.
   if (addKpiMetricsSlide(pptx, board, report, dateLabels)) {
-    return buildPptxFile(pptx);
+    return buildPptxFile(pptx, onProgress);
   }
   // A board with an uploaded report format gets exactly that format. Without
   // one, balance sheet boards use the house layout and everything else the
   // generic deck.
   if (addTemplateDrivenSlides(pptx, board, report)) {
-    return buildPptxFile(pptx);
+    return buildPptxFile(pptx, onProgress);
   }
   if (addBalanceSheetSlides(pptx, board, report)) {
-    return buildPptxFile(pptx);
+    return buildPptxFile(pptx, onProgress);
   }
   const result = report.result;
   const style = exportStyle(board);
@@ -2482,7 +2508,7 @@ export async function generateReportPpt(
     }
   }
 
-  return buildPptxFile(pptx);
+  return buildPptxFile(pptx, onProgress);
 }
 
 export async function exportReportPpt(board: Board, report: Report) {
@@ -2649,9 +2675,12 @@ export async function generateReportPdf(
   report: Report,
   chartSnapshots: PdfChartSnapshot[] = [],
   dateLabels?: ExportDateLabels,
+  onProgress?: ExportProgress,
 ): Promise<Blob> {
+  onProgress?.(5, "Preparing the PDF");
   const { jsPDF } = await import("jspdf");
   const autoTable = (await import("jspdf-autotable")).default;
+  onProgress?.(18, "Building the PDF layout");
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -2836,7 +2865,14 @@ export async function generateReportPdf(
     sections = [...sections].sort((a, b) => PDF_ORDER.indexOf(a.kind) - PDF_ORDER.indexOf(b.kind));
   }
 
-  for (const section of sections) {
+  for (const [sectionIndex, section] of sections.entries()) {
+    onProgress?.(
+      22 + Math.round((sectionIndex / Math.max(sections.length, 1)) * 68),
+      `Building ${section.title}`,
+    );
+    // jsPDF and autoTable perform substantial synchronous layout work. Yield
+    // between sections so the server can answer export-status polls.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     // ---- Summary: a callout, not a plain paragraph -----------------------
     if (section.kind === "summary" && result.summary) {
       sectionHeading(section.title, 40);
@@ -3094,6 +3130,8 @@ export async function generateReportPdf(
   }
 
   // ---- Running header and footer on every page --------------------------
+  onProgress?.(92, "Adding PDF headers and page numbers");
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
   const pages = doc.getNumberOfPages();
   for (let p = 1; p <= pages; p++) {
     doc.setPage(p);
@@ -3116,6 +3154,7 @@ export async function generateReportPdf(
     doc.text(`Page ${p} of ${pages}`, pageW - M, pageH - FOOT + 17, { align: "right" });
   }
 
+  onProgress?.(96, "Finalizing the PDF");
   return doc.output("blob") as Blob;
 }
 

@@ -84,6 +84,7 @@ export default function BoardDetailPage() {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [exporting, setExporting] = useState<{ kind: "ppt" | "pdf"; reportId: string } | null>(null);
+  const [exportProgress, setExportProgress] = useState<{ percent: number; stage: string } | null>(null);
   const [reportQuery, setReportQuery] = useState("");
   const chatEnd = useRef<HTMLDivElement>(null);
   const reportRoot = useRef<HTMLDivElement>(null);
@@ -191,13 +192,21 @@ export default function BoardDetailPage() {
   async function runExport(kind: "ppt" | "pdf", report: Report) {
     if (!board || exporting) return;
     setExporting({ kind, reportId: report.id });
+    setExportProgress({ percent: 0, stage: "Starting export" });
     setError(null);
     try {
-      await exportReportInBackground(kind, board, report, reportRoot.current);
+      await exportReportInBackground(
+        kind,
+        board,
+        report,
+        reportRoot.current,
+        (percent, stage) => setExportProgress({ percent, stage }),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export failed unexpectedly.");
     } finally {
       setExporting(null);
+      setExportProgress(null);
     }
   }
 
@@ -612,6 +621,31 @@ export default function BoardDetailPage() {
                       </div>
                     </div>
 
+                    {exporting && exportProgress && (
+                      <div className="border-b border-border bg-accent-soft/35 px-5 py-3" aria-live="polite">
+                        <div className="flex items-center justify-between gap-3 text-xs">
+                          <span className="font-medium">
+                            Exporting {exporting.kind === "ppt" ? "PowerPoint" : "PDF"} · {exportProgress.stage}
+                          </span>
+                          <span className="font-semibold tabular-nums text-primary-deep">
+                            {exportProgress.percent}%
+                          </span>
+                        </div>
+                        <div
+                          className="mt-2 h-1.5 overflow-hidden rounded-full bg-border"
+                          role="progressbar"
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={exportProgress.percent}
+                        >
+                          <div
+                            className="h-full rounded-full bg-primary transition-[width] duration-300"
+                            style={{ width: `${exportProgress.percent}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     {filteredReports.length === 0 ? (
                       <p className="px-5 py-8 text-center text-sm text-muted">
                         No reports match “{reportQuery}”.
@@ -667,7 +701,9 @@ export default function BoardDetailPage() {
                                   <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.6">
                                     <path d="M10 12V3M6.8 9 10 12.2 13.2 9M4 16h12" strokeLinecap="round" strokeLinejoin="round" />
                                   </svg>
-                                  {busyKind === "ppt" ? "Exporting…" : "PPT"}
+                                  {busyKind === "ppt"
+                                    ? `Exporting ${exportProgress?.percent ?? 0}%`
+                                    : "PPT"}
                                 </button>
                               </span>
                             </li>
@@ -695,7 +731,9 @@ export default function BoardDetailPage() {
                             <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="1.6">
                               <path d="M10 12V3M6.8 9 10 12.2 13.2 9M4 16h12" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
-                            {exporting?.kind === "pdf" ? "Exporting…" : "Download summary PDF"}
+                            {exporting?.kind === "pdf"
+                              ? `Exporting ${exportProgress?.percent ?? 0}%`
+                              : "Download summary PDF"}
                           </button>
                         </div>
                       </div>
