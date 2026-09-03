@@ -26,3 +26,9 @@ Throttle ZIP progress before sending it over child-process IPC. Compression hook
 **Why:** A real retained-template job remained alive and pollable but did not deliver completion before its safety timeout, while bounded progress updates completed the same worker path in milliseconds.
 
 **How to apply:** Send progress only when the visible percentage changes or a short interval passes. Keep a generous outer timeout, log milestone timings, and include the last worker stage in timeout errors.
+
+PowerPoint placeholder replacement must be bounded to a single DrawingML `<a:r>` run. Never use an unrestricted cross-run match around `<a:t>` tokens.
+
+**Why:** A cross-run regex copied preceding slide markup once per multiline detail, inflating a small deck to tens of megabytes and leaving PowerPoint with duplicated or partially rendered narrative.
+
+**How to apply:** Use a run-bounded match, then regression-test multiline replacements for one header, one copy of every detail line, zero unresolved tokens, and a bounded output size.

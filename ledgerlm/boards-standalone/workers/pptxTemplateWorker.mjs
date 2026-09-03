@@ -40,8 +40,11 @@ function xmlEscape(value) {
 function replacePptxPlaceholder(xml, key, value) {
   const token = `{{${key}}}`;
   const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Do not let a placeholder match cross DrawingML run boundaries. Crossing
+  // them duplicates the preceding slide markup once per inserted detail line.
+  const runContent = `(?:(?!<a:r>|</a:r>)[\\s\\S])*?`;
   const run = new RegExp(
-    `<a:r>([\\s\\S]*?)<a:t>${escapedToken}</a:t>([\\s\\S]*?)</a:r>`,
+    `<a:r>(${runContent})<a:t>${escapedToken}</a:t>(${runContent})</a:r>`,
     "g",
   );
   let replaced = false;

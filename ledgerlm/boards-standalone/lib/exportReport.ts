@@ -1475,8 +1475,12 @@ function xmlEscape(value: string) {
 function replacePptxPlaceholder(xml: string, key: string, value: string) {
   const token = `{{${key}}}`;
   const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Keep the match inside one DrawingML run. A generic [\s\S]*? match may
+  // begin at an earlier <a:r> and copy most of the slide once per detail line,
+  // which creates malformed, massively inflated PPTX slide XML.
+  const runContent = `(?:(?!<a:r>|</a:r>)[\\s\\S])*?`;
   const run = new RegExp(
-    `<a:r>([\\s\\S]*?)<a:t>${escapedToken}</a:t>([\\s\\S]*?)</a:r>`,
+    `<a:r>(${runContent})<a:t>${escapedToken}</a:t>(${runContent})</a:r>`,
     "g",
   );
   let replaced = false;
@@ -1508,6 +1512,7 @@ function entityTemplateValues(
   const internal = narrative("internal_utilization");
   const external = narrative("external_utilization");
   const capacity = narrative("capacity");
+  const governedEbit = snapshot.narrative?.find((item) => item.id === "ebit");
   const periodCode = governedPeriodCode(snapshot.greenScope!.period);
   const values: Record<string, string> = {
     report_month: snapshot.periodLabel,
@@ -1522,8 +1527,9 @@ function entityTemplateValues(
     [`${prefix}_attrition_summary`]: "Phase 2 / out of scope.",
     [`${prefix}_attrition_detail_or_phase_2_note`]:
       "No attrition value is displayed until an approved governed source mapping is available.",
-    [`${prefix}_ebit_summary`]: "Phase 2 / out of scope.",
+    [`${prefix}_ebit_summary`]: governedEbit?.summary ?? "Phase 2 / out of scope.",
     [`${prefix}_ebit_detail_or_phase_2_note`]:
+      governedEbit?.lines.join("\n") ||
       "No EBIT value is displayed until an approved governed source mapping is available.",
     [`${prefix}_source_note`]: "Governed green scope",
     [`${prefix}_actual_source_label`]: snapshot.actualSourceLabel,
